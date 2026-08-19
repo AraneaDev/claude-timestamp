@@ -229,6 +229,9 @@ anything from the one before it. The interactive wizard is covered too: it
 reads answers from stdin when there is no terminal, which makes the whole flow
 scriptable without a pseudo-terminal.
 
+Contributor setup, including the git hooks, is in
+[CONTRIBUTING.md](CONTRIBUTING.md).
+
 `tools/check-docs.sh` catches the ways this README goes stale without anyone
 noticing: a setting that is added and never written down, an assertion count
 that stops matching the suite, and an image link pointing at a file that has
@@ -266,10 +269,13 @@ While the version is below `1.0.0`, a feature bumps the patch number and a
 breaking change bumps the minor one, so the shape of the configuration can
 still settle without spending major versions on it.
 
-Merging a release pull request tags the release as
-`claude-timestamp--v<version>`, which is the form Claude Code expects for a
-plugin, and updates `plugin.json`, `version.txt`, the release manifest and this
-changelog together. `tools/check-docs.sh` fails if those ever disagree.
+Merging the Release PR tags the release as `claude-timestamp--v<version>`,
+which is the form Claude Code expects for a plugin, and updates `plugin.json`,
+`version.txt`, the release manifest and the changelog together.
+`tools/check-docs.sh` fails if those ever disagree, and the release workflow
+checks the tag matches what it released.
+
+Versions and tags are not hand-edited. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 

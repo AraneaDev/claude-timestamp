@@ -80,7 +80,7 @@ jobs:
       - name: Syntax check
         run: |
           for f in hooks/scripts/*.sh hooks/scripts/lib/*.sh tests/run.sh \
-                   tools/*.sh tools/screenshots/*.sh tools/githooks/pre-push; do
+                   tools/*.sh tools/screenshots/*.sh .githooks/pre-push .githooks/pre-commit; do
             bash -n "$f"
           done
 
@@ -94,7 +94,7 @@ jobs:
             tests/run.sh \
             tools/check-docs.sh \
             tools/screenshots/make.sh \
-            tools/githooks/pre-push
+            .githooks/pre-push .githooks/pre-commit
 
   docs:
     # The README goes stale silently: a setting gets added and never written
