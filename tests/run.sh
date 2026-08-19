@@ -62,6 +62,23 @@ lacks() {
   esac
 }
 
+# Reset configuration and session state, then load the config the case wants.
+#
+# Every scenario starts from a known-empty slate rather than whatever the last
+# one left behind. Two bugs came from exactly that: a case inherited a stale
+# rollover date, and later a stale idle timestamp, and failed for reasons that
+# had nothing to do with what it asserted.
+fresh() {
+  rm -rf "$(ct_state_dir)"
+  mkdir -p "$(ct_state_dir)"
+  if [ "$#" -gt 0 ]; then
+    printf '%s\n' "$@" > "$CLAUDE_TIMESTAMP_CONFIG"
+  else
+    : > "$CLAUDE_TIMESTAMP_CONFIG"
+  fi
+  ct_load_config
+}
+
 contains() {
   local label="$1" needle="$2" haystack="$3"
   case "$haystack" in
@@ -81,7 +98,7 @@ source "$SCRIPTS/lib/config.sh"
 echo
 echo "config parsing"
 
-: > "$CLAUDE_TIMESTAMP_CONFIG"
+fresh
 ct_load_config
 is "defaults: display format" "24h" "$CT_DISPLAY_FORMAT"
 is "defaults: color" "dim" "$CT_COLOR"
@@ -105,11 +122,13 @@ is "strips double quotes" "cyan" "$CT_COLOR"
 is "strips single quotes" "off" "$CT_ELAPSED"
 is "unset key keeps its default" "24h" "$CT_CONTEXT_FORMAT"
 
+# Written literally: this case is about the bytes in the file, so it cannot go
+# through a helper that decides its own line endings.
 printf 'TZ=Europe/Paris\r\nCOLOR=blue\r\n' > "$CLAUDE_TIMESTAMP_CONFIG"
 ct_load_config
 is "tolerates CRLF line endings" "Europe/Paris" "$CT_TZ"
 
-printf 'COLOR=green' > "$CLAUDE_TIMESTAMP_CONFIG"
+printf 'COLOR=green' > "$CLAUDE_TIMESTAMP_CONFIG"   # deliberately no trailing newline
 ct_load_config
 is "reads a final line with no trailing newline" "green" "$CT_COLOR"
 
@@ -135,7 +154,7 @@ is "iso preset"   '%Y-%m-%dT%H:%M:%S'  "$(ct_expand_format iso)"
 is "raw strftime passes through" '%A %H:%M' "$(ct_expand_format '%A %H:%M')"
 is "unknown preset falls back to 24h" '%H:%M:%S' "$(ct_expand_format nonsense)"
 
-: > "$CLAUDE_TIMESTAMP_CONFIG"
+fresh
 ct_load_config
 # Needs a timezone database. Git Bash on Windows has none, and the fallback
 # behaviour for that case is asserted separately below.
@@ -160,7 +179,7 @@ case "$(ct_now 12h)" in 0*) fail "12h preset trims the leading zero" "no leading
 echo
 echo "timezone capability"
 
-: > "$CLAUDE_TIMESTAMP_CONFIG"
+fresh
 ct_load_config
 CT_TZ="Asia/Tokyo"
 
@@ -198,6 +217,8 @@ is "minutes and seconds" "+2m14s"  "$(ct_format_elapsed 134)"
 is "pads seconds"        "+5m03s"  "$(ct_format_elapsed 303)"
 is "exactly one hour"    "+1h00m"  "$(ct_format_elapsed 3600)"
 is "hours and minutes"   "+1h03m"  "$(ct_format_elapsed 3780)"
+is "a full day"          "+25h00m" "$(ct_format_elapsed 90000)"
+is "many days"           "+100h00m" "$(ct_format_elapsed 360000)"
 refutes "rejects non-numeric input" ct_format_elapsed "abc"
 refutes "rejects negative input" ct_format_elapsed "-5"
 
@@ -260,7 +281,7 @@ echo
 echo "hooks"
 
 if command -v jq >/dev/null 2>&1; then
-  : > "$CLAUDE_TIMESTAMP_CONFIG"
+  fresh
 
   out="$(printf '{"session_id":"test-session","index":0,"delta":"Hello there."}' | bash "$SCRIPTS/message-display.sh")"
   contains "message-display stamps index 0" "displayContent" "$out"
@@ -284,12 +305,12 @@ if command -v jq >/dev/null 2>&1; then
   out="$(printf '{"session_id":"test-session","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')"
   contains "message-display renders elapsed time" "+1h03m" "$out"
 
-  printf 'ELAPSED=off\n' > "$CLAUDE_TIMESTAMP_CONFIG"
+  fresh 'ELAPSED=off'
   out="$(printf '{"session_id":"test-session","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')"
   case "$out" in *"+"*) fail "ELAPSED=off hides the duration" "no + marker" "$out" ;; *) pass "ELAPSED=off hides the duration" ;; esac
 
   # Date rollover: a stale date on file means the session crossed midnight.
-  printf 'COLOR=none\nELAPSED=off\n' > "$CLAUDE_TIMESTAMP_CONFIG"
+  fresh 'COLOR=none' 'ELAPSED=off'
   printf '2000-01-01' > "$(ct_state_dir)/test-session.date"
   out="$(printf '{"session_id":"test-session","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')"
   contains "date rollover adds the date after midnight" "$(date '+%b %d')" "$out"
@@ -300,29 +321,29 @@ if command -v jq >/dev/null 2>&1; then
   out="$(printf '{"session_id":"test-session","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')"
   lacks "date is not repeated on the same day" "$(date '+%b')" "$out"
 
-  printf 'COLOR=none\nELAPSED=off\nDATE_ROLLOVER=off\n' > "$CLAUDE_TIMESTAMP_CONFIG"
+  fresh 'COLOR=none' 'ELAPSED=off' 'DATE_ROLLOVER=off'
   printf '2000-01-01' > "$(ct_state_dir)/test-session.date"
   out="$(printf '{"session_id":"test-session","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')"
   lacks "DATE_ROLLOVER=off suppresses the date" "$(date '+%b')" "$out"
 
   # Slow-turn colouring: the duration alone is painted, the rest is not.
-  printf 'COLOR=none\nSLOW_AFTER=60\nSLOW_COLOR=cyan\nIDLE_AFTER=0\nDATE_ROLLOVER=off\n' > "$CLAUDE_TIMESTAMP_CONFIG"
+  fresh 'COLOR=none' 'SLOW_AFTER=60' 'SLOW_COLOR=cyan' 'IDLE_AFTER=0' 'DATE_ROLLOVER=off'
   printf '%s' "$(( $(date +%s) - 3780 ))" > "$(ct_state_dir)/test-session"
   out="$(printf '{"session_id":"test-session","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')"
   contains "a slow turn paints the duration" "[36m" "$out"
 
-  printf 'COLOR=none\nSLOW_AFTER=0\nIDLE_AFTER=0\nDATE_ROLLOVER=off\n' > "$CLAUDE_TIMESTAMP_CONFIG"
+  fresh 'COLOR=none' 'SLOW_AFTER=0' 'IDLE_AFTER=0' 'DATE_ROLLOVER=off'
   printf '%s' "$(( $(date +%s) - 3780 ))" > "$(ct_state_dir)/test-session"
   out="$(printf '{"session_id":"test-session","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')"
   lacks "SLOW_AFTER=0 leaves the duration unpainted" "[36m" "$out"
 
-  printf 'COLOR=none\nSLOW_AFTER=99999\nIDLE_AFTER=0\nDATE_ROLLOVER=off\n' > "$CLAUDE_TIMESTAMP_CONFIG"
+  fresh 'COLOR=none' 'SLOW_AFTER=99999' 'IDLE_AFTER=0' 'DATE_ROLLOVER=off'
   printf '%s' "$(( $(date +%s) - 3780 ))" > "$(ct_state_dir)/test-session"
   out="$(printf '{"session_id":"test-session","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')"
   lacks "a turn under the threshold is unpainted" "[36m" "$out"
 
   # Idle divider.
-  printf 'COLOR=none\nELAPSED=off\nIDLE_AFTER=3600\nDATE_ROLLOVER=off\n' > "$CLAUDE_TIMESTAMP_CONFIG"
+  fresh 'COLOR=none' 'ELAPSED=off' 'IDLE_AFTER=3600' 'DATE_ROLLOVER=off'
   printf '%s' "$(( $(date +%s) - 7200 ))" > "$(ct_state_dir)/test-session.last"
   out="$(printf '{"session_id":"test-session","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')"
   contains "an idle gap is marked" "2h later" "$out"
@@ -331,25 +352,25 @@ if command -v jq >/dev/null 2>&1; then
   out="$(printf '{"session_id":"test-session","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')"
   lacks "a fresh gap is not marked" "later" "$out"
 
-  printf 'COLOR=none\nELAPSED=off\nIDLE_AFTER=0\nDATE_ROLLOVER=off\n' > "$CLAUDE_TIMESTAMP_CONFIG"
+  fresh 'COLOR=none' 'ELAPSED=off' 'IDLE_AFTER=0' 'DATE_ROLLOVER=off'
   printf '%s' "$(( $(date +%s) - 7200 ))" > "$(ct_state_dir)/test-session.last"
   out="$(printf '{"session_id":"test-session","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')"
   lacks "IDLE_AFTER=0 disables the marker" "later" "$out"
 
   # Subagents.
-  printf 'COLOR=none\nSUBAGENTS=off\nIDLE_AFTER=0\n' > "$CLAUDE_TIMESTAMP_CONFIG"
+  fresh 'COLOR=none' 'SUBAGENTS=off' 'IDLE_AFTER=0'
   out="$(printf '{"session_id":"test-session","index":0,"delta":"x","agent_id":"sub-1"}' | bash "$SCRIPTS/message-display.sh")"
   is "SUBAGENTS=off skips subagent messages" "" "$out"
   out="$(printf '{"session_id":"test-session","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh")"
   contains "SUBAGENTS=off still stamps the main conversation" "displayContent" "$out"
-  printf 'COLOR=none\nSUBAGENTS=on\nIDLE_AFTER=0\n' > "$CLAUDE_TIMESTAMP_CONFIG"
+  fresh 'COLOR=none' 'SUBAGENTS=on' 'IDLE_AFTER=0'
   out="$(printf '{"session_id":"test-session","index":0,"delta":"x","agent_id":"sub-1"}' | bash "$SCRIPTS/message-display.sh")"
   contains "SUBAGENTS=on stamps subagent messages" "displayContent" "$out"
 
   echo
   echo "turn accounting"
 
-  : > "$CLAUDE_TIMESTAMP_CONFIG"
+  fresh
   base="$(ct_state_file "acct")"
   ct_clear_state "acct"
   mkdir -p "$(ct_state_dir)"
@@ -381,7 +402,7 @@ if command -v jq >/dev/null 2>&1; then
   echo
   echo "session summary"
 
-  : > "$CLAUDE_TIMESTAMP_CONFIG"
+  fresh
   base="$(ct_state_file "summary-session")"
   mkdir -p "$(ct_state_dir)"
   printf '%s' "$(( $(date +%s) - 5400 ))" > "$base.start"
@@ -407,19 +428,19 @@ if command -v jq >/dev/null 2>&1; then
   out="$(printf '{"session_id":"never-used"}' | bash "$SCRIPTS/session-end.sh")"
   is "an empty session reports nothing" "" "$out"
 
-  printf 'SUMMARY=off\n' > "$CLAUDE_TIMESTAMP_CONFIG"
+  fresh 'SUMMARY=off'
   printf '%s' "$(( $(date +%s) - 60 ))" > "$base.start"
   printf '2' > "$base.turns"; printf '5' > "$base.wait"
   out="$(printf '{"session_id":"summary-session"}' | bash "$SCRIPTS/session-end.sh")"
   is "SUMMARY=off reports nothing" "" "$out"
 
-  printf 'INJECT_CONTEXT=false\n' > "$CLAUDE_TIMESTAMP_CONFIG"
+  fresh 'INJECT_CONTEXT=false'
   out="$(printf '{"session_id":"test-session","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh")"
   is "INJECT_CONTEXT=false injects nothing" "" "$out"
 
   # Everything optional is off so this asserts only on the time rendering
   # itself, independent of state left behind by earlier cases.
-  printf 'COLOR=none\nDISPLAY_FORMAT=short\nTZ=UTC\nELAPSED=off\nDATE_ROLLOVER=off\nIDLE_AFTER=0\n' > "$CLAUDE_TIMESTAMP_CONFIG"
+  fresh 'COLOR=none' 'DISPLAY_FORMAT=short' 'TZ=UTC' 'ELAPSED=off' 'DATE_ROLLOVER=off' 'IDLE_AFTER=0'
   # Bracketed by two readings of the clock and accepting either, so a minute
   # boundary crossed mid-test cannot fail it.
   before="[$(TZ=UTC date '+%H:%M')] x"
@@ -443,7 +464,7 @@ fi
 echo
 echo "setup"
 
-printf 'COLOR=dim\nTZ=UTC\n' > "$CLAUDE_TIMESTAMP_CONFIG"
+fresh 'COLOR=dim' 'TZ=UTC'
 bash "$SCRIPTS/setup.sh" --color=cyan >/dev/null
 ct_load_config
 is "a flag changes its own setting" "cyan" "$CT_COLOR"
@@ -482,7 +503,7 @@ refutes "rejects a non on/off tool-timing value" bash "$SCRIPTS/setup.sh" --tool
 echo
 echo "tool timing"
 
-: > "$CLAUDE_TIMESTAMP_CONFIG"
+fresh
 is "tool timing is off by default" "off" "$(ct_load_config; printf '%s' "$CT_TOOL_TIMING")"
 
 is "duration between two readings" "1.500" "$(ct_duration_between 10.000 11.500)"
@@ -495,7 +516,7 @@ refutes "an empty tool use id is refused" ct_tool_state_file "s" ""
 
 if command -v jq >/dev/null 2>&1; then
   # Disabled: the hooks must write nothing at all.
-  printf 'TOOL_TIMING=off\n' > "$CLAUDE_TIMESTAMP_CONFIG"
+  fresh 'TOOL_TIMING=off'
   printf '{"session_id":"tools","tool_use_id":"t1","tool_name":"Bash"}' | bash "$SCRIPTS/pre-tool-use.sh"
   if [ -e "$(ct_state_dir)/tools.tool.t1" ]; then
     fail "TOOL_TIMING=off records nothing" "no state file" "file created"
@@ -503,7 +524,7 @@ if command -v jq >/dev/null 2>&1; then
     pass "TOOL_TIMING=off records nothing"
   fi
 
-  printf 'TOOL_TIMING=on\n' > "$CLAUDE_TIMESTAMP_CONFIG"
+  fresh 'TOOL_TIMING=on'
 
   # Two overlapping calls, interleaved the way parallel tool use actually runs:
   # both start before either finishes. Name-keyed state would lose one of them.
@@ -538,7 +559,7 @@ if command -v jq >/dev/null 2>&1; then
   contains "the summary counts a single call in the singular" "WebFetch 8.1s (1 call)" "$out"
   contains "the summary keeps the turn line too" "over 2 turns" "$out"
 
-  printf 'TOOL_TIMING=off\n' > "$CLAUDE_TIMESTAMP_CONFIG"
+  fresh 'TOOL_TIMING=off'
   printf '%s' "$(( $(date +%s) - 600 ))" > "$base.start"
   printf '2' > "$base.turns"; printf '30' > "$base.wait"
   printf 'Bash 40.0\n' > "$log"
@@ -547,9 +568,135 @@ if command -v jq >/dev/null 2>&1; then
 fi
 
 echo
+echo "state pruning"
+
+fresh
+mkdir -p "$(ct_state_dir)"
+# A fixed date in the past rather than a relative one: GNU touch spells that
+# -d '10 days ago' and BSD touch spells it -v-10d, but -t works on both.
+touch -t 202001010000 "$(ct_state_dir)/ancient"
+: > "$(ct_state_dir)/recent"
+ct_prune_state
+if [ -e "$(ct_state_dir)/ancient" ]; then
+  fail "pruning removes stale session state" "ancient file gone" "still there"
+else
+  pass "pruning removes stale session state"
+fi
+asserts "pruning keeps current session state" test -e "$(ct_state_dir)/recent"
+rm -rf "$(ct_state_dir)"
+ct_prune_state
+pass "pruning a missing state directory is not an error"
+
+echo
+echo "awkward input"
+
+if command -v jq >/dev/null 2>&1; then
+  fresh 'COLOR=none' 'ELAPSED=off' 'IDLE_AFTER=0' 'DATE_ROLLOVER=off'
+
+  # Message text is attacker-adjacent in the sense that it is arbitrary: it can
+  # carry quotes, backslashes and escape sequences, and the hook rebuilds it
+  # into JSON. jq builds the payload here so the test cannot pass by accident
+  # through its own quoting.
+  # shellcheck disable=SC2016  # the literal $(...) and backticks are the point
+  awkward='he said "hi" \ then \n did $(nothing) `also nothing`'
+  payload="$(jq -nc --arg d "$awkward" '{session_id:"awkward",index:0,delta:$d}')"
+  out="$(printf '%s' "$payload" | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')"
+  contains "quotes and backslashes survive intact" "$awkward" "$out"
+
+  esc="$(printf 'text with \033[31m an escape')"
+  payload="$(jq -nc --arg d "$esc" '{session_id:"awkward",index:0,delta:$d}')"
+  out="$(printf '%s' "$payload" | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')"
+  contains "escape sequences in the message are left alone" "$esc" "$out"
+
+  payload="$(jq -nc '{session_id:"awkward",index:0,delta:""}')"
+  out="$(printf '%s' "$payload" | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')"
+  case "$out" in "["*) pass "an empty message still gets a marker" ;; *) fail "an empty message still gets a marker" "a marker" "$out" ;; esac
+
+  # A payload missing the fields the hook reads must not crash it.
+  out="$(printf '{}' | bash "$SCRIPTS/message-display.sh" 2>/dev/null || echo CRASHED)"
+  case "$out" in *CRASHED*) fail "a payload with no fields is survivable" "no crash" "$out" ;; *) pass "a payload with no fields is survivable" ;; esac
+
+  fresh 'COLOR=dim' 'ELAPSED=off' 'IDLE_AFTER=0' 'DATE_ROLLOVER=off'
+  out="$(printf '{"session_id":"nc","index":0,"delta":"x"}' | NO_COLOR=1 bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')"
+  lacks "NO_COLOR reaches the rendered marker" "[2m" "$out"
+
+  echo
+  echo "degrading without jq"
+
+  # PATH is emptied rather than jq removed, so this exercises the real branch
+  # every hook opens with. bash itself is invoked by the path it is running as.
+  out="$(printf '{"session_id":"x"}' | PATH=/nonexistent "$BASH" "$SCRIPTS/session-start.sh" 2>/dev/null || true)"
+  contains "session start explains a missing jq" "jq" "$out"
+  out="$(printf '{"session_id":"x","index":0,"delta":"hello"}' | PATH=/nonexistent "$BASH" "$SCRIPTS/message-display.sh" 2>/dev/null || true)"
+  is "message display stays silent without jq" "" "$out"
+  out="$(printf '{"session_id":"x"}' | PATH=/nonexistent "$BASH" "$SCRIPTS/user-prompt-submit.sh" 2>/dev/null || true)"
+  is "prompt submit stays silent without jq" "" "$out"
+fi
+
+echo
+echo "tolerating a bad config"
+
+# Values from the config file are not validated the way flags are, so what
+# matters is that a wrong one degrades instead of breaking the marker.
+fresh 'SLOW_AFTER=abc' 'IDLE_AFTER=oops' 'COLOR=banana' 'ELAPSED=off' 'DATE_ROLLOVER=off'
+if command -v jq >/dev/null 2>&1; then
+  out="$(printf '{"session_id":"bad","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" 2>/dev/null | jq -r '.hookSpecificOutput.displayContent' 2>/dev/null)"
+  contains "a nonsense config still renders a marker" "] x" "$out"
+  lacks "an unknown colour renders no escape codes" "[" "${out#*]}"
+fi
+
+echo
+echo "the wizard"
+
+fresh
+# The timezone answer depends on the platform. Where there is no timezone
+# database the wizard is right to refuse a pinned zone, and feeding it one
+# would make it re-ask and swallow every later answer, which is exactly how
+# this test first failed on Windows.
+if ct_tz_supported; then
+  tz_answer="Asia/Tokyo"
+  tz_expected="Asia/Tokyo"
+else
+  tz_answer="local"
+  tz_expected=""
+fi
+
+# Answers in prompt order: timezone, display format, elapsed, slow after, idle
+# after, summary, colour, tell-Claude, write. Tool timing and context format
+# are skipped because summary and tell-Claude are answered off and false.
+printf '%s\nshort\non\n30\n0\noff\ncyan\nfalse\ny\n' "$tz_answer" \
+  | bash "$SCRIPTS/setup.sh" >/dev/null 2>&1
+ct_load_config
+is "the wizard writes the timezone"   "$tz_expected" "$CT_TZ"
+is "the wizard writes the format"     "short"      "$CT_DISPLAY_FORMAT"
+is "the wizard writes the threshold"  "30"         "$CT_SLOW_AFTER"
+is "the wizard writes the colour"     "cyan"       "$CT_COLOR"
+is "the wizard writes the summary"    "off"        "$CT_SUMMARY"
+is "the wizard writes the injection"  "false"      "$CT_INJECT_CONTEXT"
+
+fresh 'COLOR=green'
+printf 'local\niso\non\n0\n0\non\non\nred\ntrue\n24h\nn\n' \
+  | bash "$SCRIPTS/setup.sh" >/dev/null 2>&1
+ct_load_config
+is "answering no writes nothing" "green" "$CT_COLOR"
+
+# Input running out must not leave the wizard asking forever.
+fresh
+if timeout 20 bash -c "printf 'local\\n' | bash '$SCRIPTS/setup.sh' >/dev/null 2>&1"; then
+  pass "the wizard finishes when input runs out"
+else
+  status=$?
+  if [ "$status" -eq 124 ]; then
+    fail "the wizard finishes when input runs out" "an exit" "still waiting after 20s"
+  else
+    pass "the wizard finishes when input runs out"
+  fi
+fi
+
+echo
 echo "doctor"
 
-: > "$CLAUDE_TIMESTAMP_CONFIG"
+fresh
 out="$(bash "$SCRIPTS/setup.sh" --doctor)"
 contains "doctor reports jq"           "jq" "$out"
 contains "doctor reports the platform" "uname" "$out"

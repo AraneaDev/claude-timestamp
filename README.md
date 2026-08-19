@@ -89,6 +89,7 @@ cannot run anything.
 | `CONTEXT_FORMAT` | `24h` | Same values, for the time Claude is told |
 | `COLOR` | `dim` | `none`, `dim`, `gray`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan` |
 | `ELAPSED` | `on` | Show how long the turn took |
+| `INJECT_CONTEXT` | `true` | Tell Claude the local time each prompt was sent |
 | `SLOW_AFTER` | `60` | Colour the duration past this many seconds, `0` disables |
 | `SLOW_COLOR` | `yellow` | Colour used for a slow turn |
 | `IDLE_AFTER` | `3600` | Mark a gap this long between messages, `0` disables |
@@ -157,13 +158,25 @@ to whole seconds and the call counts carry the signal.
 ## Development
 
 ```bash
-bash tests/run.sh                                    # 142 assertions, no framework
+bash tests/run.sh                                    # 165 assertions, no framework
 shellcheck -S style -e SC1091 hooks/scripts/**/*.sh  # clean
+bash tools/check-docs.sh                             # README against the code
 ```
 
-The suite has no dependencies beyond what the plugin itself needs. It writes to
-a temporary config and state directory, so running it never touches your real
-configuration.
+The suite has no dependencies beyond what the plugin itself needs. Each case
+resets the config and state directory before it runs, so no test can inherit
+anything from the one before it. The interactive wizard is covered too: it
+reads answers from stdin when there is no terminal, which makes the whole flow
+scriptable without a pseudo-terminal.
+
+`tools/check-docs.sh` catches the ways this README goes stale without anyone
+noticing: a setting that is added and never written down, an assertion count
+that stops matching the suite, and an image link pointing at a file that has
+been renamed.
+
+CI runs on Linux, macOS and Windows. On macOS it runs the suite twice, once
+with the default bash and once with `/bin/bash`, which is still 3.2. That is
+what keeps the bash 3.2 claim above honest rather than aspirational.
 
 ### Screenshots
 
