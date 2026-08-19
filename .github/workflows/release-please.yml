@@ -1,0 +1,25 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      # RELEASE_PLEASE_TOKEN is preferred where it exists. A pull request
+      # opened with the built-in GITHUB_TOKEN does not trigger other
+      # workflows, so CI would never run on the release pull request and the
+      # required checks could never pass. A personal access token does not
+      # have that restriction.
+      - uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
