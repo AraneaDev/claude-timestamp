@@ -11,12 +11,19 @@
 # run code. Unknown keys are ignored rather than being an error, so a config
 # written by a newer version stays readable by an older one.
 
-CT_CONFIG_DEFAULT="${HOME}/.claude/claude-timestamp.conf"
+# Resolved when asked rather than when this file is sourced, so a caller that
+# changes HOME afterwards gets the path it expects.
+CT_CONFIG_NAME=".claude/claude-timestamp.conf"
+
+# A project may carry its own settings, layered over the user's. The file has
+# the same name and format, and only the keys it sets are overridden, so a
+# repository can pin a timezone without restating everything else.
+CT_PROJECT_CONFIG_NAME="$CT_CONFIG_NAME"
 
 # Path to the active config file. CLAUDE_TIMESTAMP_CONFIG exists so the test
 # suite can point at a temp file; it is not a user-facing setting.
 ct_config_path() {
-  printf '%s' "${CLAUDE_TIMESTAMP_CONFIG:-$CT_CONFIG_DEFAULT}"
+  printf '%s' "${CLAUDE_TIMESTAMP_CONFIG:-${HOME}/$CT_CONFIG_NAME}"
 }
 
 # Render a path with $HOME shortened to ~. Only affects what is printed; every
@@ -35,26 +42,39 @@ ct_tilde() {
 # The CT_* variables set here are this library's public interface -- every
 # consumer is a separate file, so shellcheck cannot see them being read.
 # shellcheck disable=SC2034
-ct_load_config() {
-  CT_TZ=""                    # empty = machine local time
-  CT_DISPLAY_FORMAT="24h"     # preset name or raw strftime
-  CT_CONTEXT_FORMAT="24h"
-  CT_COLOR="dim"
-  CT_ELAPSED="on"
-  CT_SLOW_AFTER="60"          # seconds; 0 disables
-  CT_SLOW_COLOR="yellow"
-  CT_IDLE_AFTER="3600"        # seconds; 0 disables
-  CT_DATE_ROLLOVER="on"
-  CT_SUMMARY="on"
-  CT_SUBAGENTS="on"
-  CT_TOOL_TIMING="off"        # adds two forks per tool call, so opt-in
-  CT_INJECT_CONTEXT="true"
+# Find the project config covering a directory, by walking up from it.
+#
+# The search stops at $HOME, because the file directly under it is the user
+# config rather than a project one. It also stops at the filesystem root, and
+# after a bounded number of steps so a symlink loop cannot hang a hook.
+ct_find_project_config() {
+  local dir="${1:-}" steps=0
+  [ -n "$dir" ] || return 1
+  [ -d "$dir" ] || return 1
+  dir="$(cd "$dir" 2>/dev/null && pwd)" || return 1
 
-  local file line key value
-  CT_CONFIG_PROBLEMS=""
+  while [ -n "$dir" ] && [ "$dir" != "/" ] && [ "$steps" -lt 40 ]; do
+    if [ -n "${HOME:-}" ] && [ "$dir" = "$HOME" ]; then
+      return 1
+    fi
+    if [ -r "$dir/$CT_PROJECT_CONFIG_NAME" ]; then
+      printf '%s' "$dir/$CT_PROJECT_CONFIG_NAME"
+      return 0
+    fi
+    dir="$(dirname "$dir")"
+    steps=$((steps + 1))
+  done
+  return 1
+}
 
-  file="$(ct_config_path)"
-  [ -r "$file" ] || return 0
+# Read one config file over whatever is already loaded.
+#
+# Parsed against a list of known keys and never executed. Sourcing it would run
+# whatever happened to be in the file; a whitelist reader costs the same ten
+# lines and cannot. Unknown keys are ignored rather than being an error, so a
+# file written by a newer version stays readable by an older one.
+_ct_read_config_file() {
+  local file="$1" line key value
 
   # `|| [ -n "$line" ]` so a final line with no trailing newline is still read.
   while IFS= read -r line || [ -n "$line" ]; do
@@ -87,6 +107,48 @@ ct_load_config() {
       INJECT_CONTEXT) CT_INJECT_CONTEXT="$value" ;;
     esac
   done < "$file"
+}
+
+# The CT_* variables set here are this library's public interface -- every
+# consumer is a separate file, so shellcheck cannot see them being read.
+# shellcheck disable=SC2034
+ct_load_config() {
+  CT_TZ=""                    # empty = machine local time
+  CT_DISPLAY_FORMAT="24h"     # preset name or raw strftime
+  CT_CONTEXT_FORMAT="24h"
+  CT_COLOR="dim"
+  CT_ELAPSED="on"
+  CT_SLOW_AFTER="60"          # seconds; 0 disables
+  CT_SLOW_COLOR="yellow"
+  CT_IDLE_AFTER="3600"        # seconds; 0 disables
+  CT_DATE_ROLLOVER="on"
+  CT_SUMMARY="on"
+  CT_SUBAGENTS="on"
+  CT_TOOL_TIMING="off"        # adds two forks per tool call, so opt-in
+  CT_INJECT_CONTEXT="true"
+
+  CT_CONFIG_PROBLEMS=""
+  CT_PROJECT_CONFIG=""
+
+  local file
+  file="$(ct_config_path)"
+  [ -r "$file" ] && _ct_read_config_file "$file"
+
+  # The project layer goes on top, so a repository can pin one setting without
+  # restating the rest. CLAUDE_TIMESTAMP_CONFIG is a test hook rather than a
+  # user setting, so pointing it somewhere also disables the project layer:
+  # a test asking for one exact file should get exactly that file.
+  if [ -z "${CLAUDE_TIMESTAMP_CONFIG:-}" ]; then
+    # Defaults to the working directory. The tool hooks rely on that: they
+    # decide whether to do anything at all before reading their payload, so
+    # they have no cwd to pass yet, and paying for a jq process per tool call
+    # just to look one up would cost more than it is worth.
+    local project
+    if project="$(ct_find_project_config "${1:-${PWD:-}}")"; then
+      CT_PROJECT_CONFIG="$project"
+      _ct_read_config_file "$project"
+    fi
+  fi
 
   ct_validate_config
 }

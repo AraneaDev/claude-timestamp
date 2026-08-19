@@ -21,12 +21,17 @@ command -v jq >/dev/null 2>&1 || exit 0
 input="$(cat)"
 
 # One cheap jq call decides whether there is any work to do at all.
-read -r index session_id agent_id <<< "$(printf '%s' "$input" \
-  | jq -r '"\(.index // 0) \(.session_id // "-") \(.agent_id // "")"')"
+# Split on the ASCII unit separator rather than a tab. cwd can contain spaces,
+# and tab is IFS whitespace, which means bash collapses runs of it and silently
+# drops empty fields: an absent agent_id would shift cwd into its place. A
+# non-whitespace separator preserves empty fields, and 0x1f cannot appear in
+# any of these values.
+IFS=$'\x1f' read -r index session_id agent_id cwd <<< "$(printf '%s' "$input" \
+  | jq -r '[(.index // 0 | tostring), (.session_id // "-"), (.agent_id // ""), (.cwd // "")] | join("\u001f")')"
 [ "$index" = "0" ] || exit 0
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/config.sh"
-ct_load_config
+ct_load_config "$cwd"
 
 # Subagents can run several at a time, so their output interleaves and a marker
 # on every message is noise rather than signal. Opt-out, not the default.

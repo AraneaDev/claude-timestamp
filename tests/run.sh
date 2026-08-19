@@ -9,6 +9,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export ROOT
 SCRIPTS="$ROOT/hooks/scripts"
 
 PASS=0
@@ -754,6 +755,100 @@ else
     pass "the wizard finishes when input runs out"
   fi
 fi
+
+echo
+echo "project configuration"
+
+PROJ="$WORK/projects"
+rm -rf "$PROJ"
+mkdir -p "$PROJ/home/.claude" "$PROJ/repo/.claude" "$PROJ/repo/src/deep" "$PROJ/plain"
+printf 'TZ=UTC\nCOLOR=dim\nDISPLAY_FORMAT=24h\n' > "$PROJ/home/.claude/claude-timestamp.conf"
+printf 'COLOR=cyan\n' > "$PROJ/repo/.claude/claude-timestamp.conf"
+
+# ct_find_project_config and the layering are exercised in a subshell so the
+# HOME and CLAUDE_TIMESTAMP_CONFIG they need cannot leak into later cases.
+layered() {
+  ( unset CLAUDE_TIMESTAMP_CONFIG
+    HOME="$PROJ/home"
+    ct_load_config "$1"
+    printf '%s %s %s' "$CT_COLOR" "$CT_DISPLAY_FORMAT" "${CT_PROJECT_CONFIG:+found}" )
+}
+
+is "the project layer overrides only what it names" "cyan 24h found" "$(layered "$PROJ/repo")"
+is "the search walks up from a subdirectory"        "cyan 24h found" "$(layered "$PROJ/repo/src/deep")"
+is "a directory with no project config uses yours"  "dim 24h "      "$(layered "$PROJ/plain")"
+is "the search stops at home"                       "dim 24h "      "$(layered "$PROJ/home")"
+
+refutes "no project config is reported as not found" ct_find_project_config "$PROJ/plain"
+refutes "a missing directory is not searched"        ct_find_project_config "$PROJ/nowhere"
+refutes "an empty directory argument finds nothing"  ct_find_project_config ""
+
+# CLAUDE_TIMESTAMP_CONFIG names one exact file, so it must not pick up a
+# project layer as well. The rest of this suite depends on that.
+out="$( cd "$PROJ/repo" && CLAUDE_TIMESTAMP_CONFIG="$PROJ/home/.claude/claude-timestamp.conf" \
+        HOME="$PROJ/home" bash -c "source '$ROOT/hooks/scripts/lib/config.sh'; ct_load_config; printf '%s' \"\$CT_COLOR\"" )"
+is "an explicit config file ignores the project layer" "dim" "$out"
+
+if command -v jq >/dev/null 2>&1; then
+  hook_in() {
+    # $1 = cwd reported in the payload, $2 = extra payload fields
+    ( unset CLAUDE_TIMESTAMP_CONFIG
+      HOME="$PROJ/home"
+      printf '{"session_id":"proj","index":0,"delta":"x","cwd":"%s"%s}' "$1" "$2" \
+        | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent' )
+  }
+  printf 'COLOR=none\nELAPSED=off\nIDLE_AFTER=0\nDATE_ROLLOVER=off\nDISPLAY_FORMAT=iso\n' \
+    > "$PROJ/repo/.claude/claude-timestamp.conf"
+
+  contains "a hook honours the project config for its cwd" "T" "$(hook_in "$PROJ/repo/src/deep" "")"
+  lacks "a hook outside the project does not" "T" "$(strip_ansi "$(hook_in "$PROJ/plain" "")")"
+
+  # Regression: the payload fields were split on tab, but tab is IFS
+  # whitespace, so bash collapsed the empty agent_id and shifted cwd into its
+  # place. Any payload carrying an agent_id would have worked while every
+  # payload without one silently lost its project config.
+  contains "cwd survives an absent agent_id" "T" "$(hook_in "$PROJ/repo" "")"
+  contains "cwd survives a present agent_id" "T" "$(hook_in "$PROJ/repo" ',"agent_id":"sub-1"')"
+
+  mkdir -p "$PROJ/with space/.claude"
+  printf 'DISPLAY_FORMAT=iso\nCOLOR=none\nELAPSED=off\nIDLE_AFTER=0\nDATE_ROLLOVER=off\n' \
+    > "$PROJ/with space/.claude/claude-timestamp.conf"
+  contains "a cwd containing spaces is handled" "T" "$(hook_in "$PROJ/with space" "")"
+fi
+
+echo
+echo "writing a project config"
+
+rm -rf "$PROJ/writable"; mkdir -p "$PROJ/writable"
+( cd "$PROJ/writable" && unset CLAUDE_TIMESTAMP_CONFIG && HOME="$PROJ/home" \
+    bash "$SCRIPTS/setup.sh" --project --color=cyan >/dev/null 2>&1 )
+written="$PROJ/writable/.claude/claude-timestamp.conf"
+asserts "--project creates the file" test -r "$written"
+is "--project writes what was named" "1" "$(grep -c '^COLOR=cyan' "$written")"
+is "--project writes nothing else"   "0" "$(grep -c '^DISPLAY_FORMAT=' "$written")"
+
+( cd "$PROJ/writable" && unset CLAUDE_TIMESTAMP_CONFIG && HOME="$PROJ/home" \
+    bash "$SCRIPTS/setup.sh" --project --display=short >/dev/null 2>&1 )
+is "--project keeps what was already pinned" "1" "$(grep -c '^COLOR=cyan' "$written")"
+is "--project adds the new setting"          "1" "$(grep -c '^DISPLAY_FORMAT=short' "$written")"
+
+# In a directory that has pinned nothing yet, --project on its own has no
+# settings to write and should say so rather than create an empty file.
+mkdir -p "$PROJ/empty"
+refutes "--project with nothing to write is refused" \
+  bash -c "cd '$PROJ/empty' && unset CLAUDE_TIMESTAMP_CONFIG && HOME='$PROJ/home' bash '$SCRIPTS/setup.sh' --project"
+if [ -e "$PROJ/empty/.claude/claude-timestamp.conf" ]; then
+  fail "a refused write leaves no file behind" "no file" "a file was created"
+else
+  pass "a refused write leaves no file behind"
+fi
+
+out="$( cd "$PROJ/writable" && unset CLAUDE_TIMESTAMP_CONFIG && HOME="$PROJ/home" \
+        bash "$SCRIPTS/setup.sh" --doctor 2>&1 )"
+contains "doctor names the project file" "project file" "$out"
+out="$( cd "$PROJ/plain" && unset CLAUDE_TIMESTAMP_CONFIG && HOME="$PROJ/home" \
+        bash "$SCRIPTS/setup.sh" --doctor 2>&1 )"
+contains "doctor says when there is no project file" "none for this directory" "$out"
 
 echo
 echo "doctor"

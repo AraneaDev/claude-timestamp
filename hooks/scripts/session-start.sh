@@ -24,12 +24,14 @@ fi
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/config.sh"
 
+cwd="$(cat | jq -r '.cwd // empty' 2>/dev/null || true)"
+
 ct_prune_state
 
 # A zone was pinned that this platform cannot resolve. The hooks fall back to
 # local time rather than rendering UTC, but silently showing a different zone
 # than the one configured is worth saying out loud, once.
-ct_load_config
+ct_load_config "$cwd"
 
 # A typo in the config file would otherwise do nothing visible: the value is
 # replaced by its default and the plugin carries on. Say it once, at the only
