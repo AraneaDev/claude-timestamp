@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.2](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.1...v0.0.2) (2026-08-19)
+
+
+### Continuous integration
+
+* use RELEASE_PLEASE_TOKEN when it is available ([#17](https://github.com/AraneaDev/claude-timestamp/issues/17)) ([de2ba10](https://github.com/AraneaDev/claude-timestamp/commit/de2ba100cdde0568a2b606b19e1b93a981f3728e))
+
 ## 0.0.1 (2026-08-19)
 
 
