@@ -51,6 +51,8 @@ ct_load_config() {
   CT_INJECT_CONTEXT="true"
 
   local file line key value
+  CT_CONFIG_PROBLEMS=""
+
   file="$(ct_config_path)"
   [ -r "$file" ] || return 0
 
@@ -85,6 +87,59 @@ ct_load_config() {
       INJECT_CONTEXT) CT_INJECT_CONTEXT="$value" ;;
     esac
   done < "$file"
+
+  ct_validate_config
+}
+
+# Validators. These live here rather than in setup.sh because both the loader
+# and the setup script need the same answer to "is this a usable value", and
+# two copies of that question drift apart.
+ct_is_valid_color()  { case "${1:-}" in none|off|dim|gray|grey|red|green|yellow|blue|magenta|cyan) return 0 ;; *) return 1 ;; esac; }
+ct_is_valid_format() { case "${1:-}" in *%*|24h|short|12h|iso) return 0 ;; *) return 1 ;; esac; }
+ct_is_seconds()      { case "${1:-}" in ''|*[!0-9]*) return 1 ;; *) return 0 ;; esac; }
+ct_is_onoff()        { case "${1:-}" in on|off) return 0 ;; *) return 1 ;; esac; }
+ct_is_bool()         { case "${1:-}" in true|false) return 0 ;; *) return 1 ;; esac; }
+
+# A pinned zone is checked for shape here and for whether this platform can
+# honour it separately, because those are different failures with different
+# advice attached.
+ct_is_valid_tz() {
+  case "${1:-}" in
+    '') return 0 ;;
+    /*|*/../*|*/..) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+# Replace one setting with its default when the configured value is unusable,
+# and record why. Values come from a file a person edited, so a typo should say
+# so rather than quietly doing nothing.
+_ct_require() {
+  local name="$1" check="$2" default="$3" var="CT_$1" value
+  value="${!var}"
+  "$check" "$value" && return 0
+  printf -v "$var" '%s' "$default"
+  CT_CONFIG_PROBLEMS="${CT_CONFIG_PROBLEMS}${CT_CONFIG_PROBLEMS:+$'\n'}  $name=$value is not valid, using $default"
+}
+
+# Check everything the config file can set. Reports through CT_CONFIG_PROBLEMS
+# rather than printing, because the hooks that call this have no business
+# writing to a user's screen on every message.
+ct_validate_config() {
+  CT_CONFIG_PROBLEMS=""
+  _ct_require TZ             ct_is_valid_tz     ""
+  _ct_require DISPLAY_FORMAT ct_is_valid_format 24h
+  _ct_require CONTEXT_FORMAT ct_is_valid_format 24h
+  _ct_require COLOR          ct_is_valid_color  dim
+  _ct_require SLOW_COLOR     ct_is_valid_color  yellow
+  _ct_require SLOW_AFTER     ct_is_seconds      60
+  _ct_require IDLE_AFTER     ct_is_seconds      3600
+  _ct_require ELAPSED        ct_is_onoff        on
+  _ct_require DATE_ROLLOVER  ct_is_onoff        on
+  _ct_require SUMMARY        ct_is_onoff        on
+  _ct_require SUBAGENTS      ct_is_onoff        on
+  _ct_require TOOL_TIMING    ct_is_onoff        off
+  _ct_require INJECT_CONTEXT ct_is_bool         true
 }
 
 # Preset name -> strftime string. Anything containing a % is already a strftime

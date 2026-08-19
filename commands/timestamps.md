@@ -1,56 +1,87 @@
 ---
-description: Configure claude-timestamp (timezone, clock format, color, elapsed time)
+description: Configure claude-timestamp (timezone, clock format, colour, elapsed time)
+argument-hint: what to change, e.g. "tokyo", "no colour", "12h no seconds", "off"
 ---
 
 Configure the claude-timestamp plugin for this user.
 
-The setup script has an interactive wizard, but it cannot be used from here:
-the Bash tool has no interactive stdin, so a wizard would hang. Drive the
-non-interactive form instead.
+Settings take effect on the **next message**. Every hook reads the config file
+each time it runs, so nothing needs restarting. Say so when you report back,
+because people reasonably assume otherwise.
 
-1. Show the current configuration:
+The setup script has an interactive wizard, but it cannot be used from here:
+the Bash tool has no interactive stdin. Drive the non-interactive form instead.
+
+## What the user asked for
+
+$ARGUMENTS
+
+## How to do it
+
+1. Read the current settings, so you can say what is changing rather than
+   guessing:
 
    `bash "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/setup.sh" --show`
 
-2. Ask the user what they want to change. Use AskUserQuestion, and ask only
-   about what is relevant to their request. If they asked for something
-   specific ("use Tokyo time", "drop the seconds"), just do it without
-   interrogating them about the rest.
+2. Work out which flags the request maps to. If the request above is empty or
+   vague, ask with AskUserQuestion. If it is specific, just do it, and do not
+   interrogate the user about settings they did not mention.
 
-   - Timezone: an IANA name such as `Europe/Amsterdam`, or `local` for the
-     machine's own time.
-   - Display format: `24h` (14:03:22), `short` (14:03), `12h` (2:03 PM),
-     `iso` (2026-08-19T14:03:22), or any strftime string.
-   - Color: `none`, `dim`, `gray`, `cyan`, `blue`, `green`, `yellow`,
-     `magenta`, `red`.
-   - Elapsed: `on` or `off`, whether to show how long each turn took.
-   - Inject context: `true` or `false`, whether Claude is told the local time
-     each prompt was sent.
-   - Slow turns: `--slow-after=SECONDS` colours the duration once a turn takes
-     that long, in `--slow-color=COLOR`. `0` disables it.
-   - Idle gaps: `--idle-after=SECONDS` marks a break between messages with a
-     line such as `-- 2h later --`. `0` disables it.
-   - Summary: `on` or `off`, whether session totals are reported at the end.
-   - Subagents: `on` or `off`, whether subagent messages are stamped too.
-   - Tool timing: `on` or `off`, whether individual tool calls are timed and
-     the slowest named in the session summary. Off by default, and worth
-     saying why if the user asks: it is the only setting that costs anything
-     per tool call rather than per message.
+   Some phrasings and what they mean:
 
-3. Apply only the settings they chose. Every flag is optional and anything you
-   leave out keeps its current value:
+   | They say | Flags |
+   | --- | --- |
+   | "tokyo", "use Japan time" | `--tz=Asia/Tokyo` |
+   | "my own time", "local" | `--tz=local` |
+   | "no colour", "plain" | `--color=none` |
+   | "drop the seconds", "shorter" | `--display=short` |
+   | "12 hour" | `--display=12h` |
+   | "off", "stop timestamps" | `--elapsed=off --color=none` and explain that a marker still shows; full removal is `claude plugin disable` |
+   | "don't tell Claude the time" | `--inject-context=false` |
+   | "highlight slow turns after 30s" | `--slow-after=30` |
+   | "time my tools" | `--tool-timing=on` |
 
-   `bash "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/setup.sh" --tz=Asia/Tokyo --display=short --color=dim`
+3. Apply only what they asked for. Every flag is optional and anything left out
+   keeps its current value:
 
-4. Relay the preview line the script prints, and tell them the change takes
-   effect in the next session.
+   `bash "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/setup.sh" --tz=Asia/Tokyo --display=short`
 
-If the user would rather use the interactive wizard, tell them to run this in
-their terminal, where it has a real TTY:
+4. Report the preview line the script prints, and say the change is already
+   live. If the script exits non-zero, relay its message: it refuses values it
+   cannot honour, such as a pinned timezone on a machine with no timezone
+   database.
 
-`! bash "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/setup.sh"`
+## Settings
 
-If something is not working -- no timestamps appearing, the wrong timezone,
-durations missing -- run the self-check and relay what it reports:
+- Timezone: an IANA name such as `Europe/Amsterdam`, or `local`.
+- Display format: `24h` (14:03:22), `short` (14:03), `12h` (2:03 PM),
+  `iso` (2026-08-19T14:03:22), or any strftime string.
+- Colour: `none`, `dim`, `gray`, `cyan`, `blue`, `green`, `yellow`, `magenta`,
+  `red`. Also `--slow-color` for the duration of a slow turn.
+- Elapsed: `on` or `off`, whether to show how long each turn took.
+- Slow turns: `--slow-after=SECONDS` colours the duration past that point,
+  `0` disables.
+- Idle gaps: `--idle-after=SECONDS` marks a break between messages, `0`
+  disables.
+- Date rollover: `on` or `off`, showing the date after midnight.
+- Summary: `on` or `off`, session totals on exit.
+- Subagents: `on` or `off`, whether subagent messages are stamped.
+- Tool timing: `on` or `off`. Off by default, and worth saying why if asked:
+  it is the only setting that costs anything per tool call rather than per
+  message.
+- Inject context: `true` or `false`, whether Claude is told the local time each
+  prompt was sent.
+
+## When something is not working
+
+Run the self-check and relay what it reports:
 
 `bash "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/setup.sh" --doctor`
+
+It exits non-zero when something is actually wrong, and it names bad values in
+the config file rather than leaving them to fail silently.
+
+If the user would rather answer the questions themselves, the wizard needs a
+real terminal:
+
+`! bash "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/setup.sh"`

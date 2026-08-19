@@ -9,7 +9,13 @@ painted, escape codes and all. It models bold and italics but has no notion of
 SGR 2 (dim), which is exactly what this plugin uses by default, so Screen is
 subclassed below to track it.
 
-Usage:  python screenshots.py [hero|doctor|all]
+Usage:  python screenshots.py [hero|wizard|doctor|all]
+
+There is deliberately no shot of the end-of-session summary. Producing one
+means exiting the TUI under automation, and it does not go quietly: typing
+/exit opens the command autocomplete and the newline picks from the menu,
+while Ctrl-D is ignored whenever a history suggestion is sitting in the input.
+The README shows that output as text instead.
 
 The hero shot starts a real session and therefore spends tokens. It also
 depends on how fast the model answers, so the durations differ every run; that
