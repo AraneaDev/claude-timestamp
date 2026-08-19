@@ -8,13 +8,19 @@ on:
 
 jobs:
   test:
-    # macOS matters here: the hooks call `date`, and BSD date rejects some GNU
-    # format flags. A Linux-only run would not catch that.
+    # Every supported platform runs the suite, because the differences are real:
+    # BSD date (macOS) rejects some GNU format flags, and Git Bash (Windows)
+    # ships without a zoneinfo database.
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        # Windows runners default to PowerShell; the plugin is bash throughout,
+        # and on Windows that means Git Bash.
+        shell: bash
     steps:
       - uses: actions/checkout@v4
 
@@ -24,9 +30,21 @@ jobs:
             echo "jq $(jq --version) already present"
           elif [ "$RUNNER_OS" = "macOS" ]; then
             brew install jq
+          elif [ "$RUNNER_OS" = "Windows" ]; then
+            choco install jq -y
           else
             sudo apt-get update && sudo apt-get install -y jq
           fi
+
+      - name: Report the platform's date and timezone support
+        # Recorded on every run because these two facts drive most of what can
+        # differ between platforms here.
+        run: |
+          echo "uname:      $(uname -s)"
+          echo "date:       $(date --version 2>/dev/null | head -1 || echo 'BSD/other date')"
+          echo "zoneinfo:   $([ -d /usr/share/zoneinfo ] && echo present || echo ABSENT)"
+          echo "TZ=Asia/Tokyo -> $(TZ=Asia/Tokyo date '+%H:%M %Z')"
+          echo "TZ=UTC        -> $(TZ=UTC date '+%H:%M %Z')"
 
       - name: Run tests
         run: bash tests/run.sh
