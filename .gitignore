@@ -1,3 +1,10 @@
 .DS_Store
 *.log
+
+# Local tool caches. These are generated per machine and belong to whoever ran
+# the tool, not to the repository.
+.momus/
+.knossos/
+
+# Screenshot tooling installs its Python dependencies here.
 tools/screenshots/.venv/
