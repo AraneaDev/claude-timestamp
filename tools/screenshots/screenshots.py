@@ -262,17 +262,23 @@ def shot_wizard():
 
 
 def shot_doctor():
-    """The real doctor output, run against a generic home directory."""
+    """The real doctor output, run against a generic home and a project."""
     work = WORK / "doctor"
     (work / "home" / ".claude").mkdir(parents=True, exist_ok=True)
     (work / "home" / ".claude" / "claude-timestamp.conf").write_text(DOCTOR_CONFIG)
+    # A project config too, so the shot shows the layering rather than leaving
+    # a reader to wonder what the project line means. Deliberately at a short
+    # path: the doctor prints it in full, and a long temp path wraps the line.
+    project = Path("/tmp/ct-demo-project")
+    (project / ".claude").mkdir(parents=True, exist_ok=True)
+    (project / ".claude" / "claude-timestamp.conf").write_text("COLOR=cyan\n")
 
     env = dict(os.environ)
     env.pop("CLAUDE_TIMESTAMP_CONFIG", None)
     env["HOME"] = str(work / "home")
     proc = subprocess.run(
         ["bash", str(SCRIPTS / "setup.sh"), "--doctor"],
-        capture_output=True, env=env,
+        capture_output=True, env=env, cwd=str(project),
     )
     raw = proc.stdout + proc.stderr
     (work / "doctor.raw").write_bytes(raw)

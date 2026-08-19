@@ -19,14 +19,19 @@ set -euo pipefail
 command -v jq >/dev/null 2>&1 || exit 0
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/config.sh"
-ct_load_config
 
 input="$(cat)"
+
+# The payload carries the directory the conversation is about, which is what
+# decides whether a project has its own settings.
+IFS=$'\x1f' read -r session_id cwd <<< "$(printf '%s' "$input" \
+  | jq -r '[(.session_id // ""), (.cwd // "")] | join("\u001f")')"
+
+ct_load_config "$cwd"
 
 # The turn start is recorded unconditionally: the elapsed marker and the
 # end-of-session summary both read it, and they are configured independently,
 # so gating the write on either one would silently break the other.
-session_id="$(printf '%s' "$input" | jq -r '.session_id // empty')"
 if state_file="$(ct_state_file "$session_id")"; then
   mkdir -p "$(ct_state_dir)"
   now="$(date +%s)"

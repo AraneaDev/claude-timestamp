@@ -48,6 +48,11 @@ Flags
                               it is the only setting that costs anything per
                               tool call rather than per message.
   --inject-context=true|false Tell Claude the time each prompt was sent.
+  --project                   Write to this project instead of your account,
+                              at .claude/claude-timestamp.conf in the current
+                              directory. Only the settings you name are
+                              written, so the rest keep following your own
+                              configuration.
   --config=PATH               Write somewhere other than the default file.
   -h, --help                  This text.
 
@@ -177,6 +182,11 @@ doctor() {
   else
     echo "  file            $(ct_tilde "$file") (absent, using defaults)"
   fi
+  if [ -n "${CT_PROJECT_CONFIG:-}" ]; then
+    echo "  project file    $(ct_tilde "$CT_PROJECT_CONFIG")"
+  else
+    echo "  project file    none for this directory"
+  fi
   echo "  timezone        ${CT_TZ:-<machine local>}"
   if ct_tz_unhonoured; then
     echo "                  PROBLEM - this platform cannot resolve '$CT_TZ',"
@@ -267,6 +277,53 @@ CONF
   echo "Wrote $(ct_tilde "$file")"
 }
 
+# Write a project's own settings, keeping the file to just what it overrides.
+#
+# A project config exists to pin one or two things, so writing every setting
+# would shadow the user's configuration entirely and silently freeze it at
+# today's values. Only the settings named on the command line are written,
+# merged with whatever the file already pinned.
+write_project_config() {
+  local file dir key value existing out=""
+  file="$PWD/$CT_CONFIG_NAME"
+  dir="$(dirname "$file")"
+  mkdir -p "$dir"
+
+  existing=""
+  [ -r "$file" ] && existing="$(cat "$file")"
+
+  set -- TZ "$1" DISPLAY_FORMAT "$2" CONTEXT_FORMAT "$3" COLOR "$4" \
+         ELAPSED "$5" INJECT_CONTEXT "$6" DATE_ROLLOVER "$7" SLOW_AFTER "$8" \
+         SLOW_COLOR "$9" IDLE_AFTER "${10}" SUMMARY "${11}" SUBAGENTS "${12}" \
+         TOOL_TIMING "${13}"
+
+  while [ "$#" -gt 0 ]; do
+    key="$1"; value="$2"; shift 2
+    if [ -z "$value" ]; then
+      # Not named now, but keep it if this project already pinned it.
+      value="$(printf '%s\n' "$existing" | sed -n "s/^${key}=//p" | tail -1)"
+      [ -z "$value" ] && continue
+    fi
+    [ "$key" = "TZ" ] && [ "$value" = "local" ] && value=""
+    out="${out}${key}=${value}
+"
+  done
+
+  if [ -z "$out" ]; then
+    echo "Nothing to write: name at least one setting, for example --color=none." >&2
+    return 1
+  fi
+
+  {
+    echo "# claude-timestamp settings for this project"
+    echo "# Layered over your own configuration, which still supplies everything"
+    echo "# not listed here. Run /timestamps to change it."
+    echo
+    printf '%s' "$out"
+  } > "$file"
+  echo "Wrote $(ct_tilde "$file")"
+}
+
 show_config() {
   ct_load_config
   local file
@@ -276,6 +333,8 @@ show_config() {
   else
     echo "Config: $(ct_tilde "$file") (not created yet, showing defaults)"
   fi
+  echo
+  [ -n "${CT_PROJECT_CONFIG:-}" ] && echo "Project: $(ct_tilde "$CT_PROJECT_CONFIG") (layered on top)"
   echo
   echo "  Timezone        ${CT_TZ:-<machine local>}"
   echo "  Display format  $CT_DISPLAY_FORMAT"
@@ -445,13 +504,14 @@ wizard() {
 # --- entry point ------------------------------------------------------------
 
 main() {
-  local interactive=1 action="write"
+  local interactive=1 action="write" project_scope=0
   local set_tz="" set_display="" set_context="" set_color="" set_elapsed="" set_inject="" set_rollover=""
   local set_slow="" set_slowcolor="" set_idle="" set_summary="" set_subagents="" set_tooltiming=""
 
   while [ $# -gt 0 ]; do
     case "$1" in
       --config=*)         CLAUDE_TIMESTAMP_CONFIG="${1#*=}"; export CLAUDE_TIMESTAMP_CONFIG ;;
+      --project)          project_scope=1; interactive=0 ;;
       --tz=*)             set_tz="${1#*=}";      interactive=0 ;;
       --display=*)        set_display="${1#*=}"; interactive=0 ;;
       --context=*)        set_context="${1#*=}"; interactive=0 ;;
@@ -498,7 +558,13 @@ main() {
   if [ -n "$set_subagents" ]; then valid_onoff SUBAGENTS "$set_subagents" || exit 2; CT_SUBAGENTS="$set_subagents"; fi
   if [ -n "$set_tooltiming" ]; then valid_onoff TOOL_TIMING "$set_tooltiming" || exit 2; CT_TOOL_TIMING="$set_tooltiming"; fi
 
-  write_config
+  if [ "$project_scope" = "1" ]; then
+    write_project_config "$set_tz" "$set_display" "$set_context" "$set_color" \
+      "$set_elapsed" "$set_inject" "$set_rollover" "$set_slow" "$set_slowcolor" \
+      "$set_idle" "$set_summary" "$set_subagents" "$set_tooltiming"
+  else
+    write_config
+  fi
   echo -n "Preview: "; preview
   echo "Takes effect on the next message."
 }

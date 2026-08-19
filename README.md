@@ -86,6 +86,24 @@ setup.sh --tz=Asia/Tokyo --display=short --color=dim --slow-after=30
 
 Every flag is optional and anything you leave out keeps its current value.
 
+### Project settings
+
+A project can carry its own settings in `.claude/claude-timestamp.conf`,
+layered over yours. Only the keys it names are overridden, so a repository can
+pin one thing and leave the rest following your own configuration:
+
+```bash
+cd some-project
+bash "$CLAUDE_PLUGIN_ROOT/hooks/scripts/setup.sh" --project --tz=UTC
+```
+
+That writes only `TZ=UTC`. Everything else still comes from your account. The
+file is found by walking up from the directory the conversation is about, so it
+applies from subdirectories too, and the search stops at your home directory so
+your own config is never mistaken for a project one.
+
+Which files are in play is shown by `--doctor` and `--show`.
+
 ### Settings
 
 Configuration lives in `~/.claude/claude-timestamp.conf` as `KEY=value`. It is
@@ -179,7 +197,7 @@ to whole seconds and the call counts carry the signal.
 ## Development
 
 ```bash
-bash tests/run.sh                                    # 193 assertions, no framework
+bash tests/run.sh                                    # 215 assertions, no framework
 shellcheck -S style -e SC1091 hooks/scripts/**/*.sh  # clean
 bash tools/check-docs.sh                             # README against the code
 ```
