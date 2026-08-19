@@ -14,8 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # Opens and keeps a Release PR up to date from the conventional commits on
-      # main. Merging that PR creates the claude-timestamp--vX.Y.Z tag and the
-      # GitHub Release, and sets release_created=true.
+      # main. Merging that PR creates the vX.Y.Z tag and the GitHub Release,
+      # and sets release_created=true.
       - name: Run release-please
         id: release
         uses: googleapis/release-please-action@v4
@@ -51,5 +51,4 @@ jobs:
         run: |
           version="$(jq -r .version .claude-plugin/plugin.json)"
           echo "tag: $TAG   plugin.json: $version"
-          # Claude Code expects a plugin release to be tagged {name}--v{version}.
-          [ "$TAG" = "claude-timestamp--v${version}" ]
+          [ "$TAG" = "v${version}" ]
