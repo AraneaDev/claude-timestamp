@@ -81,9 +81,22 @@ Automated by [release-please](https://github.com/googleapis/release-please) via
 2. release-please keeps a **Release PR** open and up to date, bumping
    `.claude-plugin/plugin.json`, `version.txt` and the release manifest, and
    writing `CHANGELOG.md`, all from those commits.
-3. Merging that PR creates the `claude-timestamp--vX.Y.Z` tag and the GitHub
-   Release, then the same workflow runs the tests and checks that the tag and
-   `plugin.json` agree.
+3. **The Release PR arrives with no checks on it.** GitHub does not start
+   workflows for events raised by the built-in `GITHUB_TOKEN`, so the pull
+   request release-please opens never triggers CI, and `main` requires those
+   checks to pass. Close and reopen the pull request, which raises the event
+   under your own account and starts them:
+
+   ```bash
+   gh pr close <n> && gh pr reopen <n>
+   ```
+
+   Pushing an empty commit to its branch works too. To avoid the step
+   entirely, add a personal access token as a `RELEASE_PLEASE_TOKEN` secret
+   and pass it to the action instead of `GITHUB_TOKEN`.
+4. Merging that PR creates the `claude-timestamp--vX.Y.Z` tag and the GitHub
+   Release, then the same workflow runs the tests, checks the docs, and
+   asserts the tag matches the version it just released.
 
 The tag carries the plugin name because that is the form Claude Code expects of
 a plugin release, rather than release-please's usual bare `vX.Y.Z`.
