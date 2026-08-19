@@ -326,6 +326,36 @@ if command -v jq >/dev/null 2>&1; then
   contains "SUBAGENTS=on stamps subagent messages" "displayContent" "$out"
 
   echo
+  echo "turn accounting"
+
+  : > "$CLAUDE_TIMESTAMP_CONFIG"
+  base="$(ct_state_file "acct")"
+  ct_clear_state "acct"
+  mkdir -p "$(ct_state_dir)"
+
+  # One prompt is one turn, however many messages it produces.
+  printf '{"session_id":"acct"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  is "a prompt counts one turn" "1" "$(ct_read_counter "$base.turns")"
+
+  # Two messages in that turn, at 10s and then 25s from the prompt. Waiting
+  # must end at 25s, not 35s -- elapsed is cumulative, so summing raw values
+  # would report more waiting than the session lasted.
+  printf '%s' "$(( $(date +%s) - 10 ))" > "$base"
+  printf '{"session_id":"acct","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" >/dev/null
+  printf '%s' "$(( $(date +%s) - 25 ))" > "$base"
+  printf '{"session_id":"acct","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" >/dev/null
+  is "messages in one turn are not double-counted" "25" "$(ct_read_counter "$base.wait")"
+  is "extra messages do not add turns" "1" "$(ct_read_counter "$base.turns")"
+
+  # A second prompt starts a fresh turn and its own waiting budget.
+  printf '{"session_id":"acct"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  is "a second prompt counts a second turn" "2" "$(ct_read_counter "$base.turns")"
+  printf '%s' "$(( $(date +%s) - 5 ))" > "$base"
+  printf '{"session_id":"acct","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" >/dev/null
+  is "waiting accumulates across turns" "30" "$(ct_read_counter "$base.wait")"
+  ct_clear_state "acct"
+
+  echo
   echo "session summary"
 
   : > "$CLAUDE_TIMESTAMP_CONFIG"
@@ -336,6 +366,7 @@ if command -v jq >/dev/null 2>&1; then
   printf '754'  > "$base.wait"
   out="$(printf '{"session_id":"summary-session"}' | bash "$SCRIPTS/session-end.sh" | jq -r '.systemMessage')"
   contains "summary reports the turn count" "3 turns" "$out"
+  contains "summary never reports more waiting than the session lasted" "1h30m" "$out"
   contains "summary reports time spent waiting" "12m34s of it waiting" "$out"
   if [ -e "$base.turns" ]; then
     fail "session end clears its state" "no state files" "state remains"
@@ -420,6 +451,77 @@ is "--subagents is accepted"   "off"   "$CT_SUBAGENTS"
 refutes "rejects a non-numeric slow-after" bash "$SCRIPTS/setup.sh" --slow-after=soon
 refutes "rejects a non-numeric idle-after" bash "$SCRIPTS/setup.sh" --idle-after=later
 refutes "rejects an unknown slow colour"   bash "$SCRIPTS/setup.sh" --slow-color=banana
+bash "$SCRIPTS/setup.sh" --tool-timing=on >/dev/null
+ct_load_config
+is "--tool-timing is accepted" "on" "$CT_TOOL_TIMING"
+refutes "rejects a non on/off tool-timing value" bash "$SCRIPTS/setup.sh" --tool-timing=sometimes
+
+echo
+echo "tool timing"
+
+: > "$CLAUDE_TIMESTAMP_CONFIG"
+is "tool timing is off by default" "off" "$(ct_load_config; printf '%s' "$CT_TOOL_TIMING")"
+
+is "duration between two readings" "1.500" "$(ct_duration_between 10.000 11.500)"
+is "a backwards clock reads as zero" "0.000" "$(ct_duration_between 20 10)"
+contains "precise clock returns a number" "." "$(ct_now_precise).0"
+
+is "tool state is keyed by tool use id" "$(ct_state_dir)/s.tool.toolu_01AB" "$(ct_tool_state_file "s" "toolu_01AB")"
+is "tool use id is sanitised" "$(ct_state_dir)/s.tool.etcpasswd" "$(ct_tool_state_file "s" "../../etc/passwd")"
+refutes "an empty tool use id is refused" ct_tool_state_file "s" ""
+
+if command -v jq >/dev/null 2>&1; then
+  # Disabled: the hooks must write nothing at all.
+  printf 'TOOL_TIMING=off\n' > "$CLAUDE_TIMESTAMP_CONFIG"
+  printf '{"session_id":"tools","tool_use_id":"t1","tool_name":"Bash"}' | bash "$SCRIPTS/pre-tool-use.sh"
+  if [ -e "$(ct_state_dir)/tools.tool.t1" ]; then
+    fail "TOOL_TIMING=off records nothing" "no state file" "file created"
+  else
+    pass "TOOL_TIMING=off records nothing"
+  fi
+
+  printf 'TOOL_TIMING=on\n' > "$CLAUDE_TIMESTAMP_CONFIG"
+
+  # Two overlapping calls, interleaved the way parallel tool use actually runs:
+  # both start before either finishes. Name-keyed state would lose one of them.
+  printf '{"session_id":"tools","tool_use_id":"t1","tool_name":"Bash"}' | bash "$SCRIPTS/pre-tool-use.sh"
+  printf '{"session_id":"tools","tool_use_id":"t2","tool_name":"Bash"}' | bash "$SCRIPTS/pre-tool-use.sh"
+  printf '{"session_id":"tools","tool_use_id":"t3","tool_name":"Read"}' | bash "$SCRIPTS/pre-tool-use.sh"
+  asserts "a started call is recorded" test -r "$(ct_state_dir)/tools.tool.t1"
+  printf '{"session_id":"tools","tool_use_id":"t2","tool_name":"Bash"}' | bash "$SCRIPTS/post-tool-use.sh"
+  printf '{"session_id":"tools","tool_use_id":"t1","tool_name":"Bash"}' | bash "$SCRIPTS/post-tool-use.sh"
+  printf '{"session_id":"tools","tool_use_id":"t3","tool_name":"Read"}' | bash "$SCRIPTS/post-tool-use.sh"
+
+  log="$(ct_tool_log tools)"
+  is "every completed call is logged" "3" "$(wc -l < "$log" | tr -d ' ')"
+  is "the log records tool names" "2" "$(grep -c '^Bash ' "$log")"
+  if [ -e "$(ct_state_dir)/tools.tool.t1" ]; then
+    fail "a completed call clears its start file" "no file" "file remains"
+  else
+    pass "a completed call clears its start file"
+  fi
+
+  # A post without a matching pre must not invent an entry.
+  printf '{"session_id":"tools","tool_use_id":"never-started","tool_name":"Bash"}' | bash "$SCRIPTS/post-tool-use.sh"
+  is "an unmatched completion is ignored" "3" "$(wc -l < "$log" | tr -d ' ')"
+
+  # Aggregation in the summary.
+  base="$(ct_state_file "tools")"
+  printf '%s' "$(( $(date +%s) - 600 ))" > "$base.start"
+  printf '2' > "$base.turns"; printf '30' > "$base.wait"
+  printf 'Bash 40.0\nBash 1.2\nWebFetch 8.1\nRead 0.4\n' > "$log"
+  out="$(printf '{"session_id":"tools"}' | bash "$SCRIPTS/session-end.sh" | jq -r '.systemMessage')"
+  contains "the summary names the slowest tool first" "slowest tools: Bash 41.2s (2 calls)" "$out"
+  contains "the summary counts a single call in the singular" "WebFetch 8.1s (1 call)" "$out"
+  contains "the summary keeps the turn line too" "over 2 turns" "$out"
+
+  printf 'TOOL_TIMING=off\n' > "$CLAUDE_TIMESTAMP_CONFIG"
+  printf '%s' "$(( $(date +%s) - 600 ))" > "$base.start"
+  printf '2' > "$base.turns"; printf '30' > "$base.wait"
+  printf 'Bash 40.0\n' > "$log"
+  out="$(printf '{"session_id":"tools"}' | bash "$SCRIPTS/session-end.sh" | jq -r '.systemMessage')"
+  lacks "TOOL_TIMING=off omits the tool line" "slowest tools" "$out"
+fi
 
 echo
 echo "doctor"

@@ -69,13 +69,21 @@ if [ "$CT_ELAPSED" = "on" ] && [ -n "$elapsed_secs" ]; then
   elapsed="$(ct_format_elapsed "$elapsed_secs")"
 fi
 
-# Running totals for the end-of-session summary. Kept even when the elapsed
-# marker is switched off, because the two settings are independent.
-if [ "$CT_SUMMARY" = "on" ] && [ -n "$state_file" ]; then
+# Running total of time spent waiting, for the end-of-session summary. Kept
+# even when the elapsed marker is switched off, because the two settings are
+# independent.
+#
+# elapsed_secs is measured from the prompt and therefore grows across a turn
+# that runs tools, so only the increment since this turn's previous message is
+# added. Summing the raw values would double-count, and could report more time
+# waiting than the session lasted.
+if [ "$CT_SUMMARY" = "on" ] && [ -n "$state_file" ] && [ -n "$elapsed_secs" ]; then
   mkdir -p "$(ct_state_dir)"
-  printf '%s' "$(( $(ct_read_counter "${state_file}.turns") + 1 ))" > "${state_file}.turns"
-  if [ -n "$elapsed_secs" ]; then
-    printf '%s' "$(( $(ct_read_counter "${state_file}.wait") + elapsed_secs ))" > "${state_file}.wait"
+  counted="$(ct_read_counter "${state_file}.counted")"
+  increment=$((elapsed_secs - counted))
+  if [ "$increment" -gt 0 ]; then
+    printf '%s' "$(( $(ct_read_counter "${state_file}.wait") + increment ))" > "${state_file}.wait"
+    printf '%s' "$elapsed_secs" > "${state_file}.counted"
   fi
 fi
 

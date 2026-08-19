@@ -23,6 +23,8 @@ session_id="$(printf '%s' "$input" | jq -r '.session_id // empty')"
 
 state_file="$(ct_state_file "$session_id")" || exit 0
 
+summary=""
+
 if [ "$CT_SUMMARY" = "on" ]; then
   started="$(ct_read_counter "${state_file}.start")"
   turns="$(ct_read_counter "${state_file}.turns")"
@@ -36,9 +38,28 @@ if [ "$CT_SUMMARY" = "on" ]; then
     summary="claude-timestamp: session lasted $(ct_format_duration "$total") over $turns turn"
     [ "$turns" -eq 1 ] || summary="${summary}s"
     summary="${summary}, $(ct_format_duration "$waited") of it waiting."
-    jq -n --arg msg "$summary" '{systemMessage: $msg}'
+  fi
+
+  # Tool timings, when they were being collected. Summed per tool and reported
+  # worst-first, because the question this answers is "what made this session
+  # slow", not "how long did any single call take".
+  log="${state_file}.tools"
+  if [ "$CT_TOOL_TIMING" = "on" ] && [ -s "$log" ]; then
+    tools="$(awk '{ sum[$1] += $2; n[$1]++ }
+                  END { for (t in sum) printf "%.3f\t%s\t%d\n", sum[t], t, n[t] }' "$log" \
+             | sort -rn | head -3 \
+             | awk -F'\t' '{
+                 calls = ($3 == 1) ? "1 call" : $3 " calls"
+                 printf "%s%s %.1fs (%s)", (NR > 1 ? ", " : ""), $2, $1, calls
+               }')"
+    if [ -n "$tools" ]; then
+      [ -n "$summary" ] && summary="$summary"$'\n'
+      summary="${summary}slowest tools: $tools"
+    fi
   fi
 fi
+
+[ -n "$summary" ] && jq -n --arg msg "$summary" '{systemMessage: $msg}'
 
 ct_clear_state "$session_id"
 exit 0

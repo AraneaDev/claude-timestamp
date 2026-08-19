@@ -43,6 +43,10 @@ Flags
   --date-rollover=on|off      Show the date when a session crosses midnight.
   --summary=on|off            Report session totals when the session ends.
   --subagents=on|off          Stamp subagent messages too.
+  --tool-timing=on|off        Time individual tool calls and report the
+                              slowest in the session summary. Off by default:
+                              it is the only setting that costs anything per
+                              tool call rather than per message.
   --inject-context=true|false Tell Claude the time each prompt was sent.
   --config=PATH               Write somewhere other than the default file.
   -h, --help                  This text.
@@ -181,6 +185,7 @@ doctor() {
   echo "  date rollover   $CT_DATE_ROLLOVER"
   echo "  summary         $CT_SUMMARY"
   echo "  subagents       $CT_SUBAGENTS"
+  echo "  tool timing     $CT_TOOL_TIMING$([ "$CT_TOOL_TIMING" = "on" ] && [ -z "${EPOCHREALTIME:-}" ] && echo " (whole seconds only: bash ${BASH_VERSION%%.*} has no EPOCHREALTIME)")"
   echo
 
   echo "State"
@@ -244,6 +249,10 @@ SUMMARY=$CT_SUMMARY
 # Stamp messages from subagents as well as the main conversation.
 SUBAGENTS=$CT_SUBAGENTS
 
+# Time individual tool calls and name the slowest in the session summary.
+# The only setting that costs anything per tool call rather than per message.
+TOOL_TIMING=$CT_TOOL_TIMING
+
 # Tell Claude the local time each prompt was sent.
 INJECT_CONTEXT=$CT_INJECT_CONTEXT
 CONF
@@ -266,6 +275,7 @@ show_config() {
   echo "  Date rollover   $CT_DATE_ROLLOVER"
   echo "  Summary         $CT_SUMMARY"
   echo "  Subagents       $CT_SUBAGENTS"
+  echo "  Tool timing     $CT_TOOL_TIMING"
   echo "  Inject context  $CT_INJECT_CONTEXT"
   echo
   echo -n "  Preview         "; preview
@@ -353,6 +363,12 @@ wizard() {
   done
   answer="$(ask "Report session totals when the session ends? (on/off)" "$CT_SUMMARY")"
   case "$answer" in on|off) CT_SUMMARY="$answer" ;; esac
+  if [ "$CT_SUMMARY" = "on" ]; then
+    echo "  Tool timing names the slowest tools in that summary. It is the only"
+    echo "  setting that costs anything per tool call rather than per message."
+    answer="$(ask "  Time individual tool calls? (on/off)" "$CT_TOOL_TIMING")"
+    case "$answer" in on|off) CT_TOOL_TIMING="$answer" ;; esac
+  fi
   echo
 
   # Color
@@ -398,7 +414,7 @@ wizard() {
 main() {
   local interactive=1 action="write"
   local set_tz="" set_display="" set_context="" set_color="" set_elapsed="" set_inject="" set_rollover=""
-  local set_slow="" set_slowcolor="" set_idle="" set_summary="" set_subagents=""
+  local set_slow="" set_slowcolor="" set_idle="" set_summary="" set_subagents="" set_tooltiming=""
 
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -414,6 +430,7 @@ main() {
       --idle-after=*)     set_idle="${1#*=}";      interactive=0 ;;
       --summary=*)        set_summary="${1#*=}";   interactive=0 ;;
       --subagents=*)      set_subagents="${1#*=}"; interactive=0 ;;
+      --tool-timing=*)    set_tooltiming="${1#*=}"; interactive=0 ;;
       --inject-context=*) set_inject="${1#*=}";  interactive=0 ;;
       --show)             action="show"; interactive=0 ;;
       --doctor)           action="doctor"; interactive=0 ;;
@@ -446,6 +463,7 @@ main() {
   if [ -n "$set_slowcolor" ]; then valid_color "$set_slowcolor" || exit 2; CT_SLOW_COLOR="$set_slowcolor"; fi
   if [ -n "$set_summary" ]; then valid_onoff SUMMARY "$set_summary" || exit 2; CT_SUMMARY="$set_summary"; fi
   if [ -n "$set_subagents" ]; then valid_onoff SUBAGENTS "$set_subagents" || exit 2; CT_SUBAGENTS="$set_subagents"; fi
+  if [ -n "$set_tooltiming" ]; then valid_onoff TOOL_TIMING "$set_tooltiming" || exit 2; CT_TOOL_TIMING="$set_tooltiming"; fi
 
   write_config
   echo -n "Preview: "; preview

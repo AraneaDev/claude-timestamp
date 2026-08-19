@@ -32,6 +32,10 @@ non-interactive form instead.
      line such as `-- 2h later --`. `0` disables it.
    - Summary: `on` or `off`, whether session totals are reported at the end.
    - Subagents: `on` or `off`, whether subagent messages are stamped too.
+   - Tool timing: `on` or `off`, whether individual tool calls are timed and
+     the slowest named in the session summary. Off by default, and worth
+     saying why if the user asks: it is the only setting that costs anything
+     per tool call rather than per message.
 
 3. Apply only the settings they chose. Every flag is optional and anything you
    leave out keeps its current value:

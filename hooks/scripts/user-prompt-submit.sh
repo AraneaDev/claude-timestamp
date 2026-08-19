@@ -33,6 +33,16 @@ if state_file="$(ct_state_file "$session_id")"; then
   printf '%s' "$now" > "$state_file"
   # First prompt of the session marks its beginning.
   [ -r "${state_file}.start" ] || printf '%s' "$now" > "${state_file}.start"
+
+  if [ "$CT_SUMMARY" = "on" ]; then
+    # A turn is a prompt, not an assistant message: a single prompt can produce
+    # several messages as tools run, and counting those reported one prompt as
+    # several turns.
+    printf '%s' "$(( $(ct_read_counter "${state_file}.turns") + 1 ))" > "${state_file}.turns"
+    # Waiting is accumulated per turn, and elapsed is measured from this
+    # moment, so the running total for this turn starts at zero.
+    printf '0' > "${state_file}.counted"
+  fi
 fi
 
 [ "$CT_INJECT_CONTEXT" = "false" ] && exit 0
