@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.3](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.2...v0.0.3) (2026-08-19)
+
+
+### Documentation
+
+* the release flow no longer needs a manual nudge ([#20](https://github.com/AraneaDev/claude-timestamp/issues/20)) ([7a55d85](https://github.com/AraneaDev/claude-timestamp/commit/7a55d8535d0a96309fcfd1a8f1ecf6ad81974f3d))
+
 ## [0.0.2](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.1...v0.0.2) (2026-08-19)
 
 
