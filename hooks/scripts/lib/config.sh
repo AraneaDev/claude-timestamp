@@ -19,6 +19,18 @@ ct_config_path() {
   printf '%s' "${CLAUDE_TIMESTAMP_CONFIG:-$CT_CONFIG_DEFAULT}"
 }
 
+# Render a path with $HOME shortened to ~. Only affects what is printed; every
+# path the scripts actually use stays absolute.
+ct_tilde() {
+  local path="${1:-}"
+  if [ -n "${HOME:-}" ] && [ "${path#"$HOME"/}" != "$path" ]; then
+    # shellcheck disable=SC2088  # the tilde is display text, not a path to expand
+    printf '~/%s' "${path#"$HOME"/}"
+  else
+    printf '%s' "$path"
+  fi
+}
+
 # Populate CT_* from defaults, then overlay whatever the config file sets.
 # The CT_* variables set here are this library's public interface -- every
 # consumer is a separate file, so shellcheck cannot see them being read.

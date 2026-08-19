@@ -120,6 +120,11 @@ printf 'COLOR=$(touch %s/pwned)\n' "$WORK" > "$CLAUDE_TIMESTAMP_CONFIG"
 ct_load_config
 if [ -e "$WORK/pwned" ]; then fail "config file cannot execute code" "no file created" "command ran"; else pass "config file cannot execute code"; fi
 
+# shellcheck disable=SC2088  # literal tilde is the expected output
+is "a path under home is shortened" "~/.claude/x.conf" "$(HOME=/home/someone ct_tilde /home/someone/.claude/x.conf)"
+is "a path outside home is left alone" "/etc/x.conf" "$(HOME=/home/someone ct_tilde /etc/x.conf)"
+is "a path merely prefixed by home is left alone" "/home/someone-else/x" "$(HOME=/home/someone ct_tilde /home/someone-else/x)"
+
 echo
 echo "format presets"
 
@@ -452,7 +457,7 @@ refutes "rejects an unknown color" bash "$SCRIPTS/setup.sh" --color=banana
 refutes "rejects an unknown timezone" bash "$SCRIPTS/setup.sh" --tz=Mars/Olympus
 refutes "rejects a non on/off elapsed value" bash "$SCRIPTS/setup.sh" --elapsed=maybe
 refutes "rejects an unknown flag" bash "$SCRIPTS/setup.sh" --nonsense
-contains "--show prints the config path" "$CLAUDE_TIMESTAMP_CONFIG" "$(bash "$SCRIPTS/setup.sh" --show)"
+contains "--show prints the config path" "$(ct_tilde "$CLAUDE_TIMESTAMP_CONFIG")" "$(bash "$SCRIPTS/setup.sh" --show)"
 contains "--help lists the flags" "--elapsed" "$(bash "$SCRIPTS/setup.sh" --help)"
 bash "$SCRIPTS/setup.sh" --date-rollover=off >/dev/null
 ct_load_config

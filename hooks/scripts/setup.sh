@@ -165,9 +165,9 @@ doctor() {
   local file
   file="$(ct_config_path)"
   if [ -r "$file" ]; then
-    echo "  file            $file"
+    echo "  file            $(ct_tilde "$file")"
   else
-    echo "  file            $file (absent, using defaults)"
+    echo "  file            $(ct_tilde "$file") (absent, using defaults)"
   fi
   echo "  timezone        ${CT_TZ:-<machine local>}"
   if ct_tz_unhonoured; then
@@ -256,14 +256,18 @@ TOOL_TIMING=$CT_TOOL_TIMING
 # Tell Claude the local time each prompt was sent.
 INJECT_CONTEXT=$CT_INJECT_CONTEXT
 CONF
-  echo "Wrote $file"
+  echo "Wrote $(ct_tilde "$file")"
 }
 
 show_config() {
   ct_load_config
   local file
   file="$(ct_config_path)"
-  if [ -r "$file" ]; then echo "Config: $file"; else echo "Config: $file (not created yet, showing defaults)"; fi
+  if [ -r "$file" ]; then
+    echo "Config: $(ct_tilde "$file")"
+  else
+    echo "Config: $(ct_tilde "$file") (not created yet, showing defaults)"
+  fi
   echo
   echo "  Timezone        ${CT_TZ:-<machine local>}"
   echo "  Display format  $CT_DISPLAY_FORMAT"
