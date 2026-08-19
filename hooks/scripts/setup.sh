@@ -28,6 +28,7 @@ claude-timestamp setup
   setup.sh [flags]            Write settings without prompting.
   setup.sh --show             Print the current configuration.
   setup.sh --doctor           Check that everything needed is present and working.
+  setup.sh --stats            Summarise the sessions recorded so far.
 
 Flags
   --tz=ZONE                   IANA timezone (Europe/Amsterdam), or "local".
@@ -43,6 +44,8 @@ Flags
   --date-rollover=on|off      Show the date when a session crosses midnight.
   --summary=on|off            Report session totals when the session ends.
   --subagents=on|off          Stamp subagent messages too.
+  --history=on|off            Record each finished session for --stats.
+  --history-limit=N           How many sessions to keep (default 200).
   --tool-timing=on|off        Time individual tool calls and report the
                               slowest in the session summary. Off by default:
                               it is the only setting that costs anything per
@@ -137,6 +140,63 @@ preview() {
   printf '%s[%s]%s Sure, here is what I found.\n' "$base_start" "$body" "$base_end"
 }
 
+# What the recorded sessions add up to.
+#
+# The history holds timings only, so everything here is arithmetic on six
+# numbers per session. Durations are formatted in the shell rather than in awk
+# because ct_format_duration already exists and should not be reimplemented.
+stats() {
+  ct_load_config
+
+  local file
+  file="$(ct_history_path)"
+  if [ ! -r "$file" ] || [ ! -s "$file" ]; then
+    echo "No sessions recorded yet."
+    if [ "$CT_HISTORY" != "on" ]; then
+      echo "History is switched off. Turn it on with --history=on."
+    else
+      echo "A session is recorded when it ends, so there will be one shortly."
+    fi
+    return 0
+  fi
+
+  local n total turns waited idle failed maxd maxwhen maxturns first last
+  read -r n total turns waited idle failed maxd maxwhen maxturns first last <<EOF
+$(awk -F'\t' '
+  {
+    n++; total += $2; turns += $3; waited += $4; idle += $5; failed += $6
+    if ($2 + 0 > maxd + 0) { maxd = $2; maxwhen = $1; maxturns = $3 }
+    if (first == "") first = $1
+    last = $1
+  }
+  END {
+    if (n == 0) { print "0 0 0 0 0 0 0 - 0 - -"; exit }
+    printf "%d %d %d %d %d %d %d %s %d %s %s\n",
+      n, total, turns, waited, idle, failed, maxd, maxwhen, maxturns, first, last
+  }' "$file")
+EOF
+
+  printf 'claude-timestamp stats%*slast %s session' "$((28 - 21))" "" "$n"
+  [ "$n" -eq 1 ] || printf 's'
+  printf '\n\n'
+
+  echo "  sessions        $n"
+  echo "  total time      $(ct_format_duration "$total")"
+  if [ "$total" -gt 0 ]; then
+    echo "  waiting         $(ct_format_duration "$waited")  ($(( waited * 100 / total ))% of it)"
+  else
+    echo "  waiting         $(ct_format_duration "$waited")"
+  fi
+  [ "$idle" -gt 0 ] && echo "  away            $(ct_format_duration "$idle")"
+  echo "  turns           $turns"
+  [ "$turns" -gt 0 ] && echo "  average wait    $(ct_format_duration "$(( waited / turns ))") per turn"
+  [ "$failed" -gt 0 ] && echo "  failed tools    $failed"
+  echo
+  echo "  longest         ${maxwhen%%T*}  $(ct_format_duration "$maxd") over $maxturns turns"
+  echo "  recorded from   ${first%%T*} to ${last%%T*}"
+  return 0
+}
+
 # A single place to answer "why is it not doing what I configured". Everything
 # here is something that has actually gone wrong: a missing jq, a config that
 # does not parse, or a pinned zone the platform cannot resolve.
@@ -203,6 +263,7 @@ doctor() {
   echo "  date rollover   $CT_DATE_ROLLOVER"
   echo "  summary         $CT_SUMMARY"
   echo "  subagents       $CT_SUBAGENTS"
+  echo "  history         $CT_HISTORY, keeping $CT_HISTORY_LIMIT"
   echo "  tool timing     $CT_TOOL_TIMING$([ "$CT_TOOL_TIMING" = "on" ] && [ -z "${EPOCHREALTIME:-}" ] && echo " (whole seconds only: bash ${BASH_VERSION%%.*} has no EPOCHREALTIME)")"
   echo
 
@@ -270,6 +331,11 @@ SUBAGENTS=$CT_SUBAGENTS
 # Time individual tool calls and name the slowest in the session summary.
 # The only setting that costs anything per tool call rather than per message.
 TOOL_TIMING=$CT_TOOL_TIMING
+
+# Record each finished session, and how many to keep. Timings only: no message
+# text, no tool arguments, no paths.
+HISTORY=$CT_HISTORY
+HISTORY_LIMIT=$CT_HISTORY_LIMIT
 
 # Tell Claude the local time each prompt was sent.
 INJECT_CONTEXT=$CT_INJECT_CONTEXT
@@ -347,6 +413,7 @@ show_config() {
   echo "  Summary         $CT_SUMMARY"
   echo "  Subagents       $CT_SUBAGENTS"
   echo "  Tool timing     $CT_TOOL_TIMING"
+  echo "  History         $CT_HISTORY (keeping $CT_HISTORY_LIMIT)"
   echo "  Inject context  $CT_INJECT_CONTEXT"
   echo
   echo -n "  Preview         "; preview
@@ -507,6 +574,7 @@ main() {
   local interactive=1 action="write" project_scope=0
   local set_tz="" set_display="" set_context="" set_color="" set_elapsed="" set_inject="" set_rollover=""
   local set_slow="" set_slowcolor="" set_idle="" set_summary="" set_subagents="" set_tooltiming=""
+  local set_history="" set_historylimit=""
 
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -524,9 +592,12 @@ main() {
       --summary=*)        set_summary="${1#*=}";   interactive=0 ;;
       --subagents=*)      set_subagents="${1#*=}"; interactive=0 ;;
       --tool-timing=*)    set_tooltiming="${1#*=}"; interactive=0 ;;
+      --history=*)        set_history="${1#*=}"; interactive=0 ;;
+      --history-limit=*)  set_historylimit="${1#*=}"; interactive=0 ;;
       --inject-context=*) set_inject="${1#*=}";  interactive=0 ;;
       --show)             action="show"; interactive=0 ;;
       --doctor)           action="doctor"; interactive=0 ;;
+      --stats)            action="stats"; interactive=0 ;;
       -h|--help)          usage; exit 0 ;;
       *) echo "Unknown argument: $1" >&2; echo >&2; usage >&2; exit 2 ;;
     esac
@@ -535,6 +606,7 @@ main() {
 
   if [ "$action" = "show" ]; then show_config; exit 0; fi
   if [ "$action" = "doctor" ]; then doctor; exit $?; fi
+  if [ "$action" = "stats" ]; then stats; exit $?; fi
   if [ "$interactive" = "1" ]; then wizard; exit 0; fi
 
   # Non-interactive: start from what is already configured so each flag is a
@@ -557,6 +629,8 @@ main() {
   if [ -n "$set_summary" ]; then valid_onoff SUMMARY "$set_summary" || exit 2; CT_SUMMARY="$set_summary"; fi
   if [ -n "$set_subagents" ]; then valid_onoff SUBAGENTS "$set_subagents" || exit 2; CT_SUBAGENTS="$set_subagents"; fi
   if [ -n "$set_tooltiming" ]; then valid_onoff TOOL_TIMING "$set_tooltiming" || exit 2; CT_TOOL_TIMING="$set_tooltiming"; fi
+  if [ -n "$set_history" ]; then valid_onoff HISTORY "$set_history" || exit 2; CT_HISTORY="$set_history"; fi
+  if [ -n "$set_historylimit" ]; then valid_seconds HISTORY_LIMIT "$set_historylimit" || exit 2; CT_HISTORY_LIMIT="$set_historylimit"; fi
 
   if [ "$project_scope" = "1" ]; then
     write_project_config "$set_tz" "$set_display" "$set_context" "$set_color" \

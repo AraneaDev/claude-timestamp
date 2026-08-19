@@ -21,16 +21,35 @@ duration is coloured.
 - **Tells Claude the time.** The model receives the local time each prompt was
   sent, which lets it reason about when things happened. You can switch this
   off and keep the display-only marker.
-- **Summarises the session.** On exit: how long it ran, how many turns, and how
-  much of that you spent waiting. Optionally which tools were slowest.
+- **Summarises the session.** On exit: how long it ran, how many turns, how
+  much of that you spent waiting, and how much you were away. Optionally which
+  tools were slowest and how many calls failed.
 
 ```
-claude-timestamp: session lasted 1h30m over 12 turns, 24m18s of it waiting.
-slowest tools: Bash 41.2s (18 calls), WebFetch 8.1s (1 call), Read 2.0s (37 calls)
+claude-timestamp: session lasted 1h30m over 12 turns, 24m18s of it waiting, 35m away.
+slowest tools: Bash 41.2s (18 calls), WebFetch 8.1s (1 call), Read 2.0s (37 calls). 2 failed
 ```
+
+- **Keeps a running record.** Finished sessions are logged so you can see where
+  the time actually goes.
 
 Display is display only. The marker is drawn as messages render, so it never
 enters the transcript and never reaches the model.
+
+## What the sessions add up to
+
+```bash
+bash "$CLAUDE_PLUGIN_ROOT/hooks/scripts/setup.sh" --stats
+```
+
+![Totals across recorded sessions](assets/stats.png)
+
+Each finished session is appended to `~/.claude/claude-timestamp-history.tsv`,
+and the oldest are dropped once there are more than `HISTORY_LIMIT` of them.
+
+The file holds timings only: six numbers and a date per session. No message
+text, no tool arguments, and no paths, so nothing in it says what you were
+working on. Switch it off entirely with `HISTORY=off`.
 
 ## Requirements
 
@@ -125,6 +144,8 @@ cannot run anything.
 | `SUMMARY` | `on` | Report session totals on exit |
 | `SUBAGENTS` | `on` | Stamp subagent messages as well |
 | `TOOL_TIMING` | `off` | Time individual tool calls and name the slowest |
+| `HISTORY` | `on` | Record each finished session for `--stats` |
+| `HISTORY_LIMIT` | `200` | How many recorded sessions to keep |
 
 `NO_COLOR` disables colour regardless of `COLOR`.
 
@@ -160,15 +181,15 @@ writable. It exits non-zero if any of that fails.
 
 ## How it works
 
-Six hooks, all of them harness-only, so none of this costs model context.
+Seven hooks, all of them harness-only, so none of this costs model context.
 
 | Hook | Job |
 | --- | --- |
 | `SessionStart` | Check `jq`, prune old state, point a new user at `/timestamps` |
 | `UserPromptSubmit` | Record the turn start, tell Claude the local time |
 | `MessageDisplay` | Draw the marker on the first batch of each message |
-| `SessionEnd` | Report the summary, clear the session's state |
-| `PreToolUse` / `PostToolUse` | Time tool calls, only when `TOOL_TIMING=on` |
+| `SessionEnd` | Report the summary, record the session, clear its state |
+| `PreToolUse` / `PostToolUse` / `PostToolUseFailure` | Time tool calls and count failures, only when `TOOL_TIMING=on` |
 
 `MessageDisplay` fires repeatedly as a message streams. Only the first batch is
 stamped, and the rest return nothing at all, which Claude Code treats as "show
@@ -197,7 +218,7 @@ to whole seconds and the call counts carry the signal.
 ## Development
 
 ```bash
-bash tests/run.sh                                    # 215 assertions, no framework
+bash tests/run.sh                                    # 246 assertions, no framework
 shellcheck -S style -e SC1091 hooks/scripts/**/*.sh  # clean
 bash tools/check-docs.sh                             # README against the code
 ```

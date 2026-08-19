@@ -123,6 +123,11 @@ if [ -n "$state_file" ] && [ "$CT_IDLE_AFTER" -gt 0 ] 2>/dev/null; then
     if [ "$gap" -ge "$CT_IDLE_AFTER" ]; then
       divider="$(ct_paint "$CT_COLOR" "-- $(ct_humanize_gap "$gap") later --")
 "
+      # Total the breaks so the summary can separate time you spent waiting on
+      # a reply from time you were not at the keyboard at all.
+      if [ "$CT_SUMMARY" = "on" ]; then
+        printf '%s' "$(( $(ct_read_counter "${state_file}.idle") + gap ))" > "${state_file}.idle"
+      fi
     fi
   fi
   mkdir -p "$(ct_state_dir)"
