@@ -81,31 +81,8 @@ Automated by [release-please](https://github.com/googleapis/release-please) via
 2. release-please keeps a **Release PR** open and up to date, bumping
    `.claude-plugin/plugin.json`, `version.txt` and the release manifest, and
    writing `CHANGELOG.md`, all from those commits.
-3. **The Release PR arrives with no checks on it.** GitHub does not start
-   workflows for events raised by the built-in `GITHUB_TOKEN`, so the pull
-   request release-please opens never triggers CI, and `main` requires those
-   checks to pass. Close and reopen the pull request, which raises the event
-   under your own account and starts them:
-
-   ```bash
-   gh pr close <n> && gh pr reopen <n>
-   ```
-
-   Pushing an empty commit to its branch works too.
-
-   To remove the step entirely, add a `RELEASE_PLEASE_TOKEN` secret. The
-   workflow already prefers it over `GITHUB_TOKEN` when it is present. Create a
-   [fine-grained token](https://github.com/settings/personal-access-tokens/new)
-   scoped to this repository with **Contents: read and write** and **Pull
-   requests: read and write**, then:
-
-   ```bash
-   gh secret set RELEASE_PLEASE_TOKEN --repo AraneaDev/claude-timestamp
-   ```
-
-   A fine-grained token expires. When it does, release-please stops opening
-   Release PRs and says so in the workflow log, so note the expiry date
-   somewhere. A GitHub App token avoids that at the cost of more setup.
+3. CI runs on the Release PR by itself, because the workflow opens it with the
+   `RELEASE_PLEASE_TOKEN` secret. Review it and merge.
 4. Merging that PR creates the `vX.Y.Z` tag and the GitHub Release, then the
    same workflow runs the tests, checks the docs, and asserts the tag matches
    the version it just released.
@@ -119,6 +96,34 @@ second tag in that form alongside this one.
 Below `1.0.0` a feature bumps the patch number and a breaking change bumps the
 minor one, so the shape of the configuration can settle without spending major
 versions on it.
+
+### If a Release PR turns up with no checks
+
+That means the workflow fell back to the built-in `GITHUB_TOKEN`, which is what
+happens when `RELEASE_PLEASE_TOKEN` is missing or has expired. GitHub does not
+start workflows for events that token raises, and `main` requires those checks,
+so the pull request cannot be merged as it stands.
+
+Closing and reopening it raises the event under your own account and starts the
+checks:
+
+```bash
+gh pr close <n> && gh pr reopen <n>
+```
+
+To fix it properly, replace the secret. Create a
+[fine-grained token](https://github.com/settings/personal-access-tokens/new)
+scoped to this repository with **Contents: read and write** and **Pull
+requests: read and write**, then:
+
+```bash
+gh secret set RELEASE_PLEASE_TOKEN --repo AraneaDev/claude-timestamp
+```
+
+Fine-grained tokens expire, and this is how that expiry shows up. A GitHub App
+token avoids it at the cost of more setup.
+
+### Rules
 
 Do not hand-edit versions or `CHANGELOG.md`, and do not hand-create tags. All
 of it is managed by release-please. If a release needs extra narrative, edit
