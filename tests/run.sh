@@ -115,6 +115,30 @@ CT_TZ="UTC"
 case "$(ct_now 12h)" in 0*) fail "12h preset trims the leading zero" "no leading zero" "$(ct_now 12h)" ;; *) pass "12h preset trims the leading zero" ;; esac
 
 echo
+echo "timezone capability"
+
+: > "$CLAUDE_TIMESTAMP_CONFIG"
+ct_load_config
+CT_TZ="Asia/Tokyo"
+
+# CT_TZ_SUPPORTED is read by the sourced library, which shellcheck cannot see.
+# shellcheck disable=SC2034
+# Simulate a platform without a timezone database (Git Bash on Windows) by
+# priming the memoised probe, and assert the pinned zone is ignored rather
+# than rendered as UTC.
+CT_TZ_SUPPORTED="no"
+is "an unhonourable zone falls back to local time" "$(date '+%H:%M')" "$(ct_now short)"
+if ct_tz_unhonoured; then pass "a pinned but unsupported zone is reported"; else fail "a pinned but unsupported zone is reported" "true" "false"; fi
+
+# shellcheck disable=SC2034  # read by the sourced library
+CT_TZ_SUPPORTED="yes"
+is "a supported zone is applied" "$(TZ=Asia/Tokyo date '+%H:%M')" "$(ct_now short)"
+
+CT_TZ=""
+if ct_tz_unhonoured; then fail "no pinned zone is never reported as unhonoured" "false" "true"; else pass "no pinned zone is never reported as unhonoured"; fi
+unset CT_TZ_SUPPORTED
+
+echo
 echo "elapsed formatting"
 
 is "seconds only"        "+45s"    "$(ct_format_elapsed 45)"
@@ -167,21 +191,39 @@ if command -v jq >/dev/null 2>&1; then
     fail "user-prompt-submit records the turn start" "state file exists" "missing"
   fi
 
-  # A turn that started 134 seconds ago should render as +2m14s.
-  printf '%s' "$(( $(date +%s) - 134 ))" > "$(ct_state_dir)/test-session"
+  # An hour-scale offset is used deliberately: +1h03m stays stable for a whole
+  # minute, so the assertion cannot flake when the hook reads a second after
+  # the state file is written. A 134s offset did exactly that on Windows.
+  printf '%s' "$(( $(date +%s) - 3780 ))" > "$(ct_state_dir)/test-session"
   out="$(printf '{"session_id":"test-session","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')"
-  contains "message-display renders elapsed time" "+2m14s" "$out"
+  contains "message-display renders elapsed time" "+1h03m" "$out"
 
   printf 'ELAPSED=off\n' > "$CLAUDE_TIMESTAMP_CONFIG"
   out="$(printf '{"session_id":"test-session","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')"
   case "$out" in *"+"*) fail "ELAPSED=off hides the duration" "no + marker" "$out" ;; *) pass "ELAPSED=off hides the duration" ;; esac
 
+  # Date rollover: a stale date on file means the session crossed midnight.
+  printf 'COLOR=none\nELAPSED=off\n' > "$CLAUDE_TIMESTAMP_CONFIG"
+  printf '2000-01-01' > "$(ct_state_dir)/test-session.date"
+  out="$(printf '{"session_id":"test-session","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')"
+  contains "date rollover adds the date after midnight" "$(date '+%b %d')" "$out"
+
+  # The hook just recorded today, so a second message must not repeat it.
+  out="$(printf '{"session_id":"test-session","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')"
+  is "date is not repeated on the same day" "[$(date '+%H:%M:%S')] x" "$out"
+
+  printf 'COLOR=none\nELAPSED=off\nDATE_ROLLOVER=off\n' > "$CLAUDE_TIMESTAMP_CONFIG"
+  printf '2000-01-01' > "$(ct_state_dir)/test-session.date"
+  out="$(printf '{"session_id":"test-session","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')"
+  is "DATE_ROLLOVER=off suppresses the date" "[$(date '+%H:%M:%S')] x" "$out"
+
   printf 'INJECT_CONTEXT=false\n' > "$CLAUDE_TIMESTAMP_CONFIG"
   out="$(printf '{"session_id":"test-session","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh")"
   is "INJECT_CONTEXT=false injects nothing" "" "$out"
 
-  # ELAPSED=off so this asserts only on the time rendering itself.
-  printf 'COLOR=none\nDISPLAY_FORMAT=short\nTZ=UTC\nELAPSED=off\n' > "$CLAUDE_TIMESTAMP_CONFIG"
+  # ELAPSED and DATE_ROLLOVER off so this asserts only on the time rendering
+  # itself, independent of state left behind by earlier cases.
+  printf 'COLOR=none\nDISPLAY_FORMAT=short\nTZ=UTC\nELAPSED=off\nDATE_ROLLOVER=off\n' > "$CLAUDE_TIMESTAMP_CONFIG"
   out="$(printf '{"session_id":"test-session","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')"
   expected="[$(TZ=UTC date '+%H:%M')] x"
   is "config drives the rendered marker end to end" "$expected" "$out"
@@ -214,6 +256,10 @@ refutes "rejects a non on/off elapsed value" bash "$SCRIPTS/setup.sh" --elapsed=
 refutes "rejects an unknown flag" bash "$SCRIPTS/setup.sh" --nonsense
 contains "--show prints the config path" "$CLAUDE_TIMESTAMP_CONFIG" "$(bash "$SCRIPTS/setup.sh" --show)"
 contains "--help lists the flags" "--elapsed" "$(bash "$SCRIPTS/setup.sh" --help)"
+bash "$SCRIPTS/setup.sh" --date-rollover=off >/dev/null
+ct_load_config
+is "--date-rollover is accepted" "off" "$CT_DATE_ROLLOVER"
+refutes "rejects a non on/off date-rollover value" bash "$SCRIPTS/setup.sh" --date-rollover=sometimes
 
 echo
 echo "----"

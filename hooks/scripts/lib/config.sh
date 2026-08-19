@@ -29,6 +29,7 @@ ct_load_config() {
   CT_CONTEXT_FORMAT="24h"
   CT_COLOR="dim"
   CT_ELAPSED="on"
+  CT_DATE_ROLLOVER="on"
   CT_INJECT_CONTEXT="true"
 
   local file line key value
@@ -56,6 +57,7 @@ ct_load_config() {
       CONTEXT_FORMAT) CT_CONTEXT_FORMAT="$value" ;;
       COLOR)          CT_COLOR="$value" ;;
       ELAPSED)        CT_ELAPSED="$value" ;;
+      DATE_ROLLOVER)  CT_DATE_ROLLOVER="$value" ;;
       INJECT_CONTEXT) CT_INJECT_CONTEXT="$value" ;;
     esac
   done < "$file"
@@ -73,13 +75,37 @@ ct_expand_format() {
   esac
 }
 
+# Whether this platform can resolve IANA zone names at all. Git Bash on Windows
+# ships without a zoneinfo database, and date then silently falls back to UTC
+# for any name it cannot resolve -- so a pinned zone renders the wrong time
+# rather than failing loudly. Asia/Tokyo is the probe because it is never at
+# UTC, which makes the check independent of whichever zone the user picked.
+# Memoised, so a process pays for at most one extra `date` call.
+ct_tz_supported() {
+  if [ -z "${CT_TZ_SUPPORTED:-}" ]; then
+    if [ "$(TZ=Asia/Tokyo date +%z 2>/dev/null)" = "+0000" ]; then
+      CT_TZ_SUPPORTED=no
+    else
+      CT_TZ_SUPPORTED=yes
+    fi
+  fi
+  [ "$CT_TZ_SUPPORTED" = "yes" ]
+}
+
+# True when a zone is pinned that this platform cannot honour.
+ct_tz_unhonoured() {
+  [ -n "${CT_TZ:-}" ] && ! ct_tz_supported
+}
+
 # Render the current time in the given format. CT_TZ is applied per-call rather
 # than exported, so one process can render display and context in one timezone
 # without leaking TZ into anything else it runs.
 ct_now() {
   local fmt out
   fmt="$(ct_expand_format "$1")"
-  if [ -n "${CT_TZ:-}" ]; then
+  # A pinned zone this platform cannot resolve is ignored: local time is merely
+  # not what was asked for, whereas UTC-pretending-to-be-Tokyo is wrong.
+  if [ -n "${CT_TZ:-}" ] && ct_tz_supported; then
     out="$(TZ="$CT_TZ" date "+$fmt")"
   else
     out="$(date "+$fmt")"
@@ -91,7 +117,7 @@ ct_now() {
 
 # Current timezone abbreviation (CEST, JST...) for the model-facing string.
 ct_zone() {
-  if [ -n "${CT_TZ:-}" ]; then TZ="$CT_TZ" date '+%Z'; else date '+%Z'; fi
+  if [ -n "${CT_TZ:-}" ] && ct_tz_supported; then TZ="$CT_TZ" date '+%Z'; else date '+%Z'; fi
 }
 
 ct_color_start() {

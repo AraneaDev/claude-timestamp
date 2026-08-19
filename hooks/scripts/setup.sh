@@ -35,6 +35,7 @@ Flags
   --color=COLOR               none | dim | gray | cyan | blue | green
                               | yellow | magenta | red.
   --elapsed=on|off            Show how long the turn took.
+  --date-rollover=on|off      Show the date when a session crosses midnight.
   --inject-context=true|false Tell Claude the time each prompt was sent.
   --config=PATH               Write somewhere other than the default file.
   -h, --help                  This text.
@@ -56,10 +57,16 @@ valid_tz() {
   case "$tz" in
     */../*|/*) echo "Timezone must be an IANA name like Europe/Amsterdam." >&2; return 1 ;;
   esac
-  # No zoneinfo database to check against (some minimal containers): accept the
-  # value rather than refusing to configure a machine we cannot inspect.
-  [ -d "$ZONEINFO" ] || return 0
-  if [ ! -f "$ZONEINFO/$tz" ]; then
+  # Checked functionally rather than by looking for a zoneinfo file, because a
+  # platform without the database (Git Bash on Windows) does not fail on an
+  # unknown zone -- it silently renders UTC. Writing a pinned zone there would
+  # produce a config that lies.
+  if ! ct_tz_supported; then
+    echo "This system has no timezone database, so a pinned zone would silently render as UTC." >&2
+    echo "Use --tz=local to follow the machine's own clock instead." >&2
+    return 1
+  fi
+  if [ -d "$ZONEINFO" ] && [ ! -f "$ZONEINFO/$tz" ]; then
     echo "Unknown timezone '$tz'. Expected an IANA name such as Europe/Amsterdam or Asia/Tokyo." >&2
     return 1
   fi
@@ -115,6 +122,9 @@ COLOR=$CT_COLOR
 # Show how long the turn took, e.g. [14:03 +2m14s].
 ELAPSED=$CT_ELAPSED
 
+# Show the date on the first message after the session crosses midnight.
+DATE_ROLLOVER=$CT_DATE_ROLLOVER
+
 # Tell Claude the local time each prompt was sent.
 INJECT_CONTEXT=$CT_INJECT_CONTEXT
 CONF
@@ -132,6 +142,7 @@ show_config() {
   echo "  Context format  $CT_CONTEXT_FORMAT"
   echo "  Color           $CT_COLOR"
   echo "  Elapsed         $CT_ELAPSED"
+  echo "  Date rollover   $CT_DATE_ROLLOVER"
   echo "  Inject context  $CT_INJECT_CONTEXT"
   echo
   echo -n "  Preview         "; preview
@@ -248,7 +259,7 @@ wizard() {
 
 main() {
   local interactive=1 action="write"
-  local set_tz="" set_display="" set_context="" set_color="" set_elapsed="" set_inject=""
+  local set_tz="" set_display="" set_context="" set_color="" set_elapsed="" set_inject="" set_rollover=""
 
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -258,6 +269,7 @@ main() {
       --context=*)        set_context="${1#*=}"; interactive=0 ;;
       --color=*)          set_color="${1#*=}";   interactive=0 ;;
       --elapsed=*)        set_elapsed="${1#*=}"; interactive=0 ;;
+      --date-rollover=*)  set_rollover="${1#*=}"; interactive=0 ;;
       --inject-context=*) set_inject="${1#*=}";  interactive=0 ;;
       --show)             action="show"; interactive=0 ;;
       -h|--help)          usage; exit 0 ;;
@@ -282,6 +294,7 @@ main() {
   if [ -n "$set_color" ];   then valid_color "$set_color" || exit 2; CT_COLOR="$set_color"; fi
   if [ -n "$set_elapsed" ]; then valid_onoff ELAPSED "$set_elapsed" || exit 2; CT_ELAPSED="$set_elapsed"; fi
   if [ -n "$set_inject" ];  then valid_bool INJECT_CONTEXT "$set_inject" || exit 2; CT_INJECT_CONTEXT="$set_inject"; fi
+  if [ -n "$set_rollover" ]; then valid_onoff DATE_ROLLOVER "$set_rollover" || exit 2; CT_DATE_ROLLOVER="$set_rollover"; fi
 
   write_config
   echo -n "Preview: "; preview

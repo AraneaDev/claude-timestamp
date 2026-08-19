@@ -26,6 +26,14 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/config.sh"
 
 ct_prune_state
 
+# A zone was pinned that this platform cannot resolve. The hooks fall back to
+# local time rather than rendering UTC, but silently showing a different zone
+# than the one configured is worth saying out loud, once.
+ct_load_config
+if ct_tz_unhonoured; then
+  jq -n --arg tz "$CT_TZ" '{systemMessage: ("claude-timestamp: this system has no timezone database, so " + $tz + " cannot be applied. Showing local time instead. Run /timestamps and choose \"local\" to silence this.")}'
+fi
+
 # First run: there is no README in this repo by design, so the config command
 # has to introduce itself or nobody will ever know it exists.
 if [ ! -r "$(ct_config_path)" ]; then

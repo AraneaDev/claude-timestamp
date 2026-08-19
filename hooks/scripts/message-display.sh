@@ -29,7 +29,9 @@ ct_load_config
 
 marker="$(ct_now "$CT_DISPLAY_FORMAT")"
 
-if [ "$CT_ELAPSED" = "on" ] && state_file="$(ct_state_file "$session_id")" && [ -r "$state_file" ]; then
+state_file="$(ct_state_file "$session_id")" || state_file=""
+
+if [ "$CT_ELAPSED" = "on" ] && [ -n "$state_file" ] && [ -r "$state_file" ]; then
   started="$(cat "$state_file")"
   case "$started" in
     ''|*[!0-9]*) ;;                       # unreadable stamp: just skip elapsed
@@ -40,6 +42,21 @@ if [ "$CT_ELAPSED" = "on" ] && state_file="$(ct_state_file "$session_id")" && [ 
       [ "$elapsed" -ge 0 ] && marker="$marker $(ct_format_elapsed "$elapsed")"
       ;;
   esac
+fi
+
+# A session that crosses midnight would otherwise show [00:03] with no hint
+# that the day changed, which quietly breaks using these markers to reference
+# earlier parts of a conversation. Show the date once, on the first message
+# after the rollover.
+if [ "$CT_DATE_ROLLOVER" = "on" ] && [ -n "${state_file:-}" ]; then
+  today="$(ct_now '%Y-%m-%d')"
+  date_file="${state_file}.date"
+  if [ -r "$date_file" ]; then
+    previous="$(cat "$date_file")"
+    [ -n "$previous" ] && [ "$previous" != "$today" ] && marker="$(ct_now '%b %d') $marker"
+  fi
+  mkdir -p "$(ct_state_dir)"
+  printf '%s' "$today" > "$date_file"
 fi
 
 marker="$(ct_color_start "$CT_COLOR")[$marker]$(ct_color_end "$CT_COLOR")"
