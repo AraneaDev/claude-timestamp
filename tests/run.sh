@@ -649,13 +649,25 @@ echo
 echo "the wizard"
 
 fresh
+# The timezone answer depends on the platform. Where there is no timezone
+# database the wizard is right to refuse a pinned zone, and feeding it one
+# would make it re-ask and swallow every later answer, which is exactly how
+# this test first failed on Windows.
+if ct_tz_supported; then
+  tz_answer="Asia/Tokyo"
+  tz_expected="Asia/Tokyo"
+else
+  tz_answer="local"
+  tz_expected=""
+fi
+
 # Answers in prompt order: timezone, display format, elapsed, slow after, idle
 # after, summary, colour, tell-Claude, write. Tool timing and context format
 # are skipped because summary and tell-Claude are answered off and false.
-printf 'Asia/Tokyo\nshort\non\n30\n0\noff\ncyan\nfalse\ny\n' \
+printf '%s\nshort\non\n30\n0\noff\ncyan\nfalse\ny\n' "$tz_answer" \
   | bash "$SCRIPTS/setup.sh" >/dev/null 2>&1
 ct_load_config
-is "the wizard writes the timezone"   "Asia/Tokyo" "$CT_TZ"
+is "the wizard writes the timezone"   "$tz_expected" "$CT_TZ"
 is "the wizard writes the format"     "short"      "$CT_DISPLAY_FORMAT"
 is "the wizard writes the threshold"  "30"         "$CT_SLOW_AFTER"
 is "the wizard writes the colour"     "cyan"       "$CT_COLOR"
@@ -670,7 +682,7 @@ is "answering no writes nothing" "green" "$CT_COLOR"
 
 # Input running out must not leave the wizard asking forever.
 fresh
-if timeout 20 bash -c "printf 'Asia/Tokyo\\n' | bash '$SCRIPTS/setup.sh' >/dev/null 2>&1"; then
+if timeout 20 bash -c "printf 'local\\n' | bash '$SCRIPTS/setup.sh' >/dev/null 2>&1"; then
   pass "the wizard finishes when input runs out"
 else
   status=$?
