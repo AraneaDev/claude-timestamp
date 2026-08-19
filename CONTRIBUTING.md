@@ -91,9 +91,21 @@ Automated by [release-please](https://github.com/googleapis/release-please) via
    gh pr close <n> && gh pr reopen <n>
    ```
 
-   Pushing an empty commit to its branch works too. To avoid the step
-   entirely, add a personal access token as a `RELEASE_PLEASE_TOKEN` secret
-   and pass it to the action instead of `GITHUB_TOKEN`.
+   Pushing an empty commit to its branch works too.
+
+   To remove the step entirely, add a `RELEASE_PLEASE_TOKEN` secret. The
+   workflow already prefers it over `GITHUB_TOKEN` when it is present. Create a
+   [fine-grained token](https://github.com/settings/personal-access-tokens/new)
+   scoped to this repository with **Contents: read and write** and **Pull
+   requests: read and write**, then:
+
+   ```bash
+   gh secret set RELEASE_PLEASE_TOKEN --repo AraneaDev/claude-timestamp
+   ```
+
+   A fine-grained token expires. When it does, release-please stops opening
+   Release PRs and says so in the workflow log, so note the expiry date
+   somewhere. A GitHub App token avoids that at the cost of more setup.
 4. Merging that PR creates the `vX.Y.Z` tag and the GitHub Release, then the
    same workflow runs the tests, checks the docs, and asserts the tag matches
    the version it just released.

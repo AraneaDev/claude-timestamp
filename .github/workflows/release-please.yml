@@ -16,11 +16,20 @@ jobs:
       # Opens and keeps a Release PR up to date from the conventional commits on
       # main. Merging that PR creates the vX.Y.Z tag and the GitHub Release,
       # and sets release_created=true.
+      #
+      # RELEASE_PLEASE_TOKEN is used when it exists. GitHub does not start
+      # workflows for events raised by the built-in GITHUB_TOKEN, so a Release
+      # PR opened with it arrives with no checks on it, and main requires those
+      # checks before anything can be merged. A personal access token raises
+      # the event as a real account, so CI runs on the Release PR by itself.
+      #
+      # Without the secret this still works; the Release PR then has to be
+      # closed and reopened once to start its checks. See CONTRIBUTING.md.
       - name: Run release-please
         id: release
         uses: googleapis/release-please-action@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
