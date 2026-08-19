@@ -36,6 +36,22 @@ refutes() {
   if "$@" >/dev/null 2>&1; then fail "$label" "non-zero exit" "exit 0"; else pass "$label"; fi
 }
 
+# Assert a number is within a tolerance of the expected one. Used for values
+# derived from the wall clock, where a test that pins an exact second races
+# the code it is testing on a slow runner. The tolerance is chosen to still
+# fail the bug being guarded against, not merely to stop the test complaining.
+is_near() {
+  local label="$1" expected="$2" actual="$3" tolerance="${4:-2}" diff
+  case "$actual" in ''|*[!0-9-]*) fail "$label" "$expected (+/-$tolerance)" "$actual"; return ;; esac
+  diff=$((actual - expected))
+  [ "$diff" -lt 0 ] && diff=$(( -diff ))
+  if [ "$diff" -le "$tolerance" ]; then
+    pass "$label"
+  else
+    fail "$label" "$expected (+/-$tolerance)" "$actual"
+  fi
+}
+
 # Assert a substring is absent. Used where recomputing a timestamp to compare
 # against would race with the clock.
 lacks() {
@@ -344,7 +360,9 @@ if command -v jq >/dev/null 2>&1; then
   printf '{"session_id":"acct","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" >/dev/null
   printf '%s' "$(( $(date +%s) - 25 ))" > "$base"
   printf '{"session_id":"acct","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" >/dev/null
-  is "messages in one turn are not double-counted" "25" "$(ct_read_counter "$base.wait")"
+  # Double-counting would give roughly 10+25=35, so a two-second tolerance
+  # still fails the bug while surviving a second of clock drift.
+  is_near "messages in one turn are not double-counted" 25 "$(ct_read_counter "$base.wait")" 2
   is "extra messages do not add turns" "1" "$(ct_read_counter "$base.turns")"
 
   # A second prompt starts a fresh turn and its own waiting budget.
@@ -352,7 +370,7 @@ if command -v jq >/dev/null 2>&1; then
   is "a second prompt counts a second turn" "2" "$(ct_read_counter "$base.turns")"
   printf '%s' "$(( $(date +%s) - 5 ))" > "$base"
   printf '{"session_id":"acct","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" >/dev/null
-  is "waiting accumulates across turns" "30" "$(ct_read_counter "$base.wait")"
+  is_near "waiting accumulates across turns" 30 "$(ct_read_counter "$base.wait")" 3
   ct_clear_state "acct"
 
   echo
