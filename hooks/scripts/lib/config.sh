@@ -109,6 +109,9 @@ _ct_read_config_file() {
   done < "$file"
 }
 
+# The CT_* variables set here are this library's public interface -- every
+# consumer is a separate file, so shellcheck cannot see them being read.
+# shellcheck disable=SC2034
 ct_load_config() {
   CT_TZ=""                    # empty = machine local time
   CT_DISPLAY_FORMAT="24h"     # preset name or raw strftime
