@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    # macOS matters here: the hooks call `date`, and BSD date rejects some GNU
+    # format flags. A Linux-only run would not catch that.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install jq
+        run: |
+          if command -v jq >/dev/null 2>&1; then
+            echo "jq $(jq --version) already present"
+          elif [ "$RUNNER_OS" = "macOS" ]; then
+            brew install jq
+          else
+            sudo apt-get update && sudo apt-get install -y jq
+          fi
+
+      - name: Run tests
+        run: bash tests/run.sh
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: Syntax check
+        run: |
+          for f in hooks/scripts/*.sh hooks/scripts/lib/*.sh tests/run.sh; do
+            bash -n "$f"
+          done
+
+      - name: shellcheck
+        # SC1091 is excluded because every hook resolves its library path at
+        # runtime, which shellcheck cannot follow statically.
+        run: shellcheck -S style -e SC1091 hooks/scripts/*.sh hooks/scripts/lib/*.sh tests/run.sh
+
+  manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate JSON
+        run: |
+          for f in .claude-plugin/plugin.json .claude-plugin/marketplace.json hooks/hooks.json; do
+            jq -e . "$f" > /dev/null && echo "$f ok"
+          done
+
+      - name: Hook commands point at files that exist
+        # Guards the failure mode a rename introduces: hooks.json still parses
+        # but names a script that is no longer there, and the plugin silently
+        # does nothing.
+        run: |
+          status=0
+          while read -r script; do
+            path="${script#\$CLAUDE_PLUGIN_ROOT/}"
+            if [ -f "$path" ]; then
+              echo "ok   $path"
+            else
+              echo "MISSING $path"
+              status=1
+            fi
+          done < <(jq -r '.hooks[][].hooks[].command | scan("\\$CLAUDE_PLUGIN_ROOT/[^\"]+")' hooks/hooks.json)
+          exit $status
+
+      - name: Plugin name matches the marketplace entry
+        run: |
+          plugin=$(jq -r .name .claude-plugin/plugin.json)
+          listed=$(jq -r '.plugins[0].name' .claude-plugin/marketplace.json)
+          echo "plugin.json: $plugin / marketplace.json: $listed"
+          [ "$plugin" = "$listed" ]

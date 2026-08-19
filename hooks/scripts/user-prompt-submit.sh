@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# UserPromptSubmit hook -- model-facing.
+#
+# Tells Claude the local time each prompt was sent. Claude Code wraps the
+# string in a <system-reminder>, so the model reads it as passive metadata and
+# never as part of what the user typed. The system prompt already carries
+# today's date, so this sends time + zone only -- no redundant date, fewer
+# tokens.
+#
+# This hook also stamps the start of the turn for the elapsed-time marker that
+# message-display.sh renders. That happens even when context injection is off,
+# because the two settings are independent: display-only users still want to
+# see how long a turn took.
+#
+# Times come from `date`, never jq's `now|strftime`, which always renders UTC.
+set -euo pipefail
+
+# No jq: add no context rather than failing the prompt.
+command -v jq >/dev/null 2>&1 || exit 0
+
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/config.sh"
+ct_load_config
+
+input="$(cat)"
+
+if [ "$CT_ELAPSED" = "on" ]; then
+  session_id="$(printf '%s' "$input" | jq -r '.session_id // empty')"
+  if state_file="$(ct_state_file "$session_id")"; then
+    mkdir -p "$(ct_state_dir)"
+    date +%s > "$state_file"
+  fi
+fi
+
+[ "$CT_INJECT_CONTEXT" = "false" ] && exit 0
+
+# The zone is always appended, whatever the chosen format, so the model can
+# still resolve the offset when the format itself omits it.
+ts="$(ct_now "$CT_CONTEXT_FORMAT") $(ct_zone)"
+
+jq -n --arg ts "$ts" '{
+  hookSpecificOutput: {
+    hookEventName: "UserPromptSubmit",
+    additionalContext: ("Message sent at local time " + $ts)
+  }
+}'

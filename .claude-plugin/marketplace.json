@@ -1,0 +1,15 @@
+{
+  "name": "aranea-claude-tools",
+  "owner": {
+    "name": "AraneaDev",
+    "url": "https://github.com/AraneaDev"
+  },
+  "description": "Small, focused Claude Code plugins.",
+  "plugins": [
+    {
+      "name": "claude-timestamp",
+      "source": "./",
+      "description": "Shows the local time and turn duration on every message, and tells Claude when each prompt was sent."
+    }
+  ]
+}
