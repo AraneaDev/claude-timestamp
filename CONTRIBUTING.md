@@ -94,12 +94,15 @@ Automated by [release-please](https://github.com/googleapis/release-please) via
    Pushing an empty commit to its branch works too. To avoid the step
    entirely, add a personal access token as a `RELEASE_PLEASE_TOKEN` secret
    and pass it to the action instead of `GITHUB_TOKEN`.
-4. Merging that PR creates the `claude-timestamp--vX.Y.Z` tag and the GitHub
-   Release, then the same workflow runs the tests, checks the docs, and
-   asserts the tag matches the version it just released.
+4. Merging that PR creates the `vX.Y.Z` tag and the GitHub Release, then the
+   same workflow runs the tests, checks the docs, and asserts the tag matches
+   the version it just released.
 
-The tag carries the plugin name because that is the form Claude Code expects of
-a plugin release, rather than release-please's usual bare `vX.Y.Z`.
+Tags are plain `vX.Y.Z`. Claude Code only looks for `{name}--v*` tags when it
+resolves a plugin dependency pinned to a version range, and falls back to
+copying the default branch when it finds none, so a normal install is
+unaffected. If that resolution is ever wanted, the release job can push a
+second tag in that form alongside this one.
 
 Below `1.0.0` a feature bumps the patch number and a breaking change bumps the
 minor one, so the shape of the configuration can settle without spending major
