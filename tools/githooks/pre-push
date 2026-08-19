@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Refuse a direct push to a protected branch.
+#
+# GitHub Free cannot protect a branch on a private repository, so this enforces
+# the same rule from the client side. It is a guard rail rather than a control:
+# anyone can pass --no-verify, and a different clone will not have it until
+# core.hooksPath is set there too.
+#
+# Enable in a clone with:
+#   git config core.hooksPath tools/githooks
+#
+# Bypass once, deliberately:
+#   git push --no-verify
+set -euo pipefail
+
+PROTECTED="main"
+
+while read -r _local_ref _local_sha remote_ref _remote_sha; do
+  branch="${remote_ref#refs/heads/}"
+  if [ "$branch" = "$PROTECTED" ]; then
+    cat >&2 <<MSG
+
+  Refusing to push straight to '$PROTECTED'.
+
+  This repository takes changes through pull requests. Try:
+
+    git switch -c some-branch-name
+    git push -u origin some-branch-name
+    gh pr create --fill
+
+  If you really meant it: git push --no-verify
+
+MSG
+    exit 1
+  fi
+done
+
+exit 0
