@@ -46,6 +46,19 @@ else
   note "README and the suite agree on $actual assertions"
 fi
 
+echo "version agreement"
+# Three files carry the version, and release-please updates all of them. If
+# they ever disagree, an install and a release would claim different things.
+plugin_version="$(jq -r .version .claude-plugin/plugin.json)"
+file_version="$(tr -d '[:space:]' < version.txt)"
+manifest_version="$(jq -r '."."' .release-please-manifest.json)"
+if [ "$plugin_version" = "$file_version" ] && [ "$plugin_version" = "$manifest_version" ]; then
+  note "plugin.json, version.txt and the release manifest all say $plugin_version"
+else
+  note "disagreement: plugin.json=$plugin_version version.txt=$file_version manifest=$manifest_version"
+  status=1
+fi
+
 echo "linked images"
 while read -r img; do
   if [ -f "$img" ]; then

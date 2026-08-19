@@ -254,6 +254,23 @@ therefore needs a working login and spends tokens, and its durations differ
 every run because they are real measurements. Python dependencies install into
 a virtualenv beside the script.
 
+## Releases
+
+Versioned with [semantic versioning](https://semver.org) and released by
+[release-please](https://github.com/googleapis/release-please), which reads the
+commit messages. Commits follow
+[conventional commits](https://www.conventionalcommits.org): `feat:`, `fix:`,
+`docs:`, `test:`, `ci:`, `refactor:`, `chore:`.
+
+While the version is below `1.0.0`, a feature bumps the patch number and a
+breaking change bumps the minor one, so the shape of the configuration can
+still settle without spending major versions on it.
+
+Merging a release pull request tags the release as
+`claude-timestamp--v<version>`, which is the form Claude Code expects for a
+plugin, and updates `plugin.json`, `version.txt`, the release manifest and this
+changelog together. `tools/check-docs.sh` fails if those ever disagree.
+
 ## License
 
 MIT
