@@ -65,9 +65,10 @@ valid_tz() {
   local tz="$1"
   [ "$tz" = "local" ] && return 0
   [ -z "$tz" ] && return 0
-  case "$tz" in
-    */../*|/*) echo "Timezone must be an IANA name like Europe/Amsterdam." >&2; return 1 ;;
-  esac
+  if ! ct_is_valid_tz "$tz"; then
+    echo "Timezone must be an IANA name like Europe/Amsterdam." >&2
+    return 1
+  fi
   # Checked functionally rather than by looking for a zoneinfo file, because a
   # platform without the database (Git Bash on Windows) does not fail on an
   # unknown zone -- it silently renders UTC. Writing a pinned zone there would
@@ -86,25 +87,27 @@ valid_tz() {
 }
 
 valid_color() {
-  case "$1" in
-    none|off|dim|gray|grey|red|green|yellow|blue|magenta|cyan) return 0 ;;
-    *) echo "Unknown color '$1'. Pick: none dim gray red green yellow blue magenta cyan." >&2; return 1 ;;
-  esac
+  ct_is_valid_color "$1" && return 0
+  echo "Unknown color '$1'. Pick: none dim gray red green yellow blue magenta cyan." >&2
+  return 1
 }
 
 valid_seconds() {
-  case "$2" in
-    ''|*[!0-9]*) echo "$1 must be a whole number of seconds, got '$2'." >&2; return 1 ;;
-    *) return 0 ;;
-  esac
+  ct_is_seconds "$2" && return 0
+  echo "$1 must be a whole number of seconds, got '$2'." >&2
+  return 1
 }
 
 valid_onoff() {
-  case "$2" in on|off) return 0 ;; *) echo "$1 must be 'on' or 'off', got '$2'." >&2; return 1 ;; esac
+  ct_is_onoff "$2" && return 0
+  echo "$1 must be 'on' or 'off', got '$2'." >&2
+  return 1
 }
 
 valid_bool() {
-  case "$2" in true|false) return 0 ;; *) echo "$1 must be 'true' or 'false', got '$2'." >&2; return 1 ;; esac
+  ct_is_bool "$2" && return 0
+  echo "$1 must be 'true' or 'false', got '$2'." >&2
+  return 1
 }
 
 # --- rendering --------------------------------------------------------------
@@ -162,6 +165,11 @@ doctor() {
   echo
 
   echo "Configuration"
+  if [ -n "${CT_CONFIG_PROBLEMS:-}" ]; then
+    echo "  PROBLEMS"
+    printf '%s\n' "$CT_CONFIG_PROBLEMS" | sed 's/^  /    /'
+    problems=$((problems + 1))
+  fi
   local file
   file="$(ct_config_path)"
   if [ -r "$file" ]; then
@@ -429,7 +437,7 @@ wizard() {
   echo
   answer="$(ask "Write this configuration? (y/n)" "y")"
   case "$answer" in
-    y|Y|yes) write_config; echo "Restart Claude Code, or start a new session, to pick it up." ;;
+    y|Y|yes) write_config; echo "This takes effect on your next message. No restart needed." ;;
     *) echo "Nothing written." ;;
   esac
 }
@@ -492,6 +500,7 @@ main() {
 
   write_config
   echo -n "Preview: "; preview
+  echo "Takes effect on the next message."
 }
 
 main "$@"

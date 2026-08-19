@@ -30,6 +30,15 @@ ct_prune_state
 # local time rather than rendering UTC, but silently showing a different zone
 # than the one configured is worth saying out loud, once.
 ct_load_config
+
+# A typo in the config file would otherwise do nothing visible: the value is
+# replaced by its default and the plugin carries on. Say it once, at the only
+# moment that is not in the middle of a conversation.
+if [ -n "${CT_CONFIG_PROBLEMS:-}" ]; then
+  jq -n --arg problems "$CT_CONFIG_PROBLEMS" \
+    '{systemMessage: ("claude-timestamp: some settings could not be used.\n" + $problems + "\nRun /timestamps to fix them.")}'
+fi
+
 if ct_tz_unhonoured; then
   jq -n --arg tz "$CT_TZ" '{systemMessage: ("claude-timestamp: this system has no timezone database, so " + $tz + " cannot be applied. Showing local time instead. Run /timestamps and choose \"local\" to silence this.")}'
 fi

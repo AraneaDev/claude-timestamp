@@ -24,6 +24,11 @@ duration is coloured.
 - **Summarises the session.** On exit: how long it ran, how many turns, and how
   much of that you spent waiting. Optionally which tools were slowest.
 
+```
+claude-timestamp: session lasted 1h30m over 12 turns, 24m18s of it waiting.
+slowest tools: Bash 41.2s (18 calls), WebFetch 8.1s (1 call), Read 2.0s (37 calls)
+```
+
 Display is display only. The marker is drawn as messages render, so it never
 enters the transcript and never reaches the model.
 
@@ -53,8 +58,13 @@ appear. An already-running session will not pick the plugin up.
 Nothing needs configuring. The defaults work, and the plugin tells you where to
 change them on first run.
 
-To change something, run `/timestamps` inside Claude Code and answer the
-questions. For an interactive wizard with a live preview instead, run the setup
+Changes take effect on your **next message**. Every hook reads the config file
+each time it runs, so nothing needs restarting. Only installing the plugin
+needs a new session, because that is when hooks are bound.
+
+To change something, run `/timestamps` inside Claude Code. It takes the request
+directly, so `/timestamps tokyo`, `/timestamps no colour` and
+`/timestamps 12 hour clock` all work in one step. Run it bare and it will ask. For an interactive wizard with a live preview instead, run the setup
 script in a terminal, where it has a real TTY:
 
 ```bash
@@ -99,6 +109,17 @@ cannot run anything.
 | `TOOL_TIMING` | `off` | Time individual tool calls and name the slowest |
 
 `NO_COLOR` disables colour regardless of `COLOR`.
+
+A value the plugin cannot use is replaced by its default rather than silently
+doing nothing, and it is named at the start of the next session and by
+`--doctor`:
+
+```
+claude-timestamp: some settings could not be used.
+  COLOR=banana is not valid, using dim
+  SLOW_AFTER=soon is not valid, using 60
+Run /timestamps to fix them.
+```
 
 Clock formats render as `14:03:22` for `24h`, `14:03` for `short`, `2:03 PM`
 for `12h`, and `2026-08-19T14:03:22` for `iso`. Any value containing a `%` is
@@ -158,7 +179,7 @@ to whole seconds and the call counts carry the signal.
 ## Development
 
 ```bash
-bash tests/run.sh                                    # 165 assertions, no framework
+bash tests/run.sh                                    # 193 assertions, no framework
 shellcheck -S style -e SC1091 hooks/scripts/**/*.sh  # clean
 bash tools/check-docs.sh                             # README against the code
 ```

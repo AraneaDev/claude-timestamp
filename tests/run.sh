@@ -62,6 +62,13 @@ lacks() {
   esac
 }
 
+# Remove colour escapes so an assertion can be about the text rather than the
+# styling. The ESC byte is embedded literally because BSD sed does not
+# understand \x1b the way GNU sed does.
+strip_ansi() {
+  printf '%s' "$1" | sed "s/$(printf '\033')\[[0-9;]*m//g"
+}
+
 # Reset configuration and session state, then load the config the case wants.
 #
 # Every scenario starts from a known-empty slate rather than whatever the last
@@ -634,16 +641,71 @@ if command -v jq >/dev/null 2>&1; then
 fi
 
 echo
-echo "tolerating a bad config"
+echo "validating the config"
 
-# Values from the config file are not validated the way flags are, so what
-# matters is that a wrong one degrades instead of breaking the marker.
-fresh 'SLOW_AFTER=abc' 'IDLE_AFTER=oops' 'COLOR=banana' 'ELAPSED=off' 'DATE_ROLLOVER=off'
+is "a known colour is accepted"     "0" "$(ct_is_valid_color cyan     && echo 0 || echo 1)"
+is "an unknown colour is rejected"  "1" "$(ct_is_valid_color banana   && echo 0 || echo 1)"
+is "a preset format is accepted"    "0" "$(ct_is_valid_format short   && echo 0 || echo 1)"
+is "a strftime format is accepted"  "0" "$(ct_is_valid_format '%H:%M' && echo 0 || echo 1)"
+is "a nonsense format is rejected"  "1" "$(ct_is_valid_format wat     && echo 0 || echo 1)"
+is "a number is seconds"            "0" "$(ct_is_seconds 30           && echo 0 || echo 1)"
+is "a word is not seconds"          "1" "$(ct_is_seconds soon         && echo 0 || echo 1)"
+is "an empty timezone is fine"      "0" "$(ct_is_valid_tz ''          && echo 0 || echo 1)"
+is "an absolute timezone path is not" "1" "$(ct_is_valid_tz /etc/passwd && echo 0 || echo 1)"
+is "a traversing timezone is not"   "1" "$(ct_is_valid_tz a/../b      && echo 0 || echo 1)"
+
+fresh 'COLOR=cyan' 'SLOW_AFTER=30'
+is "a good config reports no problems" "" "$CT_CONFIG_PROBLEMS"
+
+fresh 'SLOW_AFTER=abc' 'COLOR=banana' 'ELAPSED=maybe' 'DISPLAY_FORMAT=wat' 'INJECT_CONTEXT=perhaps'
+is "a bad number falls back"   "60"   "$CT_SLOW_AFTER"
+is "a bad colour falls back"   "dim"  "$CT_COLOR"
+is "a bad toggle falls back"   "on"   "$CT_ELAPSED"
+is "a bad format falls back"   "24h"  "$CT_DISPLAY_FORMAT"
+is "a bad boolean falls back"  "true" "$CT_INJECT_CONTEXT"
+contains "the bad value is named"      "COLOR=banana" "$CT_CONFIG_PROBLEMS"
+contains "the replacement is named"    "using dim"    "$CT_CONFIG_PROBLEMS"
+is "every bad value is reported" "5" "$(printf '%s\n' "$CT_CONFIG_PROBLEMS" | grep -c 'is not valid')"
+
 if command -v jq >/dev/null 2>&1; then
+  # A broken config must still produce a usable marker, drawn with the
+  # defaults that replaced the unusable values.
+  fresh 'SLOW_AFTER=abc' 'COLOR=banana' 'ELAPSED=off' 'DATE_ROLLOVER=off' 'IDLE_AFTER=oops'
   out="$(printf '{"session_id":"bad","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" 2>/dev/null | jq -r '.hookSpecificOutput.displayContent' 2>/dev/null)"
-  contains "a nonsense config still renders a marker" "] x" "$out"
-  lacks "an unknown colour renders no escape codes" "[" "${out#*]}"
+  contains "a nonsense config still renders a marker" "] x" "$(strip_ansi "$out")"
+  contains "an unusable colour falls back to the default" "[2m" "$out"
+
+  out="$(printf '{"session_id":"x"}' | bash "$SCRIPTS/session-start.sh" | jq -r '.systemMessage')"
+  contains "session start names the broken settings" "COLOR=banana" "$out"
+  contains "session start points at the fix" "/timestamps" "$out"
+
+  fresh 'COLOR=cyan'
+  out="$(printf '{"session_id":"x"}' | bash "$SCRIPTS/session-start.sh")"
+  lacks "session start says nothing about a good config" "could not be used" "$out"
+
+  refutes "doctor fails on a broken config" bash -c "
+    printf 'COLOR=banana\n' > '$CLAUDE_TIMESTAMP_CONFIG'
+    bash '$SCRIPTS/setup.sh' --doctor"
+  fresh 'COLOR=cyan'
+  asserts "doctor passes on a good config" bash "$SCRIPTS/setup.sh" --doctor
 fi
+
+echo
+echo "settings apply without a restart"
+
+# Every hook re-reads the config, so a change is live on the next message.
+# Three places used to tell people otherwise.
+if command -v jq >/dev/null 2>&1; then
+  fresh 'COLOR=none' 'ELAPSED=off' 'IDLE_AFTER=0' 'DATE_ROLLOVER=off' 'DISPLAY_FORMAT=24h'
+  before="$(printf '{"session_id":"live","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')"
+  printf 'COLOR=none\nELAPSED=off\nIDLE_AFTER=0\nDATE_ROLLOVER=off\nDISPLAY_FORMAT=iso\n' > "$CLAUDE_TIMESTAMP_CONFIG"
+  after="$(printf '{"session_id":"live","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')"
+  case "$before" in *T*) fail "the marker starts in the short format" "no date" "$before" ;; *) pass "the marker starts in the short format" ;; esac
+  contains "changing the config applies to the very next message" "T" "$after"
+fi
+
+lacks "setup no longer claims a restart is needed" "Restart Claude Code" "$(cat "$SCRIPTS/setup.sh")"
+contains "setup says the change is immediate" "next message" "$(cat "$SCRIPTS/setup.sh")"
 
 echo
 echo "the wizard"
