@@ -1,12 +1,29 @@
+<div align="center">
+
 # Claude Timestamp
 
-A Claude Code plugin that puts the local time on every assistant message, shows
-how long each turn took, and tells Claude when your prompt was sent.
+**Every message stamped with the time it happened, and how long it took.**
 
-![Timestamps on assistant messages, with a slow turn highlighted](assets/timestamps.png)
+[![Version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FAraneaDev%2Fclaude-timestamp%2Fmain%2F.claude-plugin%2Fplugin.json&query=%24.version&label=version&prefix=v&color=0b7285)](https://github.com/AraneaDev/claude-timestamp/releases)
+[![CI](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml/badge.svg)](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-246%20passing-2b8a3e)](tests/run.sh)
+[![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-364fc7)](#platform-notes)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
-Two fast turns render dim. The third crossed the slow threshold, so its
-duration is coloured.
+<img src="assets/timestamps.png" alt="Timestamps on assistant messages, with a slow turn highlighted" width="840">
+
+<sub>Two fast turns render dim. The third crossed the slow threshold, so its duration is coloured.</sub>
+
+</div>
+
+---
+
+A Claude Code plugin. It puts your local time on every assistant message, shows
+how long each turn took, and tells Claude when your prompt was sent, so a long
+conversation can be scanned, timed, and referred back to.
+
+There is nothing to set up. The defaults work as soon as it is installed, and
+`/timestamps` changes them from inside Claude Code without restarting anything.
 
 ## What it does
 
@@ -35,21 +52,6 @@ slowest tools: Bash 41.2s (18 calls), WebFetch 8.1s (1 call), Read 2.0s (37 call
 
 Display is display only. The marker is drawn as messages render, so it never
 enters the transcript and never reaches the model.
-
-## What the sessions add up to
-
-```bash
-bash "$CLAUDE_PLUGIN_ROOT/hooks/scripts/setup.sh" --stats
-```
-
-![Totals across recorded sessions](assets/stats.png)
-
-Each finished session is appended to `~/.claude/claude-timestamp-history.tsv`,
-and the oldest are dropped once there are more than `HISTORY_LIMIT` of them.
-
-The file holds timings only: six numbers and a date per session. No message
-text, no tool arguments, and no paths, so nothing in it says what you were
-working on. Switch it off entirely with `HISTORY=off`.
 
 ## Requirements
 
@@ -90,7 +92,9 @@ script in a terminal, where it has a real TTY:
 bash "$CLAUDE_PLUGIN_ROOT/hooks/scripts/setup.sh"
 ```
 
-![The setup wizard, showing the colour choices and a live preview](assets/wizard.png)
+<p align="center">
+  <img src="assets/wizard.png" alt="The setup wizard, showing the colour choices and a live preview" width="760">
+</p>
 
 Every question shows its current value in brackets, and pressing enter keeps
 it. The colour list and the result line are rendered by the same code that
@@ -167,13 +171,32 @@ treated as a strftime string, so the escape hatch needs no separate setting.
 `TOOL_TIMING` is off by default because it is the only setting that costs
 anything per tool call. Everything else costs once per message.
 
+## What the sessions add up to
+
+```bash
+bash "$CLAUDE_PLUGIN_ROOT/hooks/scripts/setup.sh" --stats
+```
+
+<p align="center">
+  <img src="assets/stats.png" alt="Totals across recorded sessions" width="660">
+</p>
+
+Each finished session is appended to `~/.claude/claude-timestamp-history.tsv`,
+and the oldest are dropped once there are more than `HISTORY_LIMIT` of them.
+
+The file holds timings only: six numbers and a date per session. No message
+text, no tool arguments, and no paths, so nothing in it says what you were
+working on. Switch it off entirely with `HISTORY=off`.
+
 ## When something is wrong
 
 ```bash
 bash "$CLAUDE_PLUGIN_ROOT/hooks/scripts/setup.sh" --doctor
 ```
 
-![Output of the doctor self-check](assets/doctor.png)
+<p align="center">
+  <img src="assets/doctor.png" alt="Output of the doctor self-check" width="760">
+</p>
 
 It checks that `jq` is present, that the config parses, that a pinned timezone
 can actually be applied on this machine, and that the state directory is

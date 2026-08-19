@@ -59,6 +59,18 @@ else
   status=1
 fi
 
+echo "test count badge"
+# The badge states a number, so it can drift the same way the code comment can.
+badge_count="$(sed -n 's/.*badge\/tests-\([0-9]*\)%20passing.*/\1/p' README.md | head -1)"
+if [ -z "$badge_count" ]; then
+  note "no test-count badge found"
+elif [ "$badge_count" != "$actual" ]; then
+  note "the badge says $badge_count tests, the suite reports $actual"
+  status=1
+else
+  note "the badge and the suite agree on $actual tests"
+fi
+
 echo "linked images"
 while read -r img; do
   if [ -f "$img" ]; then
@@ -67,7 +79,9 @@ while read -r img; do
     note "MISSING $img"
     status=1
   fi
-done < <(grep -o '](assets/[^)]*)' README.md | tr -d '](' | sed 's/)$//')
+done < <( { grep -o '](assets/[^)]*)' README.md | tr -d '](' | sed 's/)$//'
+            grep -o 'src="assets/[^"]*"' README.md | sed 's/src="//;s/"$//'
+          } | sort -u )
 
 echo
 if [ "$status" -eq 0 ]; then echo "docs are in step with the code"; else echo "docs need updating"; fi
