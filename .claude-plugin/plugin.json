@@ -1,7 +1,7 @@
 {
   "name": "claude-timestamp",
   "displayName": "Claude Timestamp",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Shows the local time on every message and tells Claude when each prompt was sent, so you can scan a conversation, see how long each turn took, and reference earlier blocks.",
   "author": {
     "name": "AraneaDev",
