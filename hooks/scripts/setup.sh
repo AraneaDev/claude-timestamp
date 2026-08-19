@@ -299,7 +299,24 @@ detect_tz() {
 
 ask() {
   local prompt="$1" default="$2" answer
-  read -r -p "$prompt [$default]: " answer </dev/tty || answer=""
+  if [ -t 0 ]; then
+    # Interactive: read the terminal directly, so the wizard still works when
+    # something has redirected this script's stdin.
+    read -r -p "$prompt [$default]: " answer </dev/tty || answer=""
+  else
+    # No terminal, so answers are being piped in. Reading stdin here is what
+    # makes the wizard testable without a pseudo-terminal.
+    #
+    # The prompt goes to stderr because this function's stdout is captured by
+    # the caller; printing it there would put the prompt inside the answer.
+    printf '%s [%s]: ' "$prompt" "$default" >&2
+    if ! read -r answer; then
+      answer=""
+      # Input is exhausted. Without this the re-ask loops below would spin
+      # forever on a value that never becomes valid.
+      CT_ASK_EOF=1
+    fi
+  fi
   printf '%s' "${answer:-$default}"
 }
 
@@ -359,11 +376,13 @@ wizard() {
     while :; do
       answer="$(ask "  Colour the duration after how many seconds? (0 = never)" "$CT_SLOW_AFTER")"
       if valid_seconds SLOW_AFTER "$answer"; then CT_SLOW_AFTER="$answer"; break; fi
+      [ -n "${CT_ASK_EOF:-}" ] && break
     done
   fi
   while :; do
     answer="$(ask "Mark a gap between messages after how many seconds? (0 = never)" "$CT_IDLE_AFTER")"
     if valid_seconds IDLE_AFTER "$answer"; then CT_IDLE_AFTER="$answer"; break; fi
+    [ -n "${CT_ASK_EOF:-}" ] && break
   done
   answer="$(ask "Report session totals when the session ends? (on/off)" "$CT_SUMMARY")"
   case "$answer" in on|off) CT_SUMMARY="$answer" ;; esac
@@ -385,6 +404,7 @@ wizard() {
   while :; do
     answer="$(ask "  Color" "$CT_COLOR")"
     if valid_color "$answer"; then CT_COLOR="$answer"; break; fi
+    [ -n "${CT_ASK_EOF:-}" ] && break
   done
   echo
 
@@ -400,6 +420,7 @@ wizard() {
         24h|short|12h|iso|*%*) CT_CONTEXT_FORMAT="$fmt"; break ;;
         *) echo "  Pick 24h, short, 12h, iso, or a strftime string containing %." ;;
       esac
+      [ -n "${CT_ASK_EOF:-}" ] && break
     done
   fi
   echo

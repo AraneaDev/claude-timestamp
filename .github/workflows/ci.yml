@@ -49,6 +49,15 @@ jobs:
       - name: Run tests
         run: bash tests/run.sh
 
+      - name: Run tests under bash 3.2
+        # macOS still ships bash 3.2 as /bin/bash. The plugin claims to work
+        # there, and this is the only runner that can actually check it, so the
+        # claim gets tested rather than asserted.
+        if: runner.os == 'macOS'
+        run: |
+          echo "/bin/bash is $(/bin/bash --version | head -1)"
+          /bin/bash tests/run.sh
+
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -70,14 +79,35 @@ jobs:
 
       - name: Syntax check
         run: |
-          for f in hooks/scripts/*.sh hooks/scripts/lib/*.sh tests/run.sh; do
+          for f in hooks/scripts/*.sh hooks/scripts/lib/*.sh tests/run.sh \
+                   tools/*.sh tools/screenshots/*.sh tools/githooks/pre-push; do
             bash -n "$f"
           done
 
       - name: shellcheck
         # SC1091 is excluded because every hook resolves its library path at
         # runtime, which shellcheck cannot follow statically.
-        run: shellcheck -S style -e SC1091 hooks/scripts/*.sh hooks/scripts/lib/*.sh tests/run.sh
+        run: |
+          shellcheck -S style -e SC1091 \
+            hooks/scripts/*.sh \
+            hooks/scripts/lib/*.sh \
+            tests/run.sh \
+            tools/check-docs.sh \
+            tools/screenshots/make.sh \
+            tools/githooks/pre-push
+
+  docs:
+    # The README goes stale silently: a setting gets added and never written
+    # down, a count stops matching, an image gets renamed. All cheap to check.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install jq
+        run: command -v jq >/dev/null || (sudo apt-get update && sudo apt-get install -y jq)
+
+      - name: Check the README against the code
+        run: bash tools/check-docs.sh
 
   manifests:
     runs-on: ubuntu-latest
