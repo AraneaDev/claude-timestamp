@@ -29,7 +29,12 @@ ct_load_config() {
   CT_CONTEXT_FORMAT="24h"
   CT_COLOR="dim"
   CT_ELAPSED="on"
+  CT_SLOW_AFTER="60"          # seconds; 0 disables
+  CT_SLOW_COLOR="yellow"
+  CT_IDLE_AFTER="3600"        # seconds; 0 disables
   CT_DATE_ROLLOVER="on"
+  CT_SUMMARY="on"
+  CT_SUBAGENTS="on"
   CT_INJECT_CONTEXT="true"
 
   local file line key value
@@ -58,6 +63,11 @@ ct_load_config() {
       COLOR)          CT_COLOR="$value" ;;
       ELAPSED)        CT_ELAPSED="$value" ;;
       DATE_ROLLOVER)  CT_DATE_ROLLOVER="$value" ;;
+      SLOW_AFTER)     CT_SLOW_AFTER="$value" ;;
+      SLOW_COLOR)     CT_SLOW_COLOR="$value" ;;
+      IDLE_AFTER)     CT_IDLE_AFTER="$value" ;;
+      SUMMARY)        CT_SUMMARY="$value" ;;
+      SUBAGENTS)      CT_SUBAGENTS="$value" ;;
       INJECT_CONTEXT) CT_INJECT_CONTEXT="$value" ;;
     esac
   done < "$file"
@@ -152,6 +162,18 @@ ct_color_end() {
 
 ct_is_color() { [ -n "$(ct_color_start "$1")" ]; }
 
+# Wrap text in a color, or return it untouched when that color is off. Keeps
+# callers from having to pair start and end themselves.
+ct_paint() {
+  local color="$1" text="$2" start
+  start="$(ct_color_start "$color")"
+  if [ -n "$start" ]; then
+    printf '%s%s%s' "$start" "$text" "$(ct_color_end "$color")"
+  else
+    printf '%s' "$text"
+  fi
+}
+
 # Elapsed-time state. One file per session, holding the epoch second the last
 # prompt was submitted.
 ct_state_dir() { printf '%s' "${TMPDIR:-/tmp}/claude-timestamp"; }
@@ -168,14 +190,52 @@ ct_state_file() {
   printf '%s/%s' "$(ct_state_dir)" "$sid"
 }
 
-# Seconds -> +45s / +2m14s / +1h03m. Refuses negative input (clock moved back).
-ct_format_elapsed() {
+# Seconds -> 45s / 2m14s / 1h03m. Refuses anything that is not a whole number,
+# which also covers a clock that moved backwards.
+ct_format_duration() {
   local s="${1:-}"
   case "$s" in ''|*[!0-9]*) return 1 ;; esac
-  if   [ "$s" -lt 60 ];   then printf '+%ds' "$s"
-  elif [ "$s" -lt 3600 ]; then printf '+%dm%02ds' "$((s / 60))" "$((s % 60))"
-  else                         printf '+%dh%02dm' "$((s / 3600))" "$(((s % 3600) / 60))"
+  if   [ "$s" -lt 60 ];   then printf '%ds' "$s"
+  elif [ "$s" -lt 3600 ]; then printf '%dm%02ds' "$((s / 60))" "$((s % 60))"
+  else                         printf '%dh%02dm' "$((s / 3600))" "$(((s % 3600) / 60))"
   fi
+}
+
+# The same duration as a turn marker: +45s / +2m14s / +1h03m.
+ct_format_elapsed() {
+  local d
+  d="$(ct_format_duration "${1:-}")" || return 1
+  printf '+%s' "$d"
+}
+
+# A coarser rendering for the idle divider, where "2h" reads better than
+# "2h07m" -- the point is that you were away, not exactly how long.
+ct_humanize_gap() {
+  local s="${1:-}"
+  case "$s" in ''|*[!0-9]*) return 1 ;; esac
+  if   [ "$s" -lt 5400 ];   then printf '%dm' "$((s / 60))"
+  elif [ "$s" -lt 129600 ]; then printf '%dh' "$((s / 3600))"
+  else                           printf '%dd' "$((s / 86400))"
+  fi
+}
+
+# Read a counter from the session state, defaulting to 0 when absent or
+# corrupt, so a damaged state file degrades to "no history" rather than
+# breaking the marker.
+ct_read_counter() {
+  local file="$1" value
+  [ -r "$file" ] || { printf '0'; return 0; }
+  value="$(cat "$file" 2>/dev/null)"
+  case "$value" in ''|*[!0-9]*) printf '0' ;; *) printf '%s' "$value" ;; esac
+}
+
+# Remove every state file belonging to one session. Called at session end, so
+# the state directory does not accumulate a file set per session forever.
+ct_clear_state() {
+  local base
+  base="$(ct_state_file "${1:-}")" || return 0
+  rm -f "$base" "$base".* 2>/dev/null
+  return 0
 }
 
 # Drop state files from sessions that ended days ago. Called at session start.

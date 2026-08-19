@@ -25,6 +25,12 @@ is() {
 # Assert a command fails. Written as a real branch rather than
 # `cmd && fail || pass`, which also runs the third branch when the second one
 # returns non-zero.
+# Assert a command succeeds.
+asserts() {
+  local label="$1"; shift
+  if "$@" >/dev/null 2>&1; then pass "$label"; else fail "$label" "exit 0" "non-zero exit"; fi
+}
+
 refutes() {
   local label="$1"; shift
   if "$@" >/dev/null 2>&1; then fail "$label" "non-zero exit" "exit 0"; else pass "$label"; fi
@@ -174,6 +180,43 @@ is "hours and minutes"   "+1h03m"  "$(ct_format_elapsed 3780)"
 refutes "rejects non-numeric input" ct_format_elapsed "abc"
 refutes "rejects negative input" ct_format_elapsed "-5"
 
+is "duration: seconds"        "45s"    "$(ct_format_duration 45)"
+is "duration: minutes"        "2m14s"  "$(ct_format_duration 134)"
+is "duration: hours"          "1h03m"  "$(ct_format_duration 3780)"
+refutes "duration rejects rubbish" ct_format_duration "x"
+
+is "gap: minutes"             "35m"    "$(ct_humanize_gap 2100)"
+is "gap: just under 90m"      "89m"    "$(ct_humanize_gap 5399)"
+is "gap: hours"               "2h"     "$(ct_humanize_gap 7200)"
+is "gap: days"                "3d"     "$(ct_humanize_gap 259200)"
+refutes "gap rejects rubbish" ct_humanize_gap "x"
+
+echo
+echo "counters and state"
+
+is "missing counter reads as zero" "0" "$(ct_read_counter "$WORK/nope")"
+printf 'garbage' > "$WORK/counter"
+is "corrupt counter reads as zero" "0" "$(ct_read_counter "$WORK/counter")"
+printf '42' > "$WORK/counter"
+is "valid counter is read" "42" "$(ct_read_counter "$WORK/counter")"
+
+mkdir -p "$(ct_state_dir)"
+base="$(ct_state_file "clearme")"
+printf '1' > "$base"; printf '2' > "$base.turns"; printf '3' > "$base.wait"
+ct_clear_state "clearme"
+if [ -e "$base" ] || [ -e "$base.turns" ] || [ -e "$base.wait" ]; then
+  fail "clearing a session removes all of its state" "no files" "some remain"
+else
+  pass "clearing a session removes all of its state"
+fi
+
+echo
+echo "painting"
+
+is "paint with no colour returns the text" "hi" "$(ct_paint none hi)"
+contains "paint wraps in the colour" "[33m" "$(ct_paint yellow hi)"
+contains "paint resets afterwards" "[0m" "$(ct_paint yellow hi)"
+
 echo
 echo "state files"
 
@@ -241,13 +284,88 @@ if command -v jq >/dev/null 2>&1; then
   out="$(printf '{"session_id":"test-session","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')"
   lacks "DATE_ROLLOVER=off suppresses the date" "$(date '+%b')" "$out"
 
+  # Slow-turn colouring: the duration alone is painted, the rest is not.
+  printf 'COLOR=none\nSLOW_AFTER=60\nSLOW_COLOR=cyan\nIDLE_AFTER=0\nDATE_ROLLOVER=off\n' > "$CLAUDE_TIMESTAMP_CONFIG"
+  printf '%s' "$(( $(date +%s) - 3780 ))" > "$(ct_state_dir)/test-session"
+  out="$(printf '{"session_id":"test-session","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')"
+  contains "a slow turn paints the duration" "[36m" "$out"
+
+  printf 'COLOR=none\nSLOW_AFTER=0\nIDLE_AFTER=0\nDATE_ROLLOVER=off\n' > "$CLAUDE_TIMESTAMP_CONFIG"
+  printf '%s' "$(( $(date +%s) - 3780 ))" > "$(ct_state_dir)/test-session"
+  out="$(printf '{"session_id":"test-session","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')"
+  lacks "SLOW_AFTER=0 leaves the duration unpainted" "[36m" "$out"
+
+  printf 'COLOR=none\nSLOW_AFTER=99999\nIDLE_AFTER=0\nDATE_ROLLOVER=off\n' > "$CLAUDE_TIMESTAMP_CONFIG"
+  printf '%s' "$(( $(date +%s) - 3780 ))" > "$(ct_state_dir)/test-session"
+  out="$(printf '{"session_id":"test-session","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')"
+  lacks "a turn under the threshold is unpainted" "[36m" "$out"
+
+  # Idle divider.
+  printf 'COLOR=none\nELAPSED=off\nIDLE_AFTER=3600\nDATE_ROLLOVER=off\n' > "$CLAUDE_TIMESTAMP_CONFIG"
+  printf '%s' "$(( $(date +%s) - 7200 ))" > "$(ct_state_dir)/test-session.last"
+  out="$(printf '{"session_id":"test-session","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')"
+  contains "an idle gap is marked" "2h later" "$out"
+
+  # The hook just recorded now, so the next message is not idle.
+  out="$(printf '{"session_id":"test-session","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')"
+  lacks "a fresh gap is not marked" "later" "$out"
+
+  printf 'COLOR=none\nELAPSED=off\nIDLE_AFTER=0\nDATE_ROLLOVER=off\n' > "$CLAUDE_TIMESTAMP_CONFIG"
+  printf '%s' "$(( $(date +%s) - 7200 ))" > "$(ct_state_dir)/test-session.last"
+  out="$(printf '{"session_id":"test-session","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')"
+  lacks "IDLE_AFTER=0 disables the marker" "later" "$out"
+
+  # Subagents.
+  printf 'COLOR=none\nSUBAGENTS=off\nIDLE_AFTER=0\n' > "$CLAUDE_TIMESTAMP_CONFIG"
+  out="$(printf '{"session_id":"test-session","index":0,"delta":"x","agent_id":"sub-1"}' | bash "$SCRIPTS/message-display.sh")"
+  is "SUBAGENTS=off skips subagent messages" "" "$out"
+  out="$(printf '{"session_id":"test-session","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh")"
+  contains "SUBAGENTS=off still stamps the main conversation" "displayContent" "$out"
+  printf 'COLOR=none\nSUBAGENTS=on\nIDLE_AFTER=0\n' > "$CLAUDE_TIMESTAMP_CONFIG"
+  out="$(printf '{"session_id":"test-session","index":0,"delta":"x","agent_id":"sub-1"}' | bash "$SCRIPTS/message-display.sh")"
+  contains "SUBAGENTS=on stamps subagent messages" "displayContent" "$out"
+
+  echo
+  echo "session summary"
+
+  : > "$CLAUDE_TIMESTAMP_CONFIG"
+  base="$(ct_state_file "summary-session")"
+  mkdir -p "$(ct_state_dir)"
+  printf '%s' "$(( $(date +%s) - 5400 ))" > "$base.start"
+  printf '3'    > "$base.turns"
+  printf '754'  > "$base.wait"
+  out="$(printf '{"session_id":"summary-session"}' | bash "$SCRIPTS/session-end.sh" | jq -r '.systemMessage')"
+  contains "summary reports the turn count" "3 turns" "$out"
+  contains "summary reports time spent waiting" "12m34s of it waiting" "$out"
+  if [ -e "$base.turns" ]; then
+    fail "session end clears its state" "no state files" "state remains"
+  else
+    pass "session end clears its state"
+  fi
+
+  # One turn must not be reported as "1 turns".
+  printf '%s' "$(( $(date +%s) - 60 ))" > "$base.start"
+  printf '1' > "$base.turns"; printf '5' > "$base.wait"
+  out="$(printf '{"session_id":"summary-session"}' | bash "$SCRIPTS/session-end.sh" | jq -r '.systemMessage')"
+  contains "a single turn is singular" "1 turn," "$out"
+
+  # A session with nothing recorded has nothing to say.
+  out="$(printf '{"session_id":"never-used"}' | bash "$SCRIPTS/session-end.sh")"
+  is "an empty session reports nothing" "" "$out"
+
+  printf 'SUMMARY=off\n' > "$CLAUDE_TIMESTAMP_CONFIG"
+  printf '%s' "$(( $(date +%s) - 60 ))" > "$base.start"
+  printf '2' > "$base.turns"; printf '5' > "$base.wait"
+  out="$(printf '{"session_id":"summary-session"}' | bash "$SCRIPTS/session-end.sh")"
+  is "SUMMARY=off reports nothing" "" "$out"
+
   printf 'INJECT_CONTEXT=false\n' > "$CLAUDE_TIMESTAMP_CONFIG"
   out="$(printf '{"session_id":"test-session","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh")"
   is "INJECT_CONTEXT=false injects nothing" "" "$out"
 
-  # ELAPSED and DATE_ROLLOVER off so this asserts only on the time rendering
+  # Everything optional is off so this asserts only on the time rendering
   # itself, independent of state left behind by earlier cases.
-  printf 'COLOR=none\nDISPLAY_FORMAT=short\nTZ=UTC\nELAPSED=off\nDATE_ROLLOVER=off\n' > "$CLAUDE_TIMESTAMP_CONFIG"
+  printf 'COLOR=none\nDISPLAY_FORMAT=short\nTZ=UTC\nELAPSED=off\nDATE_ROLLOVER=off\nIDLE_AFTER=0\n' > "$CLAUDE_TIMESTAMP_CONFIG"
   # Bracketed by two readings of the clock and accepting either, so a minute
   # boundary crossed mid-test cannot fail it.
   before="[$(TZ=UTC date '+%H:%M')] x"
@@ -291,6 +409,28 @@ bash "$SCRIPTS/setup.sh" --date-rollover=off >/dev/null
 ct_load_config
 is "--date-rollover is accepted" "off" "$CT_DATE_ROLLOVER"
 refutes "rejects a non on/off date-rollover value" bash "$SCRIPTS/setup.sh" --date-rollover=sometimes
+
+bash "$SCRIPTS/setup.sh" --slow-after=90 --slow-color=cyan --idle-after=600 --summary=off --subagents=off >/dev/null
+ct_load_config
+is "--slow-after is accepted"  "90"    "$CT_SLOW_AFTER"
+is "--slow-color is accepted"  "cyan"  "$CT_SLOW_COLOR"
+is "--idle-after is accepted"  "600"   "$CT_IDLE_AFTER"
+is "--summary is accepted"     "off"   "$CT_SUMMARY"
+is "--subagents is accepted"   "off"   "$CT_SUBAGENTS"
+refutes "rejects a non-numeric slow-after" bash "$SCRIPTS/setup.sh" --slow-after=soon
+refutes "rejects a non-numeric idle-after" bash "$SCRIPTS/setup.sh" --idle-after=later
+refutes "rejects an unknown slow colour"   bash "$SCRIPTS/setup.sh" --slow-color=banana
+
+echo
+echo "doctor"
+
+: > "$CLAUDE_TIMESTAMP_CONFIG"
+out="$(bash "$SCRIPTS/setup.sh" --doctor)"
+contains "doctor reports jq"           "jq" "$out"
+contains "doctor reports the platform" "uname" "$out"
+contains "doctor renders a preview"    "Preview" "$out"
+contains "doctor reports no problems on a healthy setup" "No problems found" "$out"
+asserts "doctor exits zero when healthy" bash "$SCRIPTS/setup.sh" --doctor
 
 echo
 echo "----"

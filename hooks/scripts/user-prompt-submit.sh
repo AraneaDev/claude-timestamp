@@ -7,10 +7,10 @@
 # today's date, so this sends time + zone only -- no redundant date, fewer
 # tokens.
 #
-# This hook also stamps the start of the turn for the elapsed-time marker that
-# message-display.sh renders. That happens even when context injection is off,
-# because the two settings are independent: display-only users still want to
-# see how long a turn took.
+# This hook also stamps the start of the turn, which message-display.sh reads
+# for the elapsed marker and session-end.sh reads for the summary. That happens
+# even when context injection is off, because the settings are independent:
+# display-only users still want to see how long a turn took.
 #
 # Times come from `date`, never jq's `now|strftime`, which always renders UTC.
 set -euo pipefail
@@ -23,12 +23,16 @@ ct_load_config
 
 input="$(cat)"
 
-if [ "$CT_ELAPSED" = "on" ]; then
-  session_id="$(printf '%s' "$input" | jq -r '.session_id // empty')"
-  if state_file="$(ct_state_file "$session_id")"; then
-    mkdir -p "$(ct_state_dir)"
-    date +%s > "$state_file"
-  fi
+# The turn start is recorded unconditionally: the elapsed marker and the
+# end-of-session summary both read it, and they are configured independently,
+# so gating the write on either one would silently break the other.
+session_id="$(printf '%s' "$input" | jq -r '.session_id // empty')"
+if state_file="$(ct_state_file "$session_id")"; then
+  mkdir -p "$(ct_state_dir)"
+  now="$(date +%s)"
+  printf '%s' "$now" > "$state_file"
+  # First prompt of the session marks its beginning.
+  [ -r "${state_file}.start" ] || printf '%s' "$now" > "${state_file}.start"
 fi
 
 [ "$CT_INJECT_CONTEXT" = "false" ] && exit 0

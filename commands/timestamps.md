@@ -26,6 +26,12 @@ non-interactive form instead.
    - Elapsed: `on` or `off`, whether to show how long each turn took.
    - Inject context: `true` or `false`, whether Claude is told the local time
      each prompt was sent.
+   - Slow turns: `--slow-after=SECONDS` colours the duration once a turn takes
+     that long, in `--slow-color=COLOR`. `0` disables it.
+   - Idle gaps: `--idle-after=SECONDS` marks a break between messages with a
+     line such as `-- 2h later --`. `0` disables it.
+   - Summary: `on` or `off`, whether session totals are reported at the end.
+   - Subagents: `on` or `off`, whether subagent messages are stamped too.
 
 3. Apply only the settings they chose. Every flag is optional and anything you
    leave out keeps its current value:
@@ -39,3 +45,8 @@ If the user would rather use the interactive wizard, tell them to run this in
 their terminal, where it has a real TTY:
 
 `! bash "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/setup.sh"`
+
+If something is not working -- no timestamps appearing, the wrong timezone,
+durations missing -- run the self-check and relay what it reports:
+
+`bash "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/setup.sh" --doctor`
