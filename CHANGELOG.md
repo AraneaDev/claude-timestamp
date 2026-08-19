@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.4](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.3...v0.0.4) (2026-08-19)
+
+
+### Documentation
+
+* correct the session summary example ([#22](https://github.com/AraneaDev/claude-timestamp/issues/22)) ([9991780](https://github.com/AraneaDev/claude-timestamp/commit/9991780f3f5a1d98951b6a51bd799c2948e1797b))
+
 ## [0.0.3](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.2...v0.0.3) (2026-08-19)
 
 
