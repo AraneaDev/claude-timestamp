@@ -92,9 +92,18 @@ ct_tz_supported() {
   [ "$CT_TZ_SUPPORTED" = "yes" ]
 }
 
+# Whether the pinned zone can actually be honoured here. UTC and GMT are plain
+# POSIX zone strings that date understands with no database at all, so they
+# work everywhere; only IANA names such as Asia/Tokyo need one.
+ct_tz_honoured() {
+  [ -n "${CT_TZ:-}" ] || return 1
+  case "$CT_TZ" in UTC|GMT) return 0 ;; esac
+  ct_tz_supported
+}
+
 # True when a zone is pinned that this platform cannot honour.
 ct_tz_unhonoured() {
-  [ -n "${CT_TZ:-}" ] && ! ct_tz_supported
+  [ -n "${CT_TZ:-}" ] && ! ct_tz_honoured
 }
 
 # Render the current time in the given format. CT_TZ is applied per-call rather
@@ -105,7 +114,7 @@ ct_now() {
   fmt="$(ct_expand_format "$1")"
   # A pinned zone this platform cannot resolve is ignored: local time is merely
   # not what was asked for, whereas UTC-pretending-to-be-Tokyo is wrong.
-  if [ -n "${CT_TZ:-}" ] && ct_tz_supported; then
+  if ct_tz_honoured; then
     out="$(TZ="$CT_TZ" date "+$fmt")"
   else
     out="$(date "+$fmt")"
@@ -117,7 +126,7 @@ ct_now() {
 
 # Current timezone abbreviation (CEST, JST...) for the model-facing string.
 ct_zone() {
-  if [ -n "${CT_TZ:-}" ] && ct_tz_supported; then TZ="$CT_TZ" date '+%Z'; else date '+%Z'; fi
+  if ct_tz_honoured; then TZ="$CT_TZ" date '+%Z'; else date '+%Z'; fi
 }
 
 ct_color_start() {

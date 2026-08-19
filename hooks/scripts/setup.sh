@@ -61,6 +61,8 @@ valid_tz() {
   # platform without the database (Git Bash on Windows) does not fail on an
   # unknown zone -- it silently renders UTC. Writing a pinned zone there would
   # produce a config that lies.
+  # UTC and GMT need no database, so they stay configurable everywhere.
+  case "$tz" in UTC|GMT) return 0 ;; esac
   if ! ct_tz_supported; then
     echo "This system has no timezone database, so a pinned zone would silently render as UTC." >&2
     echo "Use --tz=local to follow the machine's own clock instead." >&2

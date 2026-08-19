@@ -30,6 +30,16 @@ refutes() {
   if "$@" >/dev/null 2>&1; then fail "$label" "non-zero exit" "exit 0"; else pass "$label"; fi
 }
 
+# Assert a substring is absent. Used where recomputing a timestamp to compare
+# against would race with the clock.
+lacks() {
+  local label="$1" needle="$2" haystack="$3"
+  case "$haystack" in
+    *"$needle"*) fail "$label" "no '$needle'" "$haystack" ;;
+    *) pass "$label" ;;
+  esac
+}
+
 contains() {
   local label="$1" needle="$2" haystack="$3"
   case "$haystack" in
@@ -100,15 +110,21 @@ is "unknown preset falls back to 24h" '%H:%M:%S' "$(ct_expand_format nonsense)"
 
 : > "$CLAUDE_TIMESTAMP_CONFIG"
 ct_load_config
-CT_TZ="Asia/Tokyo"
-CT_DISPLAY_FORMAT="iso"
-tokyo="$(ct_now iso)"
-CT_TZ="UTC"
-utc="$(ct_now iso)"
-if [ "$tokyo" != "$utc" ]; then
-  pass "timezone actually changes the rendered time"
+# Needs a timezone database. Git Bash on Windows has none, and the fallback
+# behaviour for that case is asserted separately below.
+if ct_tz_supported; then
+  CT_TZ="Asia/Tokyo"
+  CT_DISPLAY_FORMAT="iso"
+  tokyo="$(ct_now iso)"
+  CT_TZ="UTC"
+  utc="$(ct_now iso)"
+  if [ "$tokyo" != "$utc" ]; then
+    pass "timezone actually changes the rendered time"
+  else
+    fail "timezone actually changes the rendered time" "different times" "both $utc"
+  fi
 else
-  fail "timezone actually changes the rendered time" "different times" "both $utc"
+  echo "  skip timezone actually changes the rendered time (no timezone database)"
 fi
 
 CT_TZ="UTC"
@@ -132,7 +148,13 @@ if ct_tz_unhonoured; then pass "a pinned but unsupported zone is reported"; else
 
 # shellcheck disable=SC2034  # read by the sourced library
 CT_TZ_SUPPORTED="yes"
-is "a supported zone is applied" "$(TZ=Asia/Tokyo date '+%H:%M')" "$(ct_now short)"
+if ct_tz_supported; then
+  is "a supported zone is applied" "$(TZ=Asia/Tokyo date '+%H:%M')" "$(ct_now short)"
+else
+  echo "  skip a supported zone is applied (no timezone database)"
+fi
+CT_TZ="UTC"
+is "UTC is honoured with or without a timezone database" "$(TZ=UTC date '+%H:%M')" "$(ct_now short)"
 
 CT_TZ=""
 if ct_tz_unhonoured; then fail "no pinned zone is never reported as unhonoured" "false" "true"; else pass "no pinned zone is never reported as unhonoured"; fi
@@ -209,13 +231,15 @@ if command -v jq >/dev/null 2>&1; then
   contains "date rollover adds the date after midnight" "$(date '+%b %d')" "$out"
 
   # The hook just recorded today, so a second message must not repeat it.
+  # Asserted as the absence of a month name rather than by recomputing the
+  # clock, which races with the hook by a second on a slow runner.
   out="$(printf '{"session_id":"test-session","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')"
-  is "date is not repeated on the same day" "[$(date '+%H:%M:%S')] x" "$out"
+  lacks "date is not repeated on the same day" "$(date '+%b')" "$out"
 
   printf 'COLOR=none\nELAPSED=off\nDATE_ROLLOVER=off\n' > "$CLAUDE_TIMESTAMP_CONFIG"
   printf '2000-01-01' > "$(ct_state_dir)/test-session.date"
   out="$(printf '{"session_id":"test-session","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')"
-  is "DATE_ROLLOVER=off suppresses the date" "[$(date '+%H:%M:%S')] x" "$out"
+  lacks "DATE_ROLLOVER=off suppresses the date" "$(date '+%b')" "$out"
 
   printf 'INJECT_CONTEXT=false\n' > "$CLAUDE_TIMESTAMP_CONFIG"
   out="$(printf '{"session_id":"test-session","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh")"
@@ -224,9 +248,16 @@ if command -v jq >/dev/null 2>&1; then
   # ELAPSED and DATE_ROLLOVER off so this asserts only on the time rendering
   # itself, independent of state left behind by earlier cases.
   printf 'COLOR=none\nDISPLAY_FORMAT=short\nTZ=UTC\nELAPSED=off\nDATE_ROLLOVER=off\n' > "$CLAUDE_TIMESTAMP_CONFIG"
+  # Bracketed by two readings of the clock and accepting either, so a minute
+  # boundary crossed mid-test cannot fail it.
+  before="[$(TZ=UTC date '+%H:%M')] x"
   out="$(printf '{"session_id":"test-session","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')"
-  expected="[$(TZ=UTC date '+%H:%M')] x"
-  is "config drives the rendered marker end to end" "$expected" "$out"
+  after="[$(TZ=UTC date '+%H:%M')] x"
+  if [ "$out" = "$before" ] || [ "$out" = "$after" ]; then
+    pass "config drives the rendered marker end to end"
+  else
+    fail "config drives the rendered marker end to end" "$before" "$out"
+  fi
 
   out="$(printf '{"session_id":"s"}' | bash "$SCRIPTS/session-start.sh")"
   is "session-start is quiet once configured" "" "$out"
