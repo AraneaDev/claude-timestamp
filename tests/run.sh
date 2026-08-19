@@ -79,6 +79,7 @@ strip_ansi() {
 fresh() {
   rm -rf "$(ct_state_dir)"
   mkdir -p "$(ct_state_dir)"
+  rm -f "$CLAUDE_TIMESTAMP_HISTORY"
   if [ "$#" -gt 0 ]; then
     printf '%s\n' "$@" > "$CLAUDE_TIMESTAMP_CONFIG"
   else
@@ -100,6 +101,7 @@ trap 'rm -rf "$WORK"' EXIT
 export TMPDIR="$WORK/state"
 mkdir -p "$TMPDIR"
 export CLAUDE_TIMESTAMP_CONFIG="$WORK/config.conf"
+export CLAUDE_TIMESTAMP_HISTORY="$WORK/history.tsv"
 
 source "$SCRIPTS/lib/config.sh"
 
@@ -755,6 +757,131 @@ else
     pass "the wizard finishes when input runs out"
   fi
 fi
+
+echo
+echo "session history"
+
+fresh
+is "history goes where it is told" "$CLAUDE_TIMESTAMP_HISTORY" "$(ct_history_path)"
+
+ct_history_append 3600 12 900 300 2
+is "a session is one row"      "1" "$(wc -l < "$CLAUDE_TIMESTAMP_HISTORY" | tr -d ' ')"
+is "a row carries six fields"  "6" "$(awk -F'\t' 'NR==1{print NF}' "$CLAUDE_TIMESTAMP_HISTORY")"
+is "the duration is recorded"  "3600" "$(awk -F'\t' 'NR==1{print $2}' "$CLAUDE_TIMESTAMP_HISTORY")"
+is "the turns are recorded"    "12"   "$(awk -F'\t' 'NR==1{print $3}' "$CLAUDE_TIMESTAMP_HISTORY")"
+is "the failures are recorded" "2"    "$(awk -F'\t' 'NR==1{print $6}' "$CLAUDE_TIMESTAMP_HISTORY")"
+
+fresh 'HISTORY_LIMIT=3'
+for i in 1 2 3 4 5 6; do ct_history_append "$i" 1 0 0 0; done
+is "the retention limit is applied" "3" "$(wc -l < "$CLAUDE_TIMESTAMP_HISTORY" | tr -d ' ')"
+is "the newest rows are the ones kept" "6" "$(awk -F'\t' 'END{print $2}' "$CLAUDE_TIMESTAMP_HISTORY")"
+
+fresh 'HISTORY_LIMIT=nonsense'
+is "a nonsense limit falls back" "200" "$CT_HISTORY_LIMIT"
+
+if command -v jq >/dev/null 2>&1; then
+  echo
+  echo "what a session adds up to"
+
+  seed_session() {
+    # $1 seconds ago it started, $2 turns, $3 waited, $4 idle, $5 failed
+    local b; b="$(ct_state_file "acct2")"
+    mkdir -p "$(ct_state_dir)"
+    printf '%s' "$(( $(date +%s) - $1 ))" > "$b.start"
+    printf '%s' "$2" > "$b.turns"
+    printf '%s' "$3" > "$b.wait"
+    [ "${4:-0}" -gt 0 ] && printf '%s' "$4" > "$b.idle"
+    [ "${5:-0}" -gt 0 ] && printf '%s' "$5" > "$b.failed"
+    return 0
+  }
+  end_session() { printf '{"session_id":"acct2"}' | bash "$SCRIPTS/session-end.sh" | jq -r '.systemMessage // ""'; }
+
+  fresh
+  seed_session 5400 9 754 2100 0
+  out="$(end_session)"
+  contains "the summary reports time away" "35m00s away" "$out"
+
+  fresh
+  seed_session 5400 9 754 0 0
+  out="$(end_session)"
+  lacks "a session with no breaks does not mention being away" "away" "$out"
+
+  fresh 'TOOL_TIMING=on'
+  seed_session 600 3 120 0 2
+  printf 'Bash 4.0\n' > "$(ct_state_file "acct2").tools"
+  out="$(end_session)"
+  contains "the summary counts failed tool calls" "2 failed" "$out"
+
+  fresh
+  seed_session 600 3 120 0 0
+  end_session >/dev/null
+  is "a finished session is recorded" "1" "$(wc -l < "$CLAUDE_TIMESTAMP_HISTORY" | tr -d ' ')"
+
+  fresh 'HISTORY=off'
+  seed_session 600 3 120 0 0
+  end_session >/dev/null
+  if [ -s "$CLAUDE_TIMESTAMP_HISTORY" ]; then
+    fail "HISTORY=off records nothing" "no file" "rows were written"
+  else
+    pass "HISTORY=off records nothing"
+  fi
+
+  fresh
+  out="$(printf '{"session_id":"never"}' | bash "$SCRIPTS/session-end.sh")"
+  if [ -s "$CLAUDE_TIMESTAMP_HISTORY" ]; then
+    fail "a session with no turns is not recorded" "no rows" "a row was written"
+  else
+    pass "a session with no turns is not recorded"
+  fi
+
+  echo
+  echo "counting time away and failures"
+
+  fresh 'COLOR=none' 'ELAPSED=off' 'IDLE_AFTER=3600' 'DATE_ROLLOVER=off'
+  printf '%s' "$(( $(date +%s) - 7200 ))" > "$(ct_state_dir)/gap.last"
+  printf '{"session_id":"gap","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" >/dev/null
+  is_near "a marked break is added to the time away" 7200 "$(ct_read_counter "$(ct_state_dir)/gap.idle")" 3
+
+  fresh 'TOOL_TIMING=on'
+  printf '{"session_id":"f","tool_use_id":"t1","tool_name":"Bash"}' | bash "$SCRIPTS/pre-tool-use.sh"
+  printf '{"session_id":"f","tool_use_id":"t1","tool_name":"Bash","hook_event_name":"PostToolUseFailure"}' \
+    | bash "$SCRIPTS/post-tool-use.sh"
+  is "a failed call is counted" "1" "$(ct_read_counter "$(ct_state_file f).failed")"
+  is "a failed call is still timed" "1" "$(wc -l < "$(ct_tool_log f)" | tr -d ' ')"
+
+  printf '{"session_id":"f","tool_use_id":"t2","tool_name":"Bash"}' | bash "$SCRIPTS/pre-tool-use.sh"
+  printf '{"session_id":"f","tool_use_id":"t2","tool_name":"Bash","hook_event_name":"PostToolUse"}' \
+    | bash "$SCRIPTS/post-tool-use.sh"
+  is "a successful call is not counted as failed" "1" "$(ct_read_counter "$(ct_state_file f).failed")"
+fi
+
+echo
+echo "stats"
+
+fresh
+out="$(bash "$SCRIPTS/setup.sh" --stats)"
+contains "stats says when there is nothing yet" "No sessions recorded yet" "$out"
+
+fresh 'HISTORY=off'
+contains "stats explains a switched-off history" "switched off" "$(bash "$SCRIPTS/setup.sh" --stats)"
+
+fresh
+printf '2026-08-11T09:00:00\t1200\t7\t300\t200\t1\n2026-08-12T09:00:00\t2400\t14\t600\t400\t0\n' \
+  > "$CLAUDE_TIMESTAMP_HISTORY"
+out="$(bash "$SCRIPTS/setup.sh" --stats)"
+contains "stats counts the sessions"    "sessions        2"  "$out"
+contains "stats totals the time"        "1h00m"              "$out"
+contains "stats totals the turns"       "turns           21" "$out"
+contains "stats names the longest"      "2026-08-12"         "$out"
+contains "stats reports the range"      "recorded from"      "$out"
+contains "stats counts failures"        "failed tools    1"  "$out"
+
+bash "$SCRIPTS/setup.sh" --history=off --history-limit=50 >/dev/null
+ct_load_config
+is "--history is accepted"       "off" "$CT_HISTORY"
+is "--history-limit is accepted" "50"  "$CT_HISTORY_LIMIT"
+refutes "a non on/off history is refused" bash "$SCRIPTS/setup.sh" --history=sometimes
+refutes "a non-numeric limit is refused"  bash "$SCRIPTS/setup.sh" --history-limit=lots
 
 echo
 echo "project configuration"

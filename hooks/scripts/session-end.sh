@@ -34,12 +34,19 @@ if [ "$CT_SUMMARY" = "on" ]; then
 
   # A session with no recorded turns has nothing worth reporting -- most likely
   # it was opened and closed, or the plugin was configured mid-session.
+  idle="$(ct_read_counter "${state_file}.idle")"
+  failed="$(ct_read_counter "${state_file}.failed")"
+
   if [ "$started" -gt 0 ] && [ "$turns" -gt 0 ]; then
     total=$(( $(date +%s) - started ))
     [ "$total" -lt 0 ] && total=0
     summary="claude-timestamp: session lasted $(ct_format_duration "$total") over $turns turn"
     [ "$turns" -eq 1 ] || summary="${summary}s"
-    summary="${summary}, $(ct_format_duration "$waited") of it waiting."
+    summary="${summary}, $(ct_format_duration "$waited") of it waiting"
+    # Only mentioned when there was a break worth mentioning, so a session you
+    # sat through end to end does not read as though it had gaps.
+    [ "$idle" -gt 0 ] && summary="${summary}, $(ct_format_duration "$idle") away"
+    summary="${summary}."
   fi
 
   # Tool timings, when they were being collected. Summed per tool and reported
@@ -57,11 +64,20 @@ if [ "$CT_SUMMARY" = "on" ]; then
     if [ -n "$tools" ]; then
       [ -n "$summary" ] && summary="$summary"$'\n'
       summary="${summary}slowest tools: $tools"
+      if [ "$failed" -gt 0 ]; then
+        summary="${summary}. $failed failed"
+      fi
     fi
   fi
 fi
 
 [ -n "$summary" ] && jq -n --arg msg "$summary" '{systemMessage: $msg}'
+
+# Record the session before its state is cleared, so /timestamps stats has
+# something to work from once the session is gone.
+if [ "$CT_HISTORY" = "on" ] && [ "${started:-0}" -gt 0 ] && [ "${turns:-0}" -gt 0 ]; then
+  ct_history_append "${total:-0}" "$turns" "$waited" "${idle:-0}" "${failed:-0}"
+fi
 
 ct_clear_state "$session_id"
 exit 0

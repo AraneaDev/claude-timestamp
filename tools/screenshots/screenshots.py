@@ -285,7 +285,47 @@ def shot_doctor():
     render(raw, ASSETS / "doctor.png", cols=84, rows=36, crlf=True)
 
 
-SHOTS = {"hero": shot_hero, "wizard": shot_wizard, "doctor": shot_doctor}
+def shot_stats():
+    """The real --stats output over a synthetic history.
+
+    The rows are made up, because a believable screenshot needs more sessions
+    than this repository has accumulated. Everything else, the arithmetic and
+    the formatting, is the real command.
+    """
+    work = WORK / "stats"
+    (work / "home" / ".claude").mkdir(parents=True, exist_ok=True)
+    (work / "home" / ".claude" / "claude-timestamp.conf").write_text(DOCTOR_CONFIG)
+
+    history = work / "home" / ".claude" / "claude-timestamp-history.tsv"
+    rows = [
+        ("2026-08-04T09:12:00", 4820, 41, 1180, 900, 0),
+        ("2026-08-05T10:41:00", 2260, 19, 540, 0, 1),
+        ("2026-08-06T08:55:00", 7415, 63, 2210, 3600, 2),
+        ("2026-08-07T14:02:00", 1180, 9, 260, 0, 0),
+        ("2026-08-10T09:30:00", 5360, 44, 1490, 1800, 0),
+        ("2026-08-11T11:15:00", 3090, 27, 700, 0, 3),
+        ("2026-08-12T09:05:00", 6240, 52, 1810, 2400, 1),
+        ("2026-08-13T16:20:00", 900, 6, 190, 0, 0),
+        ("2026-08-17T10:00:00", 4100, 33, 1020, 1200, 0),
+        ("2026-08-19T09:45:00", 2980, 24, 660, 0, 1),
+    ]
+    history.write_text("".join("\t".join(str(f) for f in r) + "\n" for r in rows))
+
+    env = dict(os.environ)
+    env.pop("CLAUDE_TIMESTAMP_CONFIG", None)
+    env.pop("CLAUDE_TIMESTAMP_HISTORY", None)
+    env["HOME"] = str(work / "home")
+    proc = subprocess.run(
+        ["bash", str(SCRIPTS / "setup.sh"), "--stats"],
+        capture_output=True, env=env, cwd=str(work),
+    )
+    raw = proc.stdout + proc.stderr
+    (work / "stats.raw").write_bytes(raw)
+    render(raw, ASSETS / "stats.png", cols=64, rows=22, crlf=True)
+
+
+SHOTS = {"hero": shot_hero, "wizard": shot_wizard, "doctor": shot_doctor,
+         "stats": shot_stats}
 
 if __name__ == "__main__":
     which = sys.argv[1] if len(sys.argv) > 1 else "all"

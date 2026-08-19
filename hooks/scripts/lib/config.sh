@@ -104,6 +104,8 @@ _ct_read_config_file() {
       SUMMARY)        CT_SUMMARY="$value" ;;
       SUBAGENTS)      CT_SUBAGENTS="$value" ;;
       TOOL_TIMING)    CT_TOOL_TIMING="$value" ;;
+      HISTORY)        CT_HISTORY="$value" ;;
+      HISTORY_LIMIT)  CT_HISTORY_LIMIT="$value" ;;
       INJECT_CONTEXT) CT_INJECT_CONTEXT="$value" ;;
     esac
   done < "$file"
@@ -125,6 +127,8 @@ ct_load_config() {
   CT_SUMMARY="on"
   CT_SUBAGENTS="on"
   CT_TOOL_TIMING="off"        # adds two forks per tool call, so opt-in
+  CT_HISTORY="on"
+  CT_HISTORY_LIMIT="200"      # sessions kept; older ones are dropped
   CT_INJECT_CONTEXT="true"
 
   CT_CONFIG_PROBLEMS=""
@@ -201,6 +205,8 @@ ct_validate_config() {
   _ct_require SUMMARY        ct_is_onoff        on
   _ct_require SUBAGENTS      ct_is_onoff        on
   _ct_require TOOL_TIMING    ct_is_onoff        off
+  _ct_require HISTORY        ct_is_onoff        on
+  _ct_require HISTORY_LIMIT  ct_is_seconds      200
   _ct_require INJECT_CONTEXT ct_is_bool         true
 }
 
@@ -404,6 +410,45 @@ ct_clear_state() {
   local base
   base="$(ct_state_file "${1:-}")" || return 0
   rm -f "$base" "$base".* 2>/dev/null
+  return 0
+}
+
+# Where finished sessions are recorded. Unlike the per-session state this
+# outlives the session, so it lives beside the config rather than in a
+# temporary directory.
+#
+# Timing only: no message text, no tool arguments, and no paths. There is
+# nothing in here that says what you were working on, which keeps a file that
+# accumulates indefinitely from becoming something you would rather it were
+# not.
+ct_history_path() {
+  printf '%s' "${CLAUDE_TIMESTAMP_HISTORY:-${HOME}/.claude/claude-timestamp-history.tsv}"
+}
+
+# Append one finished session and drop anything past the retention limit.
+# Fields: when, seconds, turns, waited, idle, failed tools.
+ct_history_append() {
+  local file limit tmp
+  file="$(ct_history_path)"
+  mkdir -p "$(dirname "$file")" 2>/dev/null || return 0
+
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$(date '+%Y-%m-%dT%H:%M:%S')" "${1:-0}" "${2:-0}" "${3:-0}" "${4:-0}" "${5:-0}" >> "$file" 2>/dev/null || return 0
+
+  limit="${CT_HISTORY_LIMIT:-200}"
+  case "$limit" in ''|*[!0-9]*) limit=200 ;; esac
+  [ "$limit" -lt 1 ] && limit=1
+
+  # Rewrite only when the file has actually outgrown the limit, so the common
+  # case is a plain append.
+  if [ "$(wc -l < "$file" 2>/dev/null || echo 0)" -gt "$limit" ]; then
+    tmp="$file.$$"
+    if tail -n "$limit" "$file" > "$tmp" 2>/dev/null; then
+      mv "$tmp" "$file" 2>/dev/null || rm -f "$tmp"
+    else
+      rm -f "$tmp"
+    fi
+  fi
   return 0
 }
 

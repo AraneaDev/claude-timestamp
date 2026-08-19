@@ -71,6 +71,18 @@ $ARGUMENTS
   message.
 - Inject context: `true` or `false`, whether Claude is told the local time each
   prompt was sent.
+- History: `--history=on|off` records each finished session for `--stats`, and
+  `--history-limit=N` decides how many are kept.
+
+## Showing what the sessions add up to
+
+If the user asks how long they have been spending, how much of it was waiting,
+or anything else about their own usage, run:
+
+`bash "${CLAUDE_PLUGIN_ROOT}/hooks/scripts/setup.sh" --stats`
+
+It reports over the sessions recorded so far. The history holds timings only,
+no message text and no paths, which is worth saying if they ask what is stored.
 
 ## When something is not working
 
