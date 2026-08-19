@@ -43,7 +43,7 @@ There is nothing to set up. The defaults work as soon as it is installed, and
   tools were slowest and how many calls failed.
 
 ```
-claude-timestamp: session lasted 1h30m over 12 turns, 24m18s of it waiting, 35m away.
+claude-timestamp: session lasted 1h30m over 12 turns, 24m18s of it waiting, 35m00s away.
 slowest tools: Bash 41.2s (18 calls), WebFetch 8.1s (1 call), Read 2.0s (37 calls). 2 failed
 ```
 
