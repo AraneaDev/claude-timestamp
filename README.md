@@ -6,7 +6,7 @@
 
 [![Release](https://img.shields.io/github/v/release/AraneaDev/claude-timestamp)](https://github.com/AraneaDev/claude-timestamp/releases)
 [![CI](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml/badge.svg)](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-294%20passing-2b8a3e)](tests/run.sh)
+[![Tests](https://img.shields.io/badge/tests-297%20passing-2b8a3e)](tests/run.sh)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-364fc7)](#platform-notes)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
@@ -152,7 +152,7 @@ cannot run anything.
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| `ENABLED` | `on` | Master switch. `off` silences every hook without uninstalling |
+| `ENABLED` | `on` | Master switch. `off` silences every hook without uninstalling it |
 | `TZ` | machine local | IANA name such as `Europe/Amsterdam`, or empty for local time |
 | `DISPLAY_FORMAT` | `24h` | `24h`, `short`, `12h`, `iso`, or any strftime string |
 | `CONTEXT_FORMAT` | `24h` | Same values, for the time Claude is told |
@@ -214,7 +214,7 @@ bash "$CLAUDE_PLUGIN_ROOT/hooks/scripts/setup.sh" --stats
 Each finished session is appended to the history file, and the oldest are
 dropped once there are more than `HISTORY_LIMIT` of them.
 
-The file holds timings only: six numbers and a date per session. No message
+The file holds timings only: five numbers and a date per session. No message
 text, no tool arguments, and no paths, so nothing in it says what you were
 working on. Switch it off entirely with `HISTORY=off`.
 
@@ -235,9 +235,12 @@ bash "$CLAUDE_PLUGIN_ROOT/hooks/scripts/setup.sh" --doctor
   <img src="assets/doctor.png" alt="Output of the doctor self-check" width="760">
 </p>
 
-It checks that `jq` is present, that the config parses, that `ENABLED` is on,
-that a pinned timezone can actually be applied on this machine, and that the
-state directory is writable. It exits non-zero if any of that fails.
+It checks that `jq` is present, that the config parses, that a pinned timezone
+can actually be applied on this machine, and that the state directory is
+writable, and exits non-zero if any of that fails. It also reports whether
+`ENABLED` is on: switching the plugin off on purpose is not itself a problem,
+so that line alone will not fail the check, but it is usually why you ran
+doctor in the first place.
 
 ## How it works
 
@@ -278,7 +281,7 @@ to whole seconds and the call counts carry the signal.
 ## Development
 
 ```bash
-bash tests/run.sh                                    # 294 assertions, no framework
+bash tests/run.sh                                    # 297 assertions, no framework
 shellcheck -S style -e SC1091 hooks/scripts/**/*.sh  # clean
 bash tools/check-docs.sh                             # README against the code
 ```
@@ -310,13 +313,15 @@ bash tools/screenshots/make.sh          # all of them
 bash tools/screenshots/make.sh doctor   # just one
 ```
 
-It drives the real programs, the wizard and doctor through a pty and the hero
-and picker shots through an actual Claude Code session, then renders what was
-painted using a terminal emulator. Nothing in those images is mocked up. The
-hero and picker shots therefore need a working login and spend tokens, and the
-hero shot's durations differ every run because they are real measurements.
-Python dependencies install into
-a virtualenv beside the script.
+It drives the real programs, then renders what was captured using a terminal
+emulator. Hero, picker and wizard run through a pty, so the shot shows a real
+terminal rather than a reconstruction; doctor and stats capture plain output
+instead, since neither draws anything a pty would change. Nothing in those
+images is mocked up. Hero and picker talk to an actual Claude Code session, so
+they need a working login and spend tokens; wizard, doctor and stats run local
+scripts only and are free and offline. The hero shot's durations differ every
+run because they are real measurements. Python dependencies install into a
+virtualenv beside the script.
 
 ## Releases
 
