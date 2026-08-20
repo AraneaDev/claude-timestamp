@@ -84,6 +84,26 @@ done < <(jq -r '.keys | to_entries[] | select(.value.values) |
                 [$e.key, $e.value.validator, .] | @tsv' schema.json)
 [ "$values_ok" -eq 1 ] && note "every listed value passes its validator"
 
+# A preset that names a key the loader does not read, or a value its validator
+# rejects, would write a config the plugin then silently ignores.
+presets_ok=1
+while IFS="$(printf '\t')" read -r preset key value; do
+  [ -n "$preset" ] || continue
+  validator="$(jq -r --arg k "$key" '.keys[$k].validator // empty' schema.json)"
+  if [ -z "$validator" ]; then
+    note "preset $preset sets $key, which is not in schema.json"
+    presets_ok=0
+    status=1
+  elif ! "$validator" "$value"; then
+    note "preset $preset sets $key=$value, which $validator rejects"
+    presets_ok=0
+    status=1
+  fi
+done < <(jq -r '.presets // {} | to_entries[] |
+                .key as $p | .value.set | to_entries[] |
+                [$p, .key, .value] | @tsv' schema.json)
+[ "$presets_ok" -eq 1 ] && note "every preset writes keys the loader reads"
+
 echo "assertion count"
 actual="$(bash tests/run.sh 2>/dev/null | sed -n 's/^\([0-9]*\) passed.*/\1/p' | tail -1)"
 claimed="$(sed -n 's/.*# \([0-9]*\) assertions.*/\1/p' README.md | head -1)"

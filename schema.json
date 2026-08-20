@@ -151,5 +151,23 @@
       ],
       "describes": "tell Claude the local time each prompt was sent"
     }
+  },
+  "presets": {
+    "quieter": {
+      "describes": "just the time, nothing else",
+      "set": { "ENABLED": "on", "DISPLAY_FORMAT": "short", "ELAPSED": "off" }
+    },
+    "default": {
+      "describes": "the time and how long the turn took",
+      "set": { "ENABLED": "on", "DISPLAY_FORMAT": "24h", "ELAPSED": "on", "COLOR": "dim", "SLOW_AFTER": "60", "TOOL_TIMING": "off" }
+    },
+    "detailed": {
+      "describes": "adds which tool made a slow turn slow",
+      "set": { "ENABLED": "on", "DISPLAY_FORMAT": "24h", "ELAPSED": "on", "COLOR": "dim", "SLOW_AFTER": "30", "TOOL_TIMING": "on" }
+    },
+    "off": {
+      "describes": "no marker at all, without uninstalling",
+      "set": { "ENABLED": "off" }
+    }
   }
 }
