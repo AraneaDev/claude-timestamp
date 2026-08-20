@@ -166,7 +166,7 @@ cannot run anything.
 | `SUMMARY` | `on` | Report session totals on exit |
 | `SUBAGENTS` | `on` | Stamp subagent messages as well |
 | `TOOL_TIMING` | `off` | Time individual tool calls and name the slowest |
-| `HISTORY` | `on` | Record each finished session for `--stats` |
+| `HISTORY` | `on` | Record each finished session, for `/timestamps` and `--stats` |
 | `HISTORY_LIMIT` | `200` | How many recorded sessions to keep |
 
 `NO_COLOR` disables colour regardless of `COLOR`.
@@ -197,6 +197,12 @@ state directory is writable, and which version is installed. That is what lets
 
 ## What the sessions add up to
 
+Ask Claude how long you've been at this, or how much of it was waiting, and it
+reads the totals straight out of `~/.claude/claude-timestamp-history.tsv` and
+answers in the chat, no command needed.
+
+For a terminal view, run the script instead:
+
 ```bash
 bash "$CLAUDE_PLUGIN_ROOT/hooks/scripts/setup.sh" --stats
 ```
@@ -205,14 +211,21 @@ bash "$CLAUDE_PLUGIN_ROOT/hooks/scripts/setup.sh" --stats
   <img src="assets/stats.png" alt="Totals across recorded sessions" width="660">
 </p>
 
-Each finished session is appended to `~/.claude/claude-timestamp-history.tsv`,
-and the oldest are dropped once there are more than `HISTORY_LIMIT` of them.
+Each finished session is appended to the history file, and the oldest are
+dropped once there are more than `HISTORY_LIMIT` of them.
 
 The file holds timings only: six numbers and a date per session. No message
 text, no tool arguments, and no paths, so nothing in it says what you were
 working on. Switch it off entirely with `HISTORY=off`.
 
 ## When something is wrong
+
+Ask Claude why you're not seeing timestamps and it reads the facts file and
+your config against `schema.json` to tell you what it finds. The most common
+cause is `ENABLED=off`, easy to set and forget since it silences every hook
+without a trace on screen.
+
+For a terminal check, run doctor instead:
 
 ```bash
 bash "$CLAUDE_PLUGIN_ROOT/hooks/scripts/setup.sh" --doctor
@@ -222,9 +235,9 @@ bash "$CLAUDE_PLUGIN_ROOT/hooks/scripts/setup.sh" --doctor
   <img src="assets/doctor.png" alt="Output of the doctor self-check" width="760">
 </p>
 
-It checks that `jq` is present, that the config parses, that a pinned timezone
-can actually be applied on this machine, and that the state directory is
-writable. It exits non-zero if any of that fails.
+It checks that `jq` is present, that the config parses, that `ENABLED` is on,
+that a pinned timezone can actually be applied on this machine, and that the
+state directory is writable. It exits non-zero if any of that fails.
 
 ## How it works
 

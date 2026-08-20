@@ -129,12 +129,13 @@ Report what changed, from what to what, and that it is already live.
 
 Show them where they are, then offer the presets from `schema.json`.
 
-First render the current settings as the marker they actually produce, so they
-are looking at the thing rather than at a table. Show the clock only, never a
-duration: elapsed time and tool attribution are measured by the hook after a
-reply finishes, and you are answering mid-conversation, before this reply has
-one. A plausible-looking `+2m14s` here would be a guess wearing the shape of a
-measurement, not an illustrative example, so leave it out rather than label it.
+First render the current settings' clock, in the format and colour they
+actually produce, so they are looking at the thing rather than at a table.
+Show the clock only, never a duration: elapsed time and tool attribution are
+measured by the hook after a reply finishes, and you are answering
+mid-conversation, before this reply has one. A plausible-looking `+2m14s` here
+would be a guess wearing the shape of a measurement, not an illustrative
+example, so leave it out rather than label it.
 State the rest of the current settings in words, including whether elapsed and
 tool timing are on:
 
@@ -173,9 +174,12 @@ The result reads roughly like this:
 
 "Other" is where a request to change one particular thing arrives, so take
 whatever they type there and drill into that setting. Offer walking every
-setting in the text above the question rather than spending an option on it,
-and if they ask for that, go through them in the order `schema.json` lists
-them.
+setting in the text above the question rather than spending an option on it.
+Use this exact phrasing, with no number in it: "say so and I'll go through
+them one at a time, in schema order." Counting the keys yourself and naming a
+total is not the job; the schema's key set changes, and a stale count would
+be a bug you shipped by hand. If they ask for that, go through them in the
+order `schema.json` lists them.
 
 Every preview must render what that preset really produces, under that
 preset's own settings rather than the current ones:

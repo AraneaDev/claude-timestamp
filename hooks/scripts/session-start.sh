@@ -8,8 +8,8 @@
 # blocked, so we always exit 0.
 #
 # systemMessage is the documented way to put text in front of the USER. Plain
-# stdout would only reach the model, which is the wrong audience for both of
-# these messages.
+# stdout would only reach the model, which is the wrong audience for all
+# three of these messages.
 #
 # Invoked as `bash <this script>` (see hooks.json), so it does not depend on
 # the executable bit surviving clones, zips, or Windows checkouts.
