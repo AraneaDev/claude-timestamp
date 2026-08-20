@@ -102,6 +102,7 @@ export TMPDIR="$WORK/state"
 mkdir -p "$TMPDIR"
 export CLAUDE_TIMESTAMP_CONFIG="$WORK/config.conf"
 export CLAUDE_TIMESTAMP_HISTORY="$WORK/history.tsv"
+export CLAUDE_TIMESTAMP_FACTS="$WORK/facts.json"
 
 source "$SCRIPTS/lib/config.sh"
 
@@ -726,12 +727,14 @@ else
   tz_expected=""
 fi
 
-# Answers in prompt order: timezone, display format, elapsed, slow after, idle
-# after, summary, colour, tell-Claude, write. Tool timing and context format
-# are skipped because summary and tell-Claude are answered off and false.
-printf '%s\nshort\non\n30\n0\noff\ncyan\nfalse\ny\n' "$tz_answer" \
+# Answers in prompt order: enabled, timezone, display format, elapsed, slow
+# after, idle after, summary, colour, tell-Claude, write. Tool timing and
+# context format are skipped because summary and tell-Claude are answered off
+# and false.
+printf 'off\n%s\nshort\non\n30\n0\noff\ncyan\nfalse\ny\n' "$tz_answer" \
   | bash "$SCRIPTS/setup.sh" >/dev/null 2>&1
 ct_load_config
+is "the wizard writes enabled"        "off"        "$CT_ENABLED"
 is "the wizard writes the timezone"   "$tz_expected" "$CT_TZ"
 is "the wizard writes the format"     "short"      "$CT_DISPLAY_FORMAT"
 is "the wizard writes the threshold"  "30"         "$CT_SLOW_AFTER"
@@ -739,11 +742,20 @@ is "the wizard writes the colour"     "cyan"       "$CT_COLOR"
 is "the wizard writes the summary"    "off"        "$CT_SUMMARY"
 is "the wizard writes the injection"  "false"      "$CT_INJECT_CONTEXT"
 
-fresh 'COLOR=green'
-printf 'local\niso\non\n0\n0\non\non\nred\ntrue\n24h\nn\n' \
+# Answering off then back on in a fresh run proves the question round-trips
+# rather than only ever moving in one direction.
+fresh 'ENABLED=off'
+printf 'on\n%s\nshort\non\n30\n0\noff\ncyan\nfalse\ny\n' "$tz_answer" \
   | bash "$SCRIPTS/setup.sh" >/dev/null 2>&1
 ct_load_config
-is "answering no writes nothing" "green" "$CT_COLOR"
+is "the wizard round-trips enabled back on" "on" "$CT_ENABLED"
+
+fresh 'COLOR=green'
+printf 'off\nlocal\niso\non\n0\n0\non\non\nred\ntrue\n24h\nn\n' \
+  | bash "$SCRIPTS/setup.sh" >/dev/null 2>&1
+ct_load_config
+is "answering no writes nothing"          "green" "$CT_COLOR"
+is "answering no leaves enabled untouched" "on"    "$CT_ENABLED"
 
 # Input running out must not leave the wizard asking forever.
 fresh
@@ -987,6 +999,266 @@ contains "doctor reports the platform" "uname" "$out"
 contains "doctor renders a preview"    "Preview" "$out"
 contains "doctor reports no problems on a healthy setup" "No problems found" "$out"
 asserts "doctor exits zero when healthy" bash "$SCRIPTS/setup.sh" --doctor
+
+echo
+echo "facts file"
+
+fresh
+rm -f "$CLAUDE_TIMESTAMP_FACTS"
+printf '{"session_id":"facts"}' | bash "$SCRIPTS/session-start.sh" >/dev/null
+asserts "facts: written at session start" test -r "$CLAUDE_TIMESTAMP_FACTS"
+asserts "facts: valid json" jq -e . "$CLAUDE_TIMESTAMP_FACTS"
+is "facts: reports jq present" "true" "$(jq -r '.jq' "$CLAUDE_TIMESTAMP_FACTS")"
+is "facts: version matches version.txt" \
+   "$(tr -d '[:space:]' < "$ROOT/version.txt")" \
+   "$(jq -r '.version' "$CLAUDE_TIMESTAMP_FACTS")"
+is "facts: state dir is writable here" "true" "$(jq -r '.state_dir_writable' "$CLAUDE_TIMESTAMP_FACTS")"
+if ct_tz_supported; then
+  is "facts: timezone database detected" "true" "$(jq -r '.tz_database' "$CLAUDE_TIMESTAMP_FACTS")"
+else
+  is "facts: timezone database absent" "false" "$(jq -r '.tz_database' "$CLAUDE_TIMESTAMP_FACTS")"
+fi
+
+# A stale file must be replaced rather than appended to or left alone.
+printf 'not json at all' > "$CLAUDE_TIMESTAMP_FACTS"
+printf '{"session_id":"facts"}' | bash "$SCRIPTS/session-start.sh" >/dev/null
+asserts "facts: a stale file is replaced" jq -e . "$CLAUDE_TIMESTAMP_FACTS"
+
+# Written by rename, so a concurrent reader cannot see a half-written file.
+is "facts: no temp file left behind" "" "$(find "$WORK" -name 'facts.json.*' 2>/dev/null)"
+
+# The absence of a temp file is necessary but not sufficient: a direct write
+# also leaves none behind. Pin the actual claim -- the file is replaced by
+# rename, not edited in place -- by checking the inode changes.
+printf '{}' > "$CLAUDE_TIMESTAMP_FACTS"
+# shellcheck disable=SC2012  # a fixed temp path, and `ls -i` is the only
+# inode read that works on GNU, BSD and Git Bash alike.
+before="$(ls -i "$CLAUDE_TIMESTAMP_FACTS" | awk '{print $1}')"
+printf '{"session_id":"facts"}' | bash "$SCRIPTS/session-start.sh" >/dev/null
+# shellcheck disable=SC2012  # a fixed temp path, and `ls -i` is the only
+# inode read that works on GNU, BSD and Git Bash alike.
+after="$(ls -i "$CLAUDE_TIMESTAMP_FACTS" | awk '{print $1}')"
+refutes "facts: replaced by rename, not written in place" test "$before" = "$after"
+
+# ct_write_facts resolves the plugin root via
+# `cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd` as a plain command-
+# substitution assignment. Under set -e that is NOT a context errexit skips
+# (unlike an if, a &&/||, or a negation), so if that cd ever fails the whole
+# of session-start.sh used to die right there -- silently swallowing every
+# later systemMessage (config-problems banner, tz-unhonoured banner, and the
+# first-run banner) along with it, for a script that must always exit 0 and
+# never swallow output.
+#
+# Filesystem permissions cannot force that cd to fail here: its target is
+# always an ancestor directory of the very script being executed, so denying
+# access to it would also prevent the script from being opened at all (and,
+# separately, this sandbox runs as root, which bypasses permission checks
+# entirely). Instead, BASH_ENV is used to shadow the `cd` builtin for just
+# this one subprocess, failing only the specific "go up two levels" call and
+# leaving every other cd (including the one that locates lib/config.sh two
+# lines into the script) untouched.
+BLOCK_ROOT_CD="$WORK/block-root-cd.sh"
+cat > "$BLOCK_ROOT_CD" <<'EOF'
+cd() {
+  case "$*" in
+    *"/../..") return 1 ;;
+    *) builtin cd "$@" ;;
+  esac
+}
+EOF
+
+rm -f "$CLAUDE_TIMESTAMP_CONFIG" "$CLAUDE_TIMESTAMP_FACTS"
+out="$(printf '{"session_id":"facts"}' | BASH_ENV="$BLOCK_ROOT_CD" bash "$SCRIPTS/session-start.sh")"
+status=$?
+is "facts: a root-resolution failure still exits 0" "0" "$status"
+contains "facts: a root-resolution failure still emits the first-run banner" "/timestamps" "$out"
+asserts "facts: a root-resolution failure still writes a valid facts file" jq -e . "$CLAUDE_TIMESTAMP_FACTS"
+is "facts: a root-resolution failure falls back to an unknown version" \
+   "unknown" "$(jq -r '.version' "$CLAUDE_TIMESTAMP_FACTS")"
+
+echo
+echo "enabled switch"
+
+fresh 'ENABLED=off'
+is "enabled: parsed from the config" "off" "$CT_ENABLED"
+
+out="$(printf '{"session_id":"off-1","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh")"
+is "enabled=off: no context is injected" "" "$out"
+
+fresh 'ENABLED=off'
+out="$(printf '{"index":0,"session_id":"off-2","delta":"hello"}' | bash "$SCRIPTS/message-display.sh")"
+is "enabled=off: no marker is drawn" "" "$out"
+
+# A real turn is recorded with ENABLED=on, then the plugin is switched off
+# before session-end.sh runs -- state exists (turns > 0), so the empty output
+# proves session-end.sh's own guard fired rather than there being nothing to
+# summarise. That is also the realistic "switched off mid-session" path.
+fresh 'ENABLED=on'
+printf '{"session_id":"off-3","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+printf 'ENABLED=off\n' > "$CLAUDE_TIMESTAMP_CONFIG"
+out="$(printf '{"session_id":"off-3"}' | bash "$SCRIPTS/session-end.sh")"
+is "enabled=off: no session summary" "" "$out"
+
+# Switching off mid-session must not strand that session's state files --
+# they would otherwise sit until the 7-day sweep instead of being cleared at
+# the session's own end.
+is "enabled=off: state is still cleared" "" \
+   "$(find "$(ct_state_dir)" -name 'off-3*' 2>/dev/null)"
+
+# The facts file must still be written, or /timestamps could never turn the
+# plugin back on. COLOR=banana is pinned alongside ENABLED=off so a config
+# problem exists that would otherwise produce a systemMessage -- proving
+# silence here comes from the ENABLED guard, not from there being nothing to
+# report.
+fresh 'ENABLED=off' 'COLOR=banana'
+rm -f "$CLAUDE_TIMESTAMP_FACTS"
+out="$(printf '{"session_id":"off-4"}' | bash "$SCRIPTS/session-start.sh")"
+asserts "enabled=off: facts are still published" test -r "$CLAUDE_TIMESTAMP_FACTS"
+is "enabled=off: session start stays quiet" "" "$out"
+
+# The tool-timing hooks fire per tool call rather than per message, so they
+# get their own ENABLED=off check. TOOL_TIMING=on so, absent the guard, both
+# would actually write.
+fresh 'ENABLED=off' 'TOOL_TIMING=on'
+tool_state="$(ct_tool_state_file "off-5" "t1")"
+printf '{"session_id":"off-5","tool_use_id":"t1"}' | bash "$SCRIPTS/pre-tool-use.sh" >/dev/null
+refutes "enabled=off: pre-tool-use writes no state" test -r "$tool_state"
+
+# The state file is planted directly rather than via pre-tool-use.sh, whose
+# own guard already blocks it above -- this isolates post-tool-use.sh's guard
+# so the assertion below actually exercises it.
+mkdir -p "$(ct_state_dir)"
+ct_now_precise > "$tool_state"
+tool_log="$(ct_tool_log "off-5")"
+printf '{"session_id":"off-5","tool_use_id":"t1","tool_name":"Bash","hook_event_name":"PostToolUse"}' \
+  | bash "$SCRIPTS/post-tool-use.sh" >/dev/null
+refutes "enabled=off: post-tool-use writes no log" test -s "$tool_log"
+
+fresh 'ENABLED=on'
+out="$(printf '{"index":0,"session_id":"on-1","delta":"hello"}' | bash "$SCRIPTS/message-display.sh")"
+contains "enabled=on: the marker comes back" "hello" "$out"
+
+fresh 'ENABLED=banana'
+is "enabled: an unusable value falls back to on" "on" "$CT_ENABLED"
+contains "enabled: and says so" "ENABLED=banana is not valid" "$CT_CONFIG_PROBLEMS"
+
+fresh
+bash "$SCRIPTS/setup.sh" --enabled=off >/dev/null
+ct_load_config
+is "enabled: setup.sh writes it" "off" "$CT_ENABLED"
+bash "$SCRIPTS/setup.sh" --enabled=on >/dev/null
+ct_load_config
+is "enabled: and writes it back" "on" "$CT_ENABLED"
+refutes "enabled: setup.sh refuses a bad value" \
+  bash "$SCRIPTS/setup.sh" --enabled=banana
+
+# A project may switch the plugin off for one repository without touching the
+# user's own configuration.
+project="$WORK/proj-enabled"
+mkdir -p "$project"
+( cd "$project" && CLAUDE_TIMESTAMP_CONFIG="" HOME="$WORK" \
+    bash "$SCRIPTS/setup.sh" --project --enabled=off >/dev/null )
+contains "enabled: a project can pin it" "ENABLED=off" \
+  "$(cat "$project/.claude/claude-timestamp.conf" 2>/dev/null)"
+
+echo
+echo "slow turn attribution"
+
+fresh
+mkdir -p "$(ct_state_dir)"
+log="$(ct_state_dir)/attr.turntools"
+
+printf 'Bash 118\nRead 2\n' > "$log"
+is "attribution: names the dominant tool" "Bash 1m58s" "$(ct_dominant_tool "$log" 134)"
+
+printf 'Bash 40\nRead 2\n' > "$log"
+refutes "attribution: silent when no tool dominates" ct_dominant_tool "$log" 134
+
+printf 'Bash 45\n' > "$log"
+is "attribution: sub-minute reads in seconds" "Bash 45s" "$(ct_dominant_tool "$log" 60)"
+
+printf 'Bash 30\nRead 32\n' > "$log"
+is "attribution: sums per tool, not per call" "Read 32s" "$(ct_dominant_tool "$log" 62)"
+
+# Tool calls run concurrently, so four 30s Bash calls can finish inside a 32s
+# turn. The per-tool sum (120s) must never be rendered larger than the turn
+# actually took.
+printf 'Bash 30\nBash 30\nBash 30\nBash 30\n' > "$log"
+is "attribution: clamps a duration sum larger than the turn" "Bash 32s" "$(ct_dominant_tool "$log" 32)"
+
+: > "$log"
+refutes "attribution: silent on an empty log" ct_dominant_tool "$log" 134
+refutes "attribution: silent on a missing log" ct_dominant_tool "$(ct_state_dir)/nope" 134
+refutes "attribution: silent when the turn was instant" ct_dominant_tool "$log" 0
+
+# The per-turn log must be cleared at each prompt, or the second turn inherits
+# the first turn's tools and blames the wrong one.
+fresh 'TOOL_TIMING=on'
+printf '{"session_id":"turnlog","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+printf 'Bash 99\n' > "$(ct_turn_tool_log turnlog)"
+printf '{"session_id":"turnlog","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+is "attribution: the per-turn log is cleared each prompt" "" "$(cat "$(ct_turn_tool_log turnlog)")"
+
+# End to end through the marker.
+fresh 'TOOL_TIMING=on' 'SLOW_AFTER=1'
+printf '{"session_id":"marker","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+printf '%s' "$(( $(date +%s) - 200 ))" > "$(ct_state_file marker)"
+printf 'Bash 190\n' > "$(ct_turn_tool_log marker)"
+out="$(strip_ansi "$(printf '{"index":0,"session_id":"marker","delta":"x"}' \
+  | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')")"
+contains "attribution: appears in the marker" "Bash 3m10s" "$out"
+contains "attribution: the separator is a middle dot" "· Bash" "$out"
+
+# Off by default, because it rides on TOOL_TIMING.
+fresh 'SLOW_AFTER=1'
+printf '{"session_id":"noattr","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+printf '%s' "$(( $(date +%s) - 200 ))" > "$(ct_state_file noattr)"
+printf 'Bash 190\n' > "$(ct_turn_tool_log noattr)"
+out="$(strip_ansi "$(printf '{"index":0,"session_id":"noattr","delta":"x"}' \
+  | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')")"
+lacks "attribution: absent when tool timing is off" "Bash" "$out"
+
+# A fast turn is not annotated even when a tool dominated it.
+fresh 'TOOL_TIMING=on' 'SLOW_AFTER=600'
+printf '{"session_id":"fast","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+printf '%s' "$(( $(date +%s) - 200 ))" > "$(ct_state_file fast)"
+printf 'Bash 190\n' > "$(ct_turn_tool_log fast)"
+out="$(strip_ansi "$(printf '{"index":0,"session_id":"fast","delta":"x"}' \
+  | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')")"
+lacks "attribution: absent on a fast turn" "Bash" "$out"
+
+echo
+echo "away context"
+
+fresh 'IDLE_AFTER=1800'
+mkdir -p "$(ct_state_dir)"
+printf '%s' "$(( $(date +%s) - 10800 ))" > "$(ct_state_file away).last"
+out="$(printf '{"session_id":"away","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh" \
+  | jq -r '.hookSpecificOutput.additionalContext')"
+contains "away: a long gap is reported" "after a 3h break" "$out"
+contains "away: the time is still there" "Message sent at local time" "$out"
+
+fresh 'IDLE_AFTER=1800'
+printf '%s' "$(( $(date +%s) - 60 ))" > "$(ct_state_file near).last"
+out="$(printf '{"session_id":"near","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh" \
+  | jq -r '.hookSpecificOutput.additionalContext')"
+lacks "away: a short gap is not reported" "break" "$out"
+
+fresh 'IDLE_AFTER=0'
+printf '%s' "$(( $(date +%s) - 10800 ))" > "$(ct_state_file disabled).last"
+out="$(printf '{"session_id":"disabled","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh" \
+  | jq -r '.hookSpecificOutput.additionalContext')"
+lacks "away: silent when idle marking is off" "break" "$out"
+
+fresh 'IDLE_AFTER=1800' 'INJECT_CONTEXT=false'
+printf '%s' "$(( $(date +%s) - 10800 ))" > "$(ct_state_file noinject).last"
+out="$(printf '{"session_id":"noinject","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh")"
+is "away: nothing is injected when context injection is off" "" "$out"
+
+fresh 'IDLE_AFTER=1800'
+out="$(printf '{"session_id":"firstprompt","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh" \
+  | jq -r '.hookSpecificOutput.additionalContext')"
+lacks "away: the first prompt of a session has no gap" "break" "$out"
 
 echo
 echo "----"

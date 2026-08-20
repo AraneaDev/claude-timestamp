@@ -33,6 +33,10 @@ IFS=$'\x1f' read -r index session_id agent_id cwd <<< "$(printf '%s' "$input" \
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/config.sh"
 ct_load_config "$cwd"
 
+# The master switch. Everything below draws on screen, writes state, or talks
+# to the model, and off means none of it.
+[ "$CT_ENABLED" = "on" ] || exit 0
+
 # Subagents can run several at a time, so their output interleaves and a marker
 # on every message is noise rather than signal. Opt-out, not the default.
 if [ "$CT_SUBAGENTS" = "off" ] && [ -n "$agent_id" ]; then
@@ -104,6 +108,14 @@ if [ -n "$elapsed" ]; then
   if [ "$CT_SLOW_AFTER" -gt 0 ] 2>/dev/null && [ -n "$elapsed_secs" ] \
      && [ "$elapsed_secs" -ge "$CT_SLOW_AFTER" ]; then
     inner="$inner $(ct_paint "$CT_SLOW_COLOR" "$elapsed")$base_start"
+    # Why it was slow, when that can be answered. Only tool timing collects
+    # the data, so this follows TOOL_TIMING rather than adding a key of its
+    # own: a marker that names the culprit is what tool timing is for.
+    if [ "$CT_TOOL_TIMING" = "on" ] && [ -n "$state_file" ]; then
+      if culprit="$(ct_dominant_tool "${state_file}.turntools" "$elapsed_secs")"; then
+        inner="$inner · $culprit"
+      fi
+    fi
   else
     inner="$inner $elapsed"
   fi

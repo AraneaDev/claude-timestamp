@@ -6,13 +6,13 @@
 
 [![Release](https://img.shields.io/github/v/release/AraneaDev/claude-timestamp)](https://github.com/AraneaDev/claude-timestamp/releases)
 [![CI](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml/badge.svg)](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-246%20passing-2b8a3e)](tests/run.sh)
+[![Tests](https://img.shields.io/badge/tests-297%20passing-2b8a3e)](tests/run.sh)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-364fc7)](#platform-notes)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
-<img src="assets/timestamps.png" alt="Timestamps on assistant messages, with a slow turn highlighted" width="840">
+<img src="assets/timestamps.gif" alt="A real Claude Code session, timestamps on assistant messages, with a slow turn highlighted" width="840">
 
-<sub>Two fast turns render dim. The third crossed the slow threshold, so its duration is coloured.</sub>
+<sub>Two fast turns render dim. The third crosses the slow threshold, so its duration is coloured and, with `TOOL_TIMING` on, named after the tool that caused it. Tool timing is off by default, so a plain install will not show this on its own. This is a real session played back at real speed -- nothing here is sped up or looped faster than it happened.</sub>
 
 </div>
 
@@ -32,7 +32,9 @@ There is nothing to set up. The defaults work as soon as it is installed, and
 - **Shows how long a turn took.** `+2m14s` counts from the moment you pressed
   enter to the moment the reply appeared.
 - **Highlights slow turns.** Once a turn passes a threshold you set, its
-  duration changes colour so you notice it instead of reading past it.
+  duration changes colour so you notice it instead of reading past it. Turn on
+  `TOOL_TIMING` and it names what made the turn slow, too:
+  `[13:22:13 +2m14s · Bash 1m58s]`.
 - **Marks where you stepped away.** A gap between messages is labelled, so a
   session you returned to the next morning still reads in order.
 - **Tells Claude the time.** The model receives the local time each prompt was
@@ -79,14 +81,29 @@ appear. An already-running session will not pick the plugin up.
 Nothing needs configuring. The defaults work, and the plugin tells you where to
 change them on first run.
 
+Run `/timestamps` inside Claude Code. Bare, it shows what you have now and
+offers a handful of presets, each previewed as the marker it actually produces:
+
+<p align="center">
+  <img src="assets/picker.png" alt="The in-chat picker, showing presets with a preview of each" width="760">
+</p>
+
+It also takes the request directly, so `/timestamps tokyo`, `/timestamps no
+colour` and `/timestamps 12 hour clock` each land in one step.
+
 Changes take effect on your **next message**. Every hook reads the config file
 each time it runs, so nothing needs restarting. Only installing the plugin
 needs a new session, because that is when hooks are bound.
 
-To change something, run `/timestamps` inside Claude Code. It takes the request
-directly, so `/timestamps tokyo`, `/timestamps no colour` and
-`/timestamps 12 hour clock` all work in one step. Run it bare and it will ask. For an interactive wizard with a live preview instead, run the setup
-script in a terminal, where it has a real TTY:
+Nothing about this runs a shell script. `/timestamps` reads
+`schema.json`, which ships with the plugin and describes every setting, and
+edits your config file directly.
+
+### From a terminal
+
+If you would rather answer the questions yourself, the setup script has an
+interactive wizard. It needs a real TTY, so run it in a terminal rather than
+asking Claude to:
 
 ```bash
 bash "$CLAUDE_PLUGIN_ROOT/hooks/scripts/setup.sh"
@@ -101,7 +118,7 @@ it. The colour list and the result line are rendered by the same code that
 draws the real marker, so a preview cannot drift from what you will actually
 see.
 
-It also takes flags, which is what `/timestamps` uses:
+It also takes flags, so several settings can be set from a terminal in one call:
 
 ```bash
 setup.sh --tz=Asia/Tokyo --display=short --color=dim --slow-after=30
@@ -135,6 +152,7 @@ cannot run anything.
 
 | Setting | Default | What it does |
 | --- | --- | --- |
+| `ENABLED` | `on` | Master switch. `off` silences every hook without uninstalling it |
 | `TZ` | machine local | IANA name such as `Europe/Amsterdam`, or empty for local time |
 | `DISPLAY_FORMAT` | `24h` | `24h`, `short`, `12h`, `iso`, or any strftime string |
 | `CONTEXT_FORMAT` | `24h` | Same values, for the time Claude is told |
@@ -148,7 +166,7 @@ cannot run anything.
 | `SUMMARY` | `on` | Report session totals on exit |
 | `SUBAGENTS` | `on` | Stamp subagent messages as well |
 | `TOOL_TIMING` | `off` | Time individual tool calls and name the slowest |
-| `HISTORY` | `on` | Record each finished session for `--stats` |
+| `HISTORY` | `on` | Record each finished session, for `/timestamps` and `--stats` |
 | `HISTORY_LIMIT` | `200` | How many recorded sessions to keep |
 
 `NO_COLOR` disables colour regardless of `COLOR`.
@@ -171,7 +189,19 @@ treated as a strftime string, so the escape hatch needs no separate setting.
 `TOOL_TIMING` is off by default because it is the only setting that costs
 anything per tool call. Everything else costs once per message.
 
+Alongside the config, the plugin writes `~/.claude/claude-timestamp.facts.json`
+at the start of every session. It holds what cannot be worked out by reading
+the configuration: whether this machine has a timezone database, whether the
+state directory is writable, and which version is installed. That is what lets
+`/timestamps` answer questions about your setup without running anything.
+
 ## What the sessions add up to
+
+Ask Claude how long you've been at this, or how much of it was waiting, and it
+reads the totals straight out of `~/.claude/claude-timestamp-history.tsv` and
+answers in the chat, no command needed.
+
+For a terminal view, run the script instead:
 
 ```bash
 bash "$CLAUDE_PLUGIN_ROOT/hooks/scripts/setup.sh" --stats
@@ -181,14 +211,21 @@ bash "$CLAUDE_PLUGIN_ROOT/hooks/scripts/setup.sh" --stats
   <img src="assets/stats.png" alt="Totals across recorded sessions" width="660">
 </p>
 
-Each finished session is appended to `~/.claude/claude-timestamp-history.tsv`,
-and the oldest are dropped once there are more than `HISTORY_LIMIT` of them.
+Each finished session is appended to the history file, and the oldest are
+dropped once there are more than `HISTORY_LIMIT` of them.
 
-The file holds timings only: six numbers and a date per session. No message
+The file holds timings only: five numbers and a date per session. No message
 text, no tool arguments, and no paths, so nothing in it says what you were
 working on. Switch it off entirely with `HISTORY=off`.
 
 ## When something is wrong
+
+Ask Claude why you're not seeing timestamps and it reads the facts file and
+your config against `schema.json` to tell you what it finds. The most common
+cause is `ENABLED=off`, easy to set and forget since it silences every hook
+without a trace on screen.
+
+For a terminal check, run doctor instead:
 
 ```bash
 bash "$CLAUDE_PLUGIN_ROOT/hooks/scripts/setup.sh" --doctor
@@ -200,7 +237,10 @@ bash "$CLAUDE_PLUGIN_ROOT/hooks/scripts/setup.sh" --doctor
 
 It checks that `jq` is present, that the config parses, that a pinned timezone
 can actually be applied on this machine, and that the state directory is
-writable. It exits non-zero if any of that fails.
+writable, and exits non-zero if any of that fails. It also reports whether
+`ENABLED` is on: switching the plugin off on purpose is not itself a problem,
+so that line alone will not fail the check, but it is usually why you ran
+doctor in the first place.
 
 ## How it works
 
@@ -241,7 +281,7 @@ to whole seconds and the call counts carry the signal.
 ## Development
 
 ```bash
-bash tests/run.sh                                    # 246 assertions, no framework
+bash tests/run.sh                                    # 297 assertions, no framework
 shellcheck -S style -e SC1091 hooks/scripts/**/*.sh  # clean
 bash tools/check-docs.sh                             # README against the code
 ```
@@ -273,12 +313,15 @@ bash tools/screenshots/make.sh          # all of them
 bash tools/screenshots/make.sh doctor   # just one
 ```
 
-It drives the real programs, the wizard and doctor through a pty and the hero
-shot through an actual Claude Code session, then renders what was painted using
-a terminal emulator. Nothing in those images is mocked up. The hero shot
-therefore needs a working login and spends tokens, and its durations differ
-every run because they are real measurements. Python dependencies install into
-a virtualenv beside the script.
+It drives the real programs, then renders what was captured using a terminal
+emulator. Hero, picker and wizard run through a pty, so the shot shows a real
+terminal rather than a reconstruction; doctor and stats capture plain output
+instead, since neither draws anything a pty would change. Nothing in those
+images is mocked up. Hero and picker talk to an actual Claude Code session, so
+they need a working login and spend tokens; wizard, doctor and stats run local
+scripts only and are free and offline. The hero shot's durations differ every
+run because they are real measurements. Python dependencies install into a
+virtualenv beside the script.
 
 ## Releases
 

@@ -92,6 +92,7 @@ _ct_read_config_file() {
     esac
 
     case "$key" in
+      ENABLED)        CT_ENABLED="$value" ;;
       TZ)             CT_TZ="$value" ;;
       DISPLAY_FORMAT) CT_DISPLAY_FORMAT="$value" ;;
       CONTEXT_FORMAT) CT_CONTEXT_FORMAT="$value" ;;
@@ -115,6 +116,7 @@ _ct_read_config_file() {
 # consumer is a separate file, so shellcheck cannot see them being read.
 # shellcheck disable=SC2034
 ct_load_config() {
+  CT_ENABLED="on"             # master switch; off silences every hook
   CT_TZ=""                    # empty = machine local time
   CT_DISPLAY_FORMAT="24h"     # preset name or raw strftime
   CT_CONTEXT_FORMAT="24h"
@@ -193,6 +195,7 @@ _ct_require() {
 # writing to a user's screen on every message.
 ct_validate_config() {
   CT_CONFIG_PROBLEMS=""
+  _ct_require ENABLED        ct_is_onoff        on
   _ct_require TZ             ct_is_valid_tz     ""
   _ct_require DISPLAY_FORMAT ct_is_valid_format 24h
   _ct_require CONTEXT_FORMAT ct_is_valid_format 24h
@@ -365,6 +368,38 @@ ct_tool_log() {
   printf '%s.tools' "$base"
 }
 
+# The tool log for the current turn only. The session-wide log answers "what
+# made this session slow"; this one answers "what made this reply slow", which
+# is a different question and needs a log that starts empty at every prompt.
+ct_turn_tool_log() {
+  local base
+  base="$(ct_state_file "${1:-}")" || return 1
+  printf '%s.turntools' "$base"
+}
+
+# Name the tool responsible for a slow turn, or say nothing.
+#
+# A tool has to account for at least half the turn before it is worth naming.
+# Below that the marker would be pointing at something that was not the reason,
+# which is worse than staying quiet. Returns non-zero when nothing dominates,
+# so the caller can simply test it.
+ct_dominant_tool() {
+  local log="${1:-}" total="${2:-0}"
+  [ -r "$log" ] || return 1
+  case "$total" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$total" -gt 0 ] || return 1
+  awk -v total="$total" '
+    { sum[$1] += $2 }
+    END {
+      best = ""; top = 0
+      for (t in sum) if (sum[t] > top) { top = sum[t]; best = t }
+      if (top > total) top = total
+      if (best == "" || top * 2 < total) exit 1
+      if (top < 60) printf "%s %ds", best, int(top + 0.5)
+      else          printf "%s %dm%02ds", best, int(top / 60), int(top) % 60
+    }' "$log"
+}
+
 # Seconds -> 45s / 2m14s / 1h03m. Refuses anything that is not a whole number,
 # which also covers a clock that moved backwards.
 ct_format_duration() {
@@ -423,6 +458,19 @@ ct_clear_state() {
 # not.
 ct_history_path() {
   printf '%s' "${CLAUDE_TIMESTAMP_HISTORY:-${HOME}/.claude/claude-timestamp-history.tsv}"
+}
+
+# Machine-level facts, published for whoever configures the plugin from inside
+# Claude Code so they need no subprocess to learn them. Only things that cannot
+# be read out of the config files belong here: the effective settings do not,
+# because they would be stale the moment the config is edited, and the project
+# config path does not, because it depends on a working directory that differs
+# between concurrent sessions.
+#
+# CLAUDE_TIMESTAMP_FACTS exists so the test suite can point at a temp file; it
+# is not a user-facing setting.
+ct_facts_path() {
+  printf '%s' "${CLAUDE_TIMESTAMP_FACTS:-${HOME}/.claude/claude-timestamp.facts.json}"
 }
 
 # Append one finished session and drop anything past the retention limit.

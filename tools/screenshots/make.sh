@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
-# Regenerate the screenshots in assets/.
+# Regenerate the screenshots (and the hero animation) in assets/.
 #
-#   bash tools/screenshots/make.sh            both shots
+#   bash tools/screenshots/make.sh            every shot
 #   bash tools/screenshots/make.sh doctor     just the doctor shot
 #
-# The hero shot drives a real Claude Code session, so it needs a working login
-# and it spends tokens. The doctor shot is free and offline.
+# hero and picker each drive a real Claude Code session -- a working login,
+# tokens spent, and however long the model takes to answer. wizard, doctor
+# and stats run local scripts only and are free and offline. Plain
+# `make.sh` with no argument therefore spends two real sessions every time
+# it runs; pass a single shot's name if that is not what you want.
 #
 # Dependencies go in a virtualenv beside this script rather than in the system
 # python, which on most distributions refuses the install anyway (PEP 668).
