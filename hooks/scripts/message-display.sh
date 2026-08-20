@@ -33,6 +33,10 @@ IFS=$'\x1f' read -r index session_id agent_id cwd <<< "$(printf '%s' "$input" \
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/config.sh"
 ct_load_config "$cwd"
 
+# The master switch. Everything below draws on screen, writes state, or talks
+# to the model, and off means none of it.
+[ "$CT_ENABLED" = "on" ] || exit 0
+
 # Subagents can run several at a time, so their output interleaves and a marker
 # on every message is noise rather than signal. Opt-out, not the default.
 if [ "$CT_SUBAGENTS" = "off" ] && [ -n "$agent_id" ]; then

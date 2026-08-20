@@ -23,6 +23,10 @@ IFS=$'\x1f' read -r session_id cwd <<< "$(printf '%s' "$input" \
 
 ct_load_config "$cwd"
 
+# The master switch. Everything below draws on screen, writes state, or talks
+# to the model, and off means none of it.
+[ "$CT_ENABLED" = "on" ] || exit 0
+
 state_file="$(ct_state_file "$session_id")" || exit 0
 
 summary=""

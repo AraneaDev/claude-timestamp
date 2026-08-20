@@ -92,6 +92,7 @@ _ct_read_config_file() {
     esac
 
     case "$key" in
+      ENABLED)        CT_ENABLED="$value" ;;
       TZ)             CT_TZ="$value" ;;
       DISPLAY_FORMAT) CT_DISPLAY_FORMAT="$value" ;;
       CONTEXT_FORMAT) CT_CONTEXT_FORMAT="$value" ;;
@@ -115,6 +116,7 @@ _ct_read_config_file() {
 # consumer is a separate file, so shellcheck cannot see them being read.
 # shellcheck disable=SC2034
 ct_load_config() {
+  CT_ENABLED="on"             # master switch; off silences every hook
   CT_TZ=""                    # empty = machine local time
   CT_DISPLAY_FORMAT="24h"     # preset name or raw strftime
   CT_CONTEXT_FORMAT="24h"
@@ -193,6 +195,7 @@ _ct_require() {
 # writing to a user's screen on every message.
 ct_validate_config() {
   CT_CONFIG_PROBLEMS=""
+  _ct_require ENABLED        ct_is_onoff        on
   _ct_require TZ             ct_is_valid_tz     ""
   _ct_require DISPLAY_FORMAT ct_is_valid_format 24h
   _ct_require CONTEXT_FORMAT ct_is_valid_format 24h

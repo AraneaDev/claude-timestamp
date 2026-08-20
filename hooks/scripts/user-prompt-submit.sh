@@ -29,6 +29,10 @@ IFS=$'\x1f' read -r session_id cwd <<< "$(printf '%s' "$input" \
 
 ct_load_config "$cwd"
 
+# The master switch. Everything below draws on screen, writes state, or talks
+# to the model, and off means none of it.
+[ "$CT_ENABLED" = "on" ] || exit 0
+
 # The turn start is recorded unconditionally: the elapsed marker and the
 # end-of-session summary both read it, and they are configured independently,
 # so gating the write on either one would silently break the other.

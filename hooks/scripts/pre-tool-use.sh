@@ -14,6 +14,10 @@ ct_load_config
 
 # Checked before touching jq, so the disabled path costs one bash fork and a
 # small file read rather than a jq process on every tool call.
+#
+# The master switch. Everything below draws on screen, writes state, or talks
+# to the model, and off means none of it.
+[ "$CT_ENABLED" = "on" ] || exit 0
 [ "$CT_TOOL_TIMING" = "on" ] || exit 0
 command -v jq >/dev/null 2>&1 || exit 0
 

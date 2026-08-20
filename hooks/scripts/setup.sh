@@ -51,6 +51,8 @@ Flags
                               it is the only setting that costs anything per
                               tool call rather than per message.
   --inject-context=true|false Tell Claude the time each prompt was sent.
+  --enabled=on|off            Master switch. off silences every hook without
+                              uninstalling the plugin.
   --project                   Write to this project instead of your account,
                               at .claude/claude-timestamp.conf in the current
                               directory. Only the settings you name are
@@ -299,6 +301,9 @@ write_config() {
 # Written by setup.sh -- safe to edit by hand. Run /timestamps to change it
 # interactively. Unknown keys are ignored.
 
+# Master switch. off silences every hook without uninstalling the plugin.
+ENABLED=$CT_ENABLED
+
 # IANA timezone name, or empty for the machine's local time.
 TZ=$CT_TZ
 
@@ -361,7 +366,7 @@ write_project_config() {
   set -- TZ "$1" DISPLAY_FORMAT "$2" CONTEXT_FORMAT "$3" COLOR "$4" \
          ELAPSED "$5" INJECT_CONTEXT "$6" DATE_ROLLOVER "$7" SLOW_AFTER "$8" \
          SLOW_COLOR "$9" IDLE_AFTER "${10}" SUMMARY "${11}" SUBAGENTS "${12}" \
-         TOOL_TIMING "${13}"
+         TOOL_TIMING "${13}" ENABLED "${14}"
 
   while [ "$#" -gt 0 ]; do
     key="$1"; value="$2"; shift 2
@@ -574,7 +579,7 @@ main() {
   local interactive=1 action="write" project_scope=0
   local set_tz="" set_display="" set_context="" set_color="" set_elapsed="" set_inject="" set_rollover=""
   local set_slow="" set_slowcolor="" set_idle="" set_summary="" set_subagents="" set_tooltiming=""
-  local set_history="" set_historylimit=""
+  local set_history="" set_historylimit="" set_enabled=""
 
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -585,6 +590,7 @@ main() {
       --context=*)        set_context="${1#*=}"; interactive=0 ;;
       --color=*)          set_color="${1#*=}";   interactive=0 ;;
       --elapsed=*)        set_elapsed="${1#*=}"; interactive=0 ;;
+      --enabled=*)        set_enabled="${1#*=}";  interactive=0 ;;
       --date-rollover=*)  set_rollover="${1#*=}"; interactive=0 ;;
       --slow-after=*)     set_slow="${1#*=}";      interactive=0 ;;
       --slow-color=*)     set_slowcolor="${1#*=}"; interactive=0 ;;
@@ -631,11 +637,12 @@ main() {
   if [ -n "$set_tooltiming" ]; then valid_onoff TOOL_TIMING "$set_tooltiming" || exit 2; CT_TOOL_TIMING="$set_tooltiming"; fi
   if [ -n "$set_history" ]; then valid_onoff HISTORY "$set_history" || exit 2; CT_HISTORY="$set_history"; fi
   if [ -n "$set_historylimit" ]; then valid_seconds HISTORY_LIMIT "$set_historylimit" || exit 2; CT_HISTORY_LIMIT="$set_historylimit"; fi
+  if [ -n "$set_enabled" ]; then valid_onoff ENABLED "$set_enabled" || exit 2; CT_ENABLED="$set_enabled"; fi
 
   if [ "$project_scope" = "1" ]; then
     write_project_config "$set_tz" "$set_display" "$set_context" "$set_color" \
       "$set_elapsed" "$set_inject" "$set_rollover" "$set_slow" "$set_slowcolor" \
-      "$set_idle" "$set_summary" "$set_subagents" "$set_tooltiming"
+      "$set_idle" "$set_summary" "$set_subagents" "$set_tooltiming" "$set_enabled"
   else
     write_config
   fi

@@ -1053,6 +1053,59 @@ is "facts: a root-resolution failure falls back to an unknown version" \
    "unknown" "$(jq -r '.version' "$CLAUDE_TIMESTAMP_FACTS")"
 
 echo
+echo "enabled switch"
+
+fresh 'ENABLED=off'
+is "enabled: parsed from the config" "off" "$CT_ENABLED"
+
+out="$(printf '{"session_id":"off-1","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh")"
+is "enabled=off: no context is injected" "" "$out"
+
+fresh 'ENABLED=off'
+out="$(printf '{"index":0,"session_id":"off-2","delta":"hello"}' | bash "$SCRIPTS/message-display.sh")"
+is "enabled=off: no marker is drawn" "" "$out"
+
+fresh 'ENABLED=off'
+printf '{"session_id":"off-3","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+out="$(printf '{"session_id":"off-3"}' | bash "$SCRIPTS/session-end.sh")"
+is "enabled=off: no session summary" "" "$out"
+
+# The facts file must still be written, or /timestamps could never turn the
+# plugin back on.
+fresh 'ENABLED=off'
+rm -f "$CLAUDE_TIMESTAMP_FACTS"
+out="$(printf '{"session_id":"off-4"}' | bash "$SCRIPTS/session-start.sh")"
+asserts "enabled=off: facts are still published" test -r "$CLAUDE_TIMESTAMP_FACTS"
+is "enabled=off: session start stays quiet" "" "$out"
+
+fresh 'ENABLED=on'
+out="$(printf '{"index":0,"session_id":"on-1","delta":"hello"}' | bash "$SCRIPTS/message-display.sh")"
+contains "enabled=on: the marker comes back" "hello" "$out"
+
+fresh 'ENABLED=banana'
+is "enabled: an unusable value falls back to on" "on" "$CT_ENABLED"
+contains "enabled: and says so" "ENABLED=banana is not valid" "$CT_CONFIG_PROBLEMS"
+
+fresh
+bash "$SCRIPTS/setup.sh" --enabled=off >/dev/null
+ct_load_config
+is "enabled: setup.sh writes it" "off" "$CT_ENABLED"
+bash "$SCRIPTS/setup.sh" --enabled=on >/dev/null
+ct_load_config
+is "enabled: and writes it back" "on" "$CT_ENABLED"
+refutes "enabled: setup.sh refuses a bad value" \
+  bash "$SCRIPTS/setup.sh" --enabled=banana
+
+# A project may switch the plugin off for one repository without touching the
+# user's own configuration.
+project="$WORK/proj-enabled"
+mkdir -p "$project"
+( cd "$project" && CLAUDE_TIMESTAMP_CONFIG="" HOME="$WORK" \
+    bash "$SCRIPTS/setup.sh" --project --enabled=off >/dev/null )
+contains "enabled: a project can pin it" "ENABLED=off" \
+  "$(cat "$project/.claude/claude-timestamp.conf" 2>/dev/null)"
+
+echo
 echo "----"
 printf '%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

@@ -73,6 +73,10 @@ ct_write_facts() {
 
 ct_write_facts
 
+# Off silences the advisories, but only after the facts have been published:
+# without them, /timestamps would have no way to switch the plugin back on.
+[ "$CT_ENABLED" = "on" ] || exit 0
+
 # A typo in the config file would otherwise do nothing visible: the value is
 # replaced by its default and the plugin carries on. Say it once, at the only
 # moment that is not in the middle of a conversation.

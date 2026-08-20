@@ -14,6 +14,9 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/config.sh"
 ct_load_config
 
+# The master switch. Everything below draws on screen, writes state, or talks
+# to the model, and off means none of it.
+[ "$CT_ENABLED" = "on" ] || exit 0
 [ "$CT_TOOL_TIMING" = "on" ] || exit 0
 command -v jq >/dev/null 2>&1 || exit 0
 

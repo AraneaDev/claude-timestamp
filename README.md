@@ -6,7 +6,7 @@
 
 [![Release](https://img.shields.io/github/v/release/AraneaDev/claude-timestamp)](https://github.com/AraneaDev/claude-timestamp/releases)
 [![CI](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml/badge.svg)](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-258%20passing-2b8a3e)](tests/run.sh)
+[![Tests](https://img.shields.io/badge/tests-271%20passing-2b8a3e)](tests/run.sh)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-364fc7)](#platform-notes)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
@@ -135,6 +135,7 @@ cannot run anything.
 
 | Setting | Default | What it does |
 | --- | --- | --- |
+| `ENABLED` | `on` | Master switch. `off` silences every hook without uninstalling |
 | `TZ` | machine local | IANA name such as `Europe/Amsterdam`, or empty for local time |
 | `DISPLAY_FORMAT` | `24h` | `24h`, `short`, `12h`, `iso`, or any strftime string |
 | `CONTEXT_FORMAT` | `24h` | Same values, for the time Claude is told |
@@ -241,7 +242,7 @@ to whole seconds and the call counts carry the signal.
 ## Development
 
 ```bash
-bash tests/run.sh                                    # 258 assertions, no framework
+bash tests/run.sh                                    # 271 assertions, no framework
 shellcheck -S style -e SC1091 hooks/scripts/**/*.sh  # clean
 bash tools/check-docs.sh                             # README against the code
 ```

@@ -1,5 +1,11 @@
 {
   "keys": {
+    "ENABLED": {
+      "default": "on",
+      "validator": "ct_is_onoff",
+      "values": ["on", "off"],
+      "describes": "master switch; off silences every hook without uninstalling the plugin"
+    },
     "TZ": {
       "default": "",
       "validator": "ct_is_valid_tz",
