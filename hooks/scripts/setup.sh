@@ -472,8 +472,17 @@ wizard() {
   echo "Press Enter to keep the value in brackets."
   echo
 
+  local answer
+
+  # Enabled
+  echo "Master switch for the whole plugin. Off silences every hook without"
+  echo "uninstalling it, and the rest of your settings stay put for next time."
+  answer="$(ask "Enable claude-timestamp? (on/off)" "$CT_ENABLED")"
+  case "$answer" in on|off) CT_ENABLED="$answer" ;; esac
+  echo
+
   # Timezone
-  local detected current answer
+  local detected current
   detected="$(detect_tz)"
   current="${CT_TZ:-${detected:-local}}"
   echo "Timezone. Type an IANA name (Europe/Amsterdam), or 'local' for this"

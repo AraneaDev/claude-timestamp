@@ -561,8 +561,8 @@ def shot_wizard():
     cols, rows = 84, 58
     # One Enter per question, then y to write. Spaced out because the wizard
     # redraws a colour palette between some of them.
-    keys = [(0.8 + i * 0.35, "\r") for i in range(10)]
-    keys.append((0.8 + 10 * 0.35, "y\r"))
+    keys = [(0.8 + i * 0.35, "\r") for i in range(11)]
+    keys.append((0.8 + 11 * 0.35, "y\r"))
     raw = capture_pty(
         ["bash", str(SCRIPTS / "setup.sh")],
         keys=keys, cols=cols, rows=rows, settle=3, total=40,

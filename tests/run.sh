@@ -727,12 +727,14 @@ else
   tz_expected=""
 fi
 
-# Answers in prompt order: timezone, display format, elapsed, slow after, idle
-# after, summary, colour, tell-Claude, write. Tool timing and context format
-# are skipped because summary and tell-Claude are answered off and false.
-printf '%s\nshort\non\n30\n0\noff\ncyan\nfalse\ny\n' "$tz_answer" \
+# Answers in prompt order: enabled, timezone, display format, elapsed, slow
+# after, idle after, summary, colour, tell-Claude, write. Tool timing and
+# context format are skipped because summary and tell-Claude are answered off
+# and false.
+printf 'off\n%s\nshort\non\n30\n0\noff\ncyan\nfalse\ny\n' "$tz_answer" \
   | bash "$SCRIPTS/setup.sh" >/dev/null 2>&1
 ct_load_config
+is "the wizard writes enabled"        "off"        "$CT_ENABLED"
 is "the wizard writes the timezone"   "$tz_expected" "$CT_TZ"
 is "the wizard writes the format"     "short"      "$CT_DISPLAY_FORMAT"
 is "the wizard writes the threshold"  "30"         "$CT_SLOW_AFTER"
@@ -740,11 +742,20 @@ is "the wizard writes the colour"     "cyan"       "$CT_COLOR"
 is "the wizard writes the summary"    "off"        "$CT_SUMMARY"
 is "the wizard writes the injection"  "false"      "$CT_INJECT_CONTEXT"
 
-fresh 'COLOR=green'
-printf 'local\niso\non\n0\n0\non\non\nred\ntrue\n24h\nn\n' \
+# Answering off then back on in a fresh run proves the question round-trips
+# rather than only ever moving in one direction.
+fresh 'ENABLED=off'
+printf 'on\n%s\nshort\non\n30\n0\noff\ncyan\nfalse\ny\n' "$tz_answer" \
   | bash "$SCRIPTS/setup.sh" >/dev/null 2>&1
 ct_load_config
-is "answering no writes nothing" "green" "$CT_COLOR"
+is "the wizard round-trips enabled back on" "on" "$CT_ENABLED"
+
+fresh 'COLOR=green'
+printf 'off\nlocal\niso\non\n0\n0\non\non\nred\ntrue\n24h\nn\n' \
+  | bash "$SCRIPTS/setup.sh" >/dev/null 2>&1
+ct_load_config
+is "answering no writes nothing"          "green" "$CT_COLOR"
+is "answering no leaves enabled untouched" "on"    "$CT_ENABLED"
 
 # Input running out must not leave the wizard asking forever.
 fresh
