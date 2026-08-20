@@ -102,6 +102,7 @@ export TMPDIR="$WORK/state"
 mkdir -p "$TMPDIR"
 export CLAUDE_TIMESTAMP_CONFIG="$WORK/config.conf"
 export CLAUDE_TIMESTAMP_HISTORY="$WORK/history.tsv"
+export CLAUDE_TIMESTAMP_FACTS="$WORK/facts.json"
 
 source "$SCRIPTS/lib/config.sh"
 
@@ -987,6 +988,33 @@ contains "doctor reports the platform" "uname" "$out"
 contains "doctor renders a preview"    "Preview" "$out"
 contains "doctor reports no problems on a healthy setup" "No problems found" "$out"
 asserts "doctor exits zero when healthy" bash "$SCRIPTS/setup.sh" --doctor
+
+echo
+echo "facts file"
+
+fresh
+rm -f "$CLAUDE_TIMESTAMP_FACTS"
+printf '{"session_id":"facts"}' | bash "$SCRIPTS/session-start.sh" >/dev/null
+asserts "facts: written at session start" test -r "$CLAUDE_TIMESTAMP_FACTS"
+asserts "facts: valid json" jq -e . "$CLAUDE_TIMESTAMP_FACTS"
+is "facts: reports jq present" "true" "$(jq -r '.jq' "$CLAUDE_TIMESTAMP_FACTS")"
+is "facts: version matches version.txt" \
+   "$(tr -d '[:space:]' < "$ROOT/version.txt")" \
+   "$(jq -r '.version' "$CLAUDE_TIMESTAMP_FACTS")"
+is "facts: state dir is writable here" "true" "$(jq -r '.state_dir_writable' "$CLAUDE_TIMESTAMP_FACTS")"
+if ct_tz_supported; then
+  is "facts: timezone database detected" "true" "$(jq -r '.tz_database' "$CLAUDE_TIMESTAMP_FACTS")"
+else
+  is "facts: timezone database absent" "false" "$(jq -r '.tz_database' "$CLAUDE_TIMESTAMP_FACTS")"
+fi
+
+# A stale file must be replaced rather than appended to or left alone.
+printf 'not json at all' > "$CLAUDE_TIMESTAMP_FACTS"
+printf '{"session_id":"facts"}' | bash "$SCRIPTS/session-start.sh" >/dev/null
+asserts "facts: a stale file is replaced" jq -e . "$CLAUDE_TIMESTAMP_FACTS"
+
+# Written by rename, so a concurrent reader cannot see a half-written file.
+is "facts: no temp file left behind" "" "$(find "$WORK" -name 'facts.json.*' 2>/dev/null)"
 
 echo
 echo "----"

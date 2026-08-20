@@ -425,6 +425,19 @@ ct_history_path() {
   printf '%s' "${CLAUDE_TIMESTAMP_HISTORY:-${HOME}/.claude/claude-timestamp-history.tsv}"
 }
 
+# Machine-level facts, published for whoever configures the plugin from inside
+# Claude Code so they need no subprocess to learn them. Only things that cannot
+# be read out of the config files belong here: the effective settings do not,
+# because they would be stale the moment the config is edited, and the project
+# config path does not, because it depends on a working directory that differs
+# between concurrent sessions.
+#
+# CLAUDE_TIMESTAMP_FACTS exists so the test suite can point at a temp file; it
+# is not a user-facing setting.
+ct_facts_path() {
+  printf '%s' "${CLAUDE_TIMESTAMP_FACTS:-${HOME}/.claude/claude-timestamp.facts.json}"
+}
+
 # Append one finished session and drop anything past the retention limit.
 # Fields: when, seconds, turns, waited, idle, failed tools.
 ct_history_append() {

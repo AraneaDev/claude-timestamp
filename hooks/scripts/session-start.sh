@@ -33,6 +33,46 @@ ct_prune_state
 # than the one configured is worth saying out loud, once.
 ct_load_config "$cwd"
 
+# Publish what cannot be worked out by reading files. This runs after
+# ct_load_config because ct_tz_supported memoises into the same shell.
+#
+# jq is always true here: the hook returns early when jq is missing, so the
+# file's absence carries that case. Recording it anyway means a reader gets one
+# shape rather than having to infer a negative from a missing file.
+ct_write_facts() {
+  local file tmp root version writable=false
+  file="$(ct_facts_path)"
+  mkdir -p "$(dirname "$file")" 2>/dev/null || return 0
+
+  # This script is hooks/scripts/session-start.sh, so the plugin root is two
+  # levels up and version.txt sits directly in it.
+  root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+  version="$(tr -d '[:space:]' < "$root/version.txt" 2>/dev/null)" || version=""
+  [ -n "$version" ] || version="unknown"
+
+  if mkdir -p "$(ct_state_dir)" 2>/dev/null && : > "$(ct_state_dir)/.probe" 2>/dev/null; then
+    writable=true
+    rm -f "$(ct_state_dir)/.probe" 2>/dev/null
+  fi
+
+  # Temp file and rename, so a session starting while another reads this never
+  # exposes a half-written file.
+  tmp="$file.$$"
+  if jq -n \
+      --arg version "$version" \
+      --argjson tz_database "$(ct_tz_supported && printf 'true' || printf 'false')" \
+      --argjson state_dir_writable "$writable" \
+      '{jq: true, tz_database: $tz_database, state_dir_writable: $state_dir_writable, version: $version}' \
+      > "$tmp" 2>/dev/null; then
+    mv "$tmp" "$file" 2>/dev/null || rm -f "$tmp" 2>/dev/null
+  else
+    rm -f "$tmp" 2>/dev/null
+  fi
+  return 0
+}
+
+ct_write_facts
+
 # A typo in the config file would otherwise do nothing visible: the value is
 # replaced by its default and the plugin carries on. Say it once, at the only
 # moment that is not in the middle of a conversation.
