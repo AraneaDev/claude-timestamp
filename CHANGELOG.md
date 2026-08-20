@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.5](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.4...v0.0.5) (2026-08-20)
+
+
+### Features
+
+* configure the plugin without running a shell script ([#24](https://github.com/AraneaDev/claude-timestamp/issues/24)) ([1a88f10](https://github.com/AraneaDev/claude-timestamp/commit/1a88f100c42d1f8d622c751df4be38d07e4be649))
+
 ## [0.0.4](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.3...v0.0.4) (2026-08-19)
 
 
