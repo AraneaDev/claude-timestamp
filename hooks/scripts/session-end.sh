@@ -35,6 +35,14 @@ fi
 
 state_file="$(ct_state_file "$session_id")" || { ct_clear_state "$session_id"; exit 0; }
 
+# A session can end mid-turn, which leaves a turn no Stop ever closed. That is
+# the same reconciliation the next prompt would have done, at the one other
+# place a turn can be abandoned, so the last turn of a session is not silently
+# dropped from its own summary.
+if [ "$CT_SUMMARY" = "on" ]; then
+  ct_close_turn "$state_file" "$(ct_read_counter "${state_file}.last")"
+fi
+
 summary=""
 
 if [ "$CT_SUMMARY" = "on" ]; then

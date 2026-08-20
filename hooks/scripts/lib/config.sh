@@ -439,6 +439,39 @@ ct_read_counter() {
   case "$value" in ''|*[!0-9]*) printf '0' ;; *) printf '%s' "$value" ;; esac
 }
 
+# Close the turn a prompt opened, adding what it cost to the running total of
+# time spent waiting.
+#
+# A turn is open while its start file exists without a .closed sibling. The
+# start file is left in place rather than removed, because message-display.sh
+# reads it to render the elapsed marker and nothing orders a message's final
+# flush against the event that ends a turn. Writing a sibling instead of
+# deleting the file being read makes the interleaving irrelevant.
+#
+# Closing is idempotent. A hook can cause the model to run again, so a turn
+# seeing two closes is a case to survive rather than one to assume away.
+#
+# The end time is a parameter rather than something read here, because the
+# callers know different things: the Stop hook knows the turn is ending now,
+# while a prompt reconciling a turn that was interrupted only knows when its
+# last message was drawn.
+ct_close_turn() {
+  local state_file="${1:-}" ended="${2:-0}" started
+  [ -n "$state_file" ] || return 0
+  [ -r "$state_file" ] || return 0
+  [ -e "${state_file}.closed" ] && return 0
+  case "$ended" in ''|*[!0-9]*) return 0 ;; esac
+  started="$(ct_read_counter "$state_file")"
+  [ "$started" -gt 0 ] || return 0
+  # A turn that ended before it began drew no message of its own, so it has
+  # nothing to contribute. It is still closed: it is over either way.
+  if [ "$ended" -gt "$started" ]; then
+    printf '%s' "$(( $(ct_read_counter "${state_file}.wait") + ended - started ))" > "${state_file}.wait"
+  fi
+  printf '%s' "$ended" > "${state_file}.closed"
+  return 0
+}
+
 # Remove every state file belonging to one session. Called at session end, so
 # the state directory does not accumulate a file set per session forever.
 ct_clear_state() {

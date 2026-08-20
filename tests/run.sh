@@ -386,28 +386,114 @@ if command -v jq >/dev/null 2>&1; then
   ct_clear_state "acct"
   mkdir -p "$(ct_state_dir)"
 
+  # The helper on its own, before any hook drives it.
+  printf '%s' "$(( $(date +%s) - 40 ))" > "$base"
+  ct_close_turn "$base" "$(date +%s)"
+  is_near "closing a turn adds it to the waiting total" 40 "$(ct_read_counter "$base.wait")" 2
+  asserts "closing a turn marks it closed" test -r "$base.closed"
+
+  # A hook can cause the model to run again, so a turn seeing two closes is a
+  # case to survive rather than one to assume away.
+  ct_close_turn "$base" "$(date +%s)"
+  is_near "closing a closed turn adds nothing" 40 "$(ct_read_counter "$base.wait")" 2
+
+  # An end that precedes the start means the turn drew no message of its own.
+  ct_clear_state "acct"; mkdir -p "$(ct_state_dir)"
+  printf '%s' "$(date +%s)" > "$base"
+  ct_close_turn "$base" "$(( $(date +%s) - 500 ))"
+  is "a turn ending before it started adds nothing" "0" "$(ct_read_counter "$base.wait")"
+  asserts "a turn ending before it started is still closed" test -r "$base.closed"
+
+  ct_clear_state "acct"; mkdir -p "$(ct_state_dir)"
+  ct_close_turn "$base" "$(date +%s)"
+  is "closing a turn that never started adds nothing" "0" "$(ct_read_counter "$base.wait")"
+
   # One prompt is one turn, however many messages it produces.
+  ct_clear_state "acct"; mkdir -p "$(ct_state_dir)"
   printf '{"session_id":"acct"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
   is "a prompt counts one turn" "1" "$(ct_read_counter "$base.turns")"
 
-  # Two messages in that turn, at 10s and then 25s from the prompt. Waiting
-  # must end at 25s, not 35s -- elapsed is cumulative, so summing raw values
-  # would report more waiting than the session lasted.
-  printf '%s' "$(( $(date +%s) - 10 ))" > "$base"
-  printf '{"session_id":"acct","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" >/dev/null
+  # Messages no longer accumulate waiting: the marker hook draws a marker.
   printf '%s' "$(( $(date +%s) - 25 ))" > "$base"
   printf '{"session_id":"acct","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" >/dev/null
-  # Double-counting would give roughly 10+25=35, so a two-second tolerance
-  # still fails the bug while surviving a second of clock drift.
-  is_near "messages in one turn are not double-counted" 25 "$(ct_read_counter "$base.wait")" 2
+  printf '{"session_id":"acct","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" >/dev/null
+  is "messages do not accumulate waiting" "0" "$(ct_read_counter "$base.wait")"
   is "extra messages do not add turns" "1" "$(ct_read_counter "$base.turns")"
 
-  # A second prompt starts a fresh turn and its own waiting budget.
+  # Stop closes it, once, for the whole turn.
+  printf '{"session_id":"acct","hook_event_name":"Stop"}' | bash "$SCRIPTS/stop.sh"
+  is_near "Stop records the whole turn as waiting" 25 "$(ct_read_counter "$base.wait")" 2
+  printf '{"session_id":"acct","hook_event_name":"Stop"}' | bash "$SCRIPTS/stop.sh"
+  is_near "a second Stop adds nothing" 25 "$(ct_read_counter "$base.wait")" 2
+
+  # A second prompt starts a fresh turn, and finds nothing left to reconcile.
   printf '{"session_id":"acct"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
   is "a second prompt counts a second turn" "2" "$(ct_read_counter "$base.turns")"
-  printf '%s' "$(( $(date +%s) - 5 ))" > "$base"
-  printf '{"session_id":"acct","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" >/dev/null
-  is_near "waiting accumulates across turns" 30 "$(ct_read_counter "$base.wait")" 3
+  is_near "a prompt after a clean close adds nothing" 25 "$(ct_read_counter "$base.wait")" 2
+  if [ -e "$base.closed" ]; then
+    fail "a new prompt reopens the turn" "no .closed file" "still closed"
+  else
+    pass "a new prompt reopens the turn"
+  fi
+  printf '%s' "$(( $(date +%s) - 30 ))" > "$base"
+  printf '{"session_id":"acct","hook_event_name":"StopFailure"}' | bash "$SCRIPTS/stop.sh"
+  is_near "StopFailure closes a turn too" 55 "$(ct_read_counter "$base.wait")" 3
+
+  # An interrupted turn never sees a Stop. The next prompt reconciles it using
+  # the last message drawn, so it contributes the part that was observed.
+  #
+  # Both offsets come from one reading of the clock. Taking two would let a
+  # second tick between them and make the difference 39 or 41, which is a flake
+  # rather than a bug, and this assertion is exact because nothing in it is
+  # measured against the clock at the moment the hook runs.
+  ct_clear_state "acct"; mkdir -p "$(ct_state_dir)"
+  printf '{"session_id":"acct"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  now="$(date +%s)"
+  printf '%s' "$(( now - 60 ))" > "$base"
+  printf '%s' "$(( now - 20 ))" > "$base.last"
+  printf '{"session_id":"acct"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  is "an interrupted turn contributes what was observed" "40" "$(ct_read_counter "$base.wait")"
+
+  # A turn interrupted before it drew anything has nothing to contribute.
+  ct_clear_state "acct"; mkdir -p "$(ct_state_dir)"
+  printf '{"session_id":"acct"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  printf '%s' "$(( $(date +%s) - 60 ))" > "$base"
+  printf '{"session_id":"acct"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  is "a turn that drew nothing contributes nothing" "0" "$(ct_read_counter "$base.wait")"
+
+  # The session can end mid-turn too, and that is the same reconciliation.
+  # One reading of the clock again, for the same reason as above.
+  ct_clear_state "acct"; mkdir -p "$(ct_state_dir)"
+  now="$(date +%s)"
+  printf '%s' "$(( now - 900 ))" > "$base.start"
+  printf '1' > "$base.turns"
+  printf '%s' "$(( now - 60 ))" > "$base"
+  printf '%s' "$(( now - 20 ))" > "$base.last"
+  out="$(printf '{"session_id":"acct"}' | bash "$SCRIPTS/session-end.sh" | jq -r '.systemMessage')"
+  contains "session end closes a turn still open" "40s of it waiting" "$out"
+
+  # The hook is silent even when it does have work to do: it writes state and
+  # says nothing. Asserted under a config where it runs, so that it cannot pass
+  # merely by having exited early.
+  fresh
+  ct_clear_state "acct"; mkdir -p "$(ct_state_dir)"
+  printf '%s' "$(( $(date +%s) - 40 ))" > "$base"
+  out="$(printf '{"session_id":"acct","hook_event_name":"Stop"}' | bash "$SCRIPTS/stop.sh")"
+  is "stop emits nothing" "" "$out"
+  is_near "stop did its work while staying silent" 40 "$(ct_read_counter "$base.wait")" 2
+
+  # Switched off, the hook writes nothing at all.
+  fresh 'SUMMARY=off'
+  printf '%s' "$(( $(date +%s) - 40 ))" > "$base"
+  printf '{"session_id":"acct","hook_event_name":"Stop"}' | bash "$SCRIPTS/stop.sh"
+  is "SUMMARY=off records no waiting" "0" "$(ct_read_counter "$base.wait")"
+
+  fresh 'ENABLED=off'
+  printf '%s' "$(( $(date +%s) - 40 ))" > "$base"
+  printf '{"session_id":"acct","hook_event_name":"Stop"}' | bash "$SCRIPTS/stop.sh"
+  is "ENABLED=off records no waiting" "0" "$(ct_read_counter "$base.wait")"
+
+  fresh
   ct_clear_state "acct"
 
   echo

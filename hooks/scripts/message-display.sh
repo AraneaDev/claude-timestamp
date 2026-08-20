@@ -5,6 +5,11 @@
 # documents this event as display-only: the stored transcript and what the model
 # sees are both untouched, so the marker cannot confuse Claude.
 #
+# It draws, and it keeps only what drawing needs: the last message's time and
+# the last date rendered, both of which the idle divider and the midnight
+# rollover read. The session's accounts are kept by the prompt and stop hooks,
+# which is where a turn actually begins and ends.
+#
 # The event fires repeatedly as a message streams, with a zero-based `index`
 # per batch of newly completed lines. We stamp index 0 and emit nothing at all
 # for the rest -- Claude Code displays the original delta when a hook returns no
@@ -76,24 +81,6 @@ fi
 
 if [ "$CT_ELAPSED" = "on" ] && [ -n "$elapsed_secs" ]; then
   elapsed="$(ct_format_elapsed "$elapsed_secs")"
-fi
-
-# Running total of time spent waiting, for the end-of-session summary. Kept
-# even when the elapsed marker is switched off, because the two settings are
-# independent.
-#
-# elapsed_secs is measured from the prompt and therefore grows across a turn
-# that runs tools, so only the increment since this turn's previous message is
-# added. Summing the raw values would double-count, and could report more time
-# waiting than the session lasted.
-if [ "$CT_SUMMARY" = "on" ] && [ -n "$state_file" ] && [ -n "$elapsed_secs" ]; then
-  mkdir -p "$(ct_state_dir)"
-  counted="$(ct_read_counter "${state_file}.counted")"
-  increment=$((elapsed_secs - counted))
-  if [ "$increment" -gt 0 ]; then
-    printf '%s' "$(( $(ct_read_counter "${state_file}.wait") + increment ))" > "${state_file}.wait"
-    printf '%s' "$elapsed_secs" > "${state_file}.counted"
-  fi
 fi
 
 # Build the marker. The elapsed portion gets its own colour once a turn crosses

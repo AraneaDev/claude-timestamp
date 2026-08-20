@@ -9,11 +9,12 @@
 # tokens.
 #
 # This hook also stamps the start of the turn, which message-display.sh reads
-# for the elapsed marker and session-end.sh reads for the summary, and clears
-# the per-turn tool log so ct_dominant_tool cannot blame a tool call from the
-# previous turn. Those two happen even when context injection is off, because
-# the settings are independent: display-only users still want to see how long
-# a turn took and what made it slow. The away string below is the one thing
+# for the elapsed marker and stop.sh reads to close it, and closes out a turn
+# that was interrupted before Stop could fire. It clears the per-turn tool log
+# too, so ct_dominant_tool cannot blame a tool call from the previous turn.
+# Those two happen even when context injection is off, because the settings
+# are independent: display-only users still want to see how long a turn took
+# and what made it slow. The away string below is the one thing
 # that does not: it exists only to tell the model, so it is gated on
 # INJECT_CONTEXT along with everything else that talks to it.
 #
@@ -44,7 +45,18 @@ ct_load_config "$cwd"
 if state_file="$(ct_state_file "$session_id")"; then
   mkdir -p "$(ct_state_dir)"
   now="$(date +%s)"
+
+  # A turn still open when the next prompt arrives ended without a Stop, which
+  # is what an interrupt looks like from here. It contributes the part of
+  # itself that was observed: up to the last message drawn on screen. This has
+  # to happen before the new start is written, or the evidence is gone.
+  if [ "$CT_SUMMARY" = "on" ]; then
+    ct_close_turn "$state_file" "$(ct_read_counter "${state_file}.last")"
+  fi
+
   printf '%s' "$now" > "$state_file"
+  # The new turn is open, whatever the previous one left behind.
+  rm -f "${state_file}.closed" 2>/dev/null || true
   # First prompt of the session marks its beginning.
   [ -r "${state_file}.start" ] || printf '%s' "$now" > "${state_file}.start"
 
@@ -53,9 +65,6 @@ if state_file="$(ct_state_file "$session_id")"; then
     # several messages as tools run, and counting those reported one prompt as
     # several turns.
     printf '%s' "$(( $(ct_read_counter "${state_file}.turns") + 1 ))" > "${state_file}.turns"
-    # Waiting is accumulated per turn, and elapsed is measured from this
-    # moment, so the running total for this turn starts at zero.
-    printf '0' > "${state_file}.counted"
   fi
 
   # Cleared unconditionally rather than under TOOL_TIMING, so switching tool
