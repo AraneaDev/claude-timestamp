@@ -550,8 +550,8 @@ if command -v jq >/dev/null 2>&1; then
   log="$(ct_tool_log tools)"
   is "every completed call is logged" "3" "$(wc -l < "$log" | tr -d ' ')"
   is "the log records tool names" "2" "$(grep -c '^Bash ' "$log")"
-  is "milliseconds are converted to seconds" "Bash 40.000" "$(sed -n 1p "$log")"
-  is "a sub-second call keeps its precision" "Read 0.400" "$(sed -n 3p "$log")"
+  is "milliseconds are converted to seconds" "Bash 40.000 ok" "$(sed -n 1p "$log")"
+  is "a sub-second call keeps its precision" "Read 0.400 ok" "$(sed -n 3p "$log")"
 
   # The per-turn log gets the same line, because the marker reads that one.
   is "the per-turn log gets the same lines" "3" "$(wc -l < "$(ct_turn_tool_log tools)" | tr -d ' ')"
@@ -577,6 +577,40 @@ if command -v jq >/dev/null 2>&1; then
   printf '{"session_id":"tools","tool_use_id":"t6","tool_name":"../evil","duration_ms":500}' \
     | bash "$SCRIPTS/post-tool-use.sh"
   is "an unusable tool name is recorded as unknown" "1" "$(grep -c '^unknown ' "$log")"
+
+  # The outcome rides on the log line rather than in a counter, because tool
+  # calls run in parallel and a shared read-modify-write loses writes.
+  fresh 'TOOL_TIMING=on'
+  printf '{"session_id":"outcome","tool_use_id":"t1","tool_name":"Bash","duration_ms":1000,"hook_event_name":"PostToolUse"}' \
+    | bash "$SCRIPTS/post-tool-use.sh"
+  printf '{"session_id":"outcome","tool_use_id":"t2","tool_name":"Bash","duration_ms":2000,"hook_event_name":"PostToolUseFailure"}' \
+    | bash "$SCRIPTS/post-tool-use.sh"
+  olog="$(ct_tool_log outcome)"
+  is "a successful call is logged as ok" "Bash 1.000 ok" "$(sed -n 1p "$olog")"
+  is "a failed call is logged as fail" "Bash 2.000 fail" "$(sed -n 2p "$olog")"
+  is "the per-turn log carries the outcome too" "Bash 2.000 fail" "$(sed -n 2p "$(ct_turn_tool_log outcome)")"
+  if [ -e "$(ct_state_file outcome).failed" ]; then
+    fail "no failure counter is written" "no .failed file" "file created"
+  else
+    pass "no failure counter is written"
+  fi
+
+  # An event name the payload does not carry is not a failure.
+  printf '{"session_id":"outcome","tool_use_id":"t3","tool_name":"Read","duration_ms":100}' \
+    | bash "$SCRIPTS/post-tool-use.sh"
+  is "a call with no event name is logged as ok" "Read 0.100 ok" "$(sed -n 3p "$olog")"
+
+  # The summary counts failures by reading the log, so concurrent appends are
+  # all seen rather than racing on one counter.
+  fresh 'TOOL_TIMING=on'
+  fbase="$(ct_state_file "failcount")"
+  mkdir -p "$(ct_state_dir)"
+  printf '%s' "$(( $(date +%s) - 600 ))" > "$fbase.start"
+  printf '2' > "$fbase.turns"; printf '30' > "$fbase.wait"
+  printf 'Bash 40.0 ok\nBash 1.2 fail\nWebFetch 8.1 fail\nRead 0.4 ok\n' > "$fbase.tools"
+  out="$(printf '{"session_id":"failcount"}' | bash "$SCRIPTS/session-end.sh" | jq -r '.systemMessage')"
+  contains "the summary counts failures from the log" "2 failed" "$out"
+  contains "the summary still sums per tool" "Bash 41.2s (2 calls)" "$out"
 
   # Aggregation in the summary, unchanged: it reads the same two fields.
   base="$(ct_state_file "tools")"
@@ -814,14 +848,20 @@ if command -v jq >/dev/null 2>&1; then
   echo "what a session adds up to"
 
   seed_session() {
-    # $1 seconds ago it started, $2 turns, $3 waited, $4 idle, $5 failed
-    local b; b="$(ct_state_file "acct2")"
+    # $1 seconds ago it started, $2 turns, $3 waited, $4 idle, $5 failed calls
+    local b i; b="$(ct_state_file "acct2")"
     mkdir -p "$(ct_state_dir)"
     printf '%s' "$(( $(date +%s) - $1 ))" > "$b.start"
     printf '%s' "$2" > "$b.turns"
     printf '%s' "$3" > "$b.wait"
     [ "${4:-0}" -gt 0 ] && printf '%s' "$4" > "$b.idle"
-    [ "${5:-0}" -gt 0 ] && printf '%s' "$5" > "$b.failed"
+    # Failures live on the tool log's third field now, so a seeded failure is a
+    # seeded log line rather than a counter.
+    i=0
+    while [ "$i" -lt "${5:-0}" ]; do
+      printf 'Bash 1.0 fail\n' >> "$b.tools"
+      i=$((i + 1))
+    done
     return 0
   }
   end_session() { printf '{"session_id":"acct2"}' | bash "$SCRIPTS/session-end.sh" | jq -r '.systemMessage // ""'; }
@@ -838,7 +878,6 @@ if command -v jq >/dev/null 2>&1; then
 
   fresh 'TOOL_TIMING=on'
   seed_session 600 3 120 0 2
-  printf 'Bash 4.0\n' > "$(ct_state_file "acct2").tools"
   out="$(end_session)"
   contains "the summary counts failed tool calls" "2 failed" "$out"
 
@@ -875,12 +914,12 @@ if command -v jq >/dev/null 2>&1; then
   fresh 'TOOL_TIMING=on'
   printf '{"session_id":"f","tool_use_id":"t1","tool_name":"Bash","duration_ms":1000,"hook_event_name":"PostToolUseFailure"}' \
     | bash "$SCRIPTS/post-tool-use.sh"
-  is "a failed call is counted" "1" "$(ct_read_counter "$(ct_state_file f).failed")"
   is "a failed call is still timed" "1" "$(wc -l < "$(ct_tool_log f)" | tr -d ' ')"
+  is "a failed call records its outcome" "1" "$(grep -c ' fail$' "$(ct_tool_log f)")"
 
   printf '{"session_id":"f","tool_use_id":"t2","tool_name":"Bash","duration_ms":1000,"hook_event_name":"PostToolUse"}' \
     | bash "$SCRIPTS/post-tool-use.sh"
-  is "a successful call is not counted as failed" "1" "$(ct_read_counter "$(ct_state_file f).failed")"
+  is "a successful call is not recorded as failed" "1" "$(grep -c ' fail$' "$(ct_tool_log f)")"
 fi
 
 echo

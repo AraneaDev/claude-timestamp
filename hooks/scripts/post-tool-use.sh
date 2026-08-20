@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # PostToolUse and PostToolUseFailure hook -- records what a tool call cost.
 #
-# Appends one line, "<tool name> <seconds>", to a per-session log that
+# Appends one line, "<tool name> <seconds> <ok|fail>", to a per-session log that
 # session-end.sh aggregates, and the same line to a per-turn log the marker
 # reads. Appending rather than maintaining a running tally is deliberate: tool
 # calls run in parallel, so several copies of this hook can finish at once, and
@@ -51,20 +51,20 @@ printf -v seconds '%d.%03d' "$((ms / 1000))" "$((ms % 1000))"
 log="$(ct_tool_log "$session_id")" || exit 0
 case "$tool_name" in ''|*[![:alnum:]_-]*) tool_name="unknown" ;; esac
 
+# The outcome is the third field on the line rather than a counter of its own.
+# Tool calls run in parallel, so a counter would be a read-modify-write on a
+# file several copies of this hook hold open at once, which is the lost-update
+# hazard the log's own append-only shape exists to avoid.
+outcome=ok
+[ "$event" = "PostToolUseFailure" ] && outcome=fail
+
 mkdir -p "$(ct_state_dir)"
-printf '%s %s\n' "$tool_name" "$seconds" >> "$log"
+printf '%s %s %s\n' "$tool_name" "$seconds" "$outcome" >> "$log"
 
 # The session-wide log answers "what made this session slow"; this one
 # answers "what made this reply slow". Both need the same line.
 if turn_log="$(ct_turn_tool_log "$session_id")"; then
-  printf '%s %s\n' "$tool_name" "$seconds" >> "$turn_log"
-fi
-
-# The same script serves both events, because a failed call is still a call
-# that took time. Only the tally of failures differs.
-if [ "$event" = "PostToolUseFailure" ]; then
-  base="$(ct_state_file "$session_id")" || exit 0
-  printf '%s' "$(( $(ct_read_counter "${base}.failed") + 1 ))" > "${base}.failed"
+  printf '%s %s %s\n' "$tool_name" "$seconds" "$outcome" >> "$turn_log"
 fi
 
 exit 0

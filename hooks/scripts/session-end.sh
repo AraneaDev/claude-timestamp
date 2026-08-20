@@ -45,7 +45,13 @@ if [ "$CT_SUMMARY" = "on" ]; then
   # A session with no recorded turns has nothing worth reporting -- most likely
   # it was opened and closed, or the plugin was configured mid-session.
   idle="$(ct_read_counter "${state_file}.idle")"
-  failed="$(ct_read_counter "${state_file}.failed")"
+
+  # Failures are counted out of the tool log rather than from a counter, so
+  # concurrent tool calls appending at once are all seen. A log that is absent
+  # or was never written means no failures to report.
+  log="${state_file}.tools"
+  failed=0
+  [ -s "$log" ] && failed="$(awk '$3 == "fail" { n++ } END { print n + 0 }' "$log")"
 
   if [ "$started" -gt 0 ] && [ "$turns" -gt 0 ]; then
     total=$(( $(date +%s) - started ))
@@ -62,7 +68,6 @@ if [ "$CT_SUMMARY" = "on" ]; then
   # Tool timings, when they were being collected. Summed per tool and reported
   # worst-first, because the question this answers is "what made this session
   # slow", not "how long did any single call take".
-  log="${state_file}.tools"
   if [ "$CT_TOOL_TIMING" = "on" ] && [ -s "$log" ]; then
     tools="$(awk '{ sum[$1] += $2; n[$1]++ }
                   END { for (t in sum) printf "%.3f\t%s\t%d\n", sum[t], t, n[t] }' "$log" \
