@@ -12,7 +12,7 @@
 
 <img src="assets/timestamps.png" alt="Timestamps on assistant messages, with a slow turn highlighted" width="840">
 
-<sub>Two fast turns render dim. The third crossed the slow threshold, so its duration is coloured.</sub>
+<sub>Two fast turns render dim. The third crosses the slow threshold, so its duration is coloured and, with `TOOL_TIMING` on, named after the tool that caused it. Tool timing is off by default, so a plain install will not show this on its own.</sub>
 
 </div>
 

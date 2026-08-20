@@ -143,6 +143,14 @@ def blend(fg, bg, amount):
     return tuple(int(b + (f - b) * amount) for f, b in zip(fg, bg))
 
 
+# DejaVu Sans Mono is missing a handful of glyphs the real Claude Code TUI
+# paints for tool calls -- notably U+23BF (the "⎿" result marker), which
+# renders as a tofu box. Swapped for a box-drawing corner the font does have,
+# since the two look the same at this size and swapping preserves the grid
+# layout (draw position is cell-indexed, not glyph-measured).
+GLYPH_SUBSTITUTIONS = {"⎿": "└"}
+
+
 def render(raw, out, cols, rows, first=None, last=None, scale=2, crlf=False):
     screen = DimScreen(cols, rows)
     if crlf:
@@ -169,7 +177,8 @@ def render(raw, out, cols, rows, first=None, last=None, scale=2, crlf=False):
             fg = to_rgb(c.fg)
             if screen.dim.get((y, x)):
                 fg = blend(fg, bg, 0.45)
-            d.text((pad + x * cw, pad + (y - top) * ch), c.data,
+            glyph = GLYPH_SUBSTITUTIONS.get(c.data, c.data)
+            d.text((pad + x * cw, pad + (y - top) * ch), glyph,
                    font=boldf if c.bold else font, fill=fg)
     out.parent.mkdir(parents=True, exist_ok=True)
     img.save(out)
@@ -205,7 +214,17 @@ TOOL_TIMING=on
 
 
 def shot_hero():
-    """A real session: two quick turns and one slow enough to colour."""
+    """A real session: two quick turns, then one slow enough to name its tool.
+
+    The third prompt has to make Claude actually run something slow, or
+    TOOL_TIMING has nothing to attribute. It asks for an exact count that
+    cannot be recalled or estimated, only computed, and rules out every
+    interpreter but bash's own (slow) integer arithmetic so the trial
+    division can't be handed off to something fast. That keeps it a single
+    dominant Bash call rather than work split across tools -- and being pure
+    arithmetic with no filesystem or network access, it can't touch anything
+    outside this work directory even by accident.
+    """
     if not subprocess.run(["which", "claude"], capture_output=True).returncode == 0:
         raise SystemExit("claude is not on PATH; cannot capture the hero shot.")
     work = WORK / "hero"
@@ -213,16 +232,19 @@ def shot_hero():
     conf = work / "config.conf"
     conf.write_text(DEMO_CONFIG)
 
-    cols, rows = 96, 46
+    cols, rows = 96, 90
     os.chdir(work)
     raw = capture_pty(
         ["claude"],
         keys=[
             (6.0, "What is the capital of Portugal? One word, no punctuation."), (7.0, "\r"),
             (24.0, "Name three Portuguese cities, comma separated, nothing else."), (26.0, "\r"),
-            (44.0, "In about 90 words, explain why bash has no decimal arithmetic."), (46.0, "\r"),
+            (44.0, "Run one bash command that counts, by trial division using only "
+                    "bash's own integer arithmetic (no python, bc, or awk), how many "
+                    "integers below 300000 are prime. Actually execute it, don't "
+                    "estimate. Reply with just the final count."), (47.0, "\r"),
         ],
-        cols=cols, rows=rows, settle=14, total=140,
+        cols=cols, rows=rows, settle=16, total=200,
         env={"CLAUDE_TIMESTAMP_CONFIG": str(conf)},
     )
     (work / "hero.raw").write_bytes(raw)
