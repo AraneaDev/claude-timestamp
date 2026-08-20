@@ -1016,6 +1016,42 @@ asserts "facts: a stale file is replaced" jq -e . "$CLAUDE_TIMESTAMP_FACTS"
 # Written by rename, so a concurrent reader cannot see a half-written file.
 is "facts: no temp file left behind" "" "$(find "$WORK" -name 'facts.json.*' 2>/dev/null)"
 
+# ct_write_facts resolves the plugin root via
+# `cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd` as a plain command-
+# substitution assignment. Under set -e that is NOT a context errexit skips
+# (unlike an if, a &&/||, or a negation), so if that cd ever fails the whole
+# of session-start.sh used to die right there -- silently swallowing every
+# later systemMessage (config-problems banner, tz-unhonoured banner, and the
+# first-run banner) along with it, for a script that must always exit 0 and
+# never swallow output.
+#
+# Filesystem permissions cannot force that cd to fail here: its target is
+# always an ancestor directory of the very script being executed, so denying
+# access to it would also prevent the script from being opened at all (and,
+# separately, this sandbox runs as root, which bypasses permission checks
+# entirely). Instead, BASH_ENV is used to shadow the `cd` builtin for just
+# this one subprocess, failing only the specific "go up two levels" call and
+# leaving every other cd (including the one that locates lib/config.sh two
+# lines into the script) untouched.
+BLOCK_ROOT_CD="$WORK/block-root-cd.sh"
+cat > "$BLOCK_ROOT_CD" <<'EOF'
+cd() {
+  case "$*" in
+    *"/../..") return 1 ;;
+    *) builtin cd "$@" ;;
+  esac
+}
+EOF
+
+rm -f "$CLAUDE_TIMESTAMP_CONFIG" "$CLAUDE_TIMESTAMP_FACTS"
+out="$(printf '{"session_id":"facts"}' | BASH_ENV="$BLOCK_ROOT_CD" bash "$SCRIPTS/session-start.sh")"
+status=$?
+is "facts: a root-resolution failure still exits 0" "0" "$status"
+contains "facts: a root-resolution failure still emits the first-run banner" "/timestamps" "$out"
+asserts "facts: a root-resolution failure still writes a valid facts file" jq -e . "$CLAUDE_TIMESTAMP_FACTS"
+is "facts: a root-resolution failure falls back to an unknown version" \
+   "unknown" "$(jq -r '.version' "$CLAUDE_TIMESTAMP_FACTS")"
+
 echo
 echo "----"
 printf '%d passed, %d failed\n' "$PASS" "$FAIL"

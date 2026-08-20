@@ -46,8 +46,8 @@ ct_write_facts() {
 
   # This script is hooks/scripts/session-start.sh, so the plugin root is two
   # levels up and version.txt sits directly in it.
-  root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-  version="$(tr -d '[:space:]' < "$root/version.txt" 2>/dev/null)" || version=""
+  root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd)" || root=""
+  version="$(tr -d '[:space:]' 2>/dev/null < "$root/version.txt")" || version=""
   [ -n "$version" ] || version="unknown"
 
   if mkdir -p "$(ct_state_dir)" 2>/dev/null && : > "$(ct_state_dir)/.probe" 2>/dev/null; then
