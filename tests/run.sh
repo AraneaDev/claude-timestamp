@@ -1192,6 +1192,39 @@ out="$(strip_ansi "$(printf '{"index":0,"session_id":"fast","delta":"x"}' \
 lacks "attribution: absent on a fast turn" "Bash" "$out"
 
 echo
+echo "away context"
+
+fresh 'IDLE_AFTER=1800'
+mkdir -p "$(ct_state_dir)"
+printf '%s' "$(( $(date +%s) - 10800 ))" > "$(ct_state_file away).last"
+out="$(printf '{"session_id":"away","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh" \
+  | jq -r '.hookSpecificOutput.additionalContext')"
+contains "away: a long gap is reported" "after a 3h break" "$out"
+contains "away: the time is still there" "Message sent at local time" "$out"
+
+fresh 'IDLE_AFTER=1800'
+printf '%s' "$(( $(date +%s) - 60 ))" > "$(ct_state_file near).last"
+out="$(printf '{"session_id":"near","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh" \
+  | jq -r '.hookSpecificOutput.additionalContext')"
+lacks "away: a short gap is not reported" "break" "$out"
+
+fresh 'IDLE_AFTER=0'
+printf '%s' "$(( $(date +%s) - 10800 ))" > "$(ct_state_file disabled).last"
+out="$(printf '{"session_id":"disabled","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh" \
+  | jq -r '.hookSpecificOutput.additionalContext')"
+lacks "away: silent when idle marking is off" "break" "$out"
+
+fresh 'IDLE_AFTER=1800' 'INJECT_CONTEXT=false'
+printf '%s' "$(( $(date +%s) - 10800 ))" > "$(ct_state_file noinject).last"
+out="$(printf '{"session_id":"noinject","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh")"
+is "away: nothing is injected when context injection is off" "" "$out"
+
+fresh 'IDLE_AFTER=1800'
+out="$(printf '{"session_id":"firstprompt","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh" \
+  | jq -r '.hookSpecificOutput.additionalContext')"
+lacks "away: the first prompt of a session has no gap" "break" "$out"
+
+echo
 echo "----"
 printf '%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

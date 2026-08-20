@@ -62,13 +62,29 @@ fi
 
 [ "$CT_INJECT_CONTEXT" = "false" ] && exit 0
 
+# How long the user was away, when they were. The gap is measured from the last
+# assistant message, which message-display.sh records, so this is the same
+# break the idle divider draws on screen. Told to the model because a reply
+# that carries on mid-thought after three hours reads as though nothing
+# happened.
+away=""
+if [ -n "${state_file:-}" ] && [ "$CT_IDLE_AFTER" -gt 0 ] 2>/dev/null; then
+  last="$(ct_read_counter "${state_file}.last")"
+  if [ "$last" -gt 0 ]; then
+    gap=$(( $(date +%s) - last ))
+    if [ "$gap" -ge "$CT_IDLE_AFTER" ]; then
+      away=", after a $(ct_humanize_gap "$gap") break"
+    fi
+  fi
+fi
+
 # The zone is always appended, whatever the chosen format, so the model can
 # still resolve the offset when the format itself omits it.
 ts="$(ct_now "$CT_CONTEXT_FORMAT") $(ct_zone)"
 
-jq -n --arg ts "$ts" '{
+jq -n --arg ts "$ts" --arg away "$away" '{
   hookSpecificOutput: {
     hookEventName: "UserPromptSubmit",
-    additionalContext: ("Message sent at local time " + $ts)
+    additionalContext: ("Message sent at local time " + $ts + $away)
   }
 }'
