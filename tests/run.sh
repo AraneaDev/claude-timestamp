@@ -461,6 +461,21 @@ if command -v jq >/dev/null 2>&1; then
   printf '{"session_id":"acct"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
   is "a turn that drew nothing contributes nothing" "0" "$(ct_read_counter "$base.wait")"
 
+  # IDLE_AFTER=0 switches off the divider and the .idle total, but the
+  # timestamp message-display.sh stamps every message with is not that
+  # feature -- it is the evidence an interrupted turn is reconciled from, so
+  # turning idle marking off must not turn off the stamp itself.
+  fresh 'IDLE_AFTER=0'
+  ct_clear_state "acct"; mkdir -p "$(ct_state_dir)"
+  printf '{"session_id":"acct"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  printf '%s' "$(( $(date +%s) - 60 ))" > "$base"
+  printf '{"session_id":"acct","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" >/dev/null
+  asserts "message-display stamps .last even with IDLE_AFTER=0" test -r "$base.last"
+  printf '%s' "$(( $(date +%s) - 20 ))" > "$base.last"
+  printf '{"session_id":"acct"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  is_near "an interrupted turn still contributes with IDLE_AFTER=0" 40 "$(ct_read_counter "$base.wait")" 2
+  fresh
+
   # The session can end mid-turn too, and that is the same reconciliation.
   # One reading of the clock again, for the same reason as above.
   ct_clear_state "acct"; mkdir -p "$(ct_state_dir)"
@@ -471,6 +486,22 @@ if command -v jq >/dev/null 2>&1; then
   printf '%s' "$(( now - 20 ))" > "$base.last"
   out="$(printf '{"session_id":"acct"}' | bash "$SCRIPTS/session-end.sh" | jq -r '.systemMessage')"
   contains "session end closes a turn still open" "40s of it waiting" "$out"
+
+  # The ordering every normal session takes: Stop closes the turn, then
+  # SessionEnd runs behind it. SessionEnd's own reconciliation must see the
+  # turn already closed and add nothing on top of what Stop already recorded.
+  # The comparisons use the values Stop actually wrote rather than a value
+  # predicted from the clock, so they are exact without needing a tolerance.
+  ct_clear_state "acct"; mkdir -p "$(ct_state_dir)"
+  printf '%s' "$(( $(date +%s) - 900 ))" > "$base.start"
+  printf '1' > "$base.turns"
+  printf '%s' "$(( $(date +%s) - 45 ))" > "$base"
+  printf '{"session_id":"acct","hook_event_name":"Stop"}' | bash "$SCRIPTS/stop.sh"
+  started="$(cat "$base")"
+  waited="$(ct_read_counter "$base.wait")"
+  is "Stop's .closed holds the epoch the turn ended" "$(( started + waited ))" "$(cat "$base.closed")"
+  out="$(printf '{"session_id":"acct"}' | bash "$SCRIPTS/session-end.sh" | jq -r '.systemMessage')"
+  contains "SessionEnd after Stop does not double-count" "$(ct_format_duration "$waited") of it waiting" "$out"
 
   # The hook is silent even when it does have work to do: it writes state and
   # says nothing. Asserted under a config where it runs, so that it cannot pass

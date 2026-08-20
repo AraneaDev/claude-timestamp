@@ -9,13 +9,13 @@
 # tokens.
 #
 # This hook also stamps the start of the turn, which message-display.sh reads
-# for the elapsed marker and stop.sh reads to close it, and closes out a turn
-# that was interrupted before Stop could fire. It clears the per-turn tool log
-# too, so ct_dominant_tool cannot blame a tool call from the previous turn.
-# Those two happen even when context injection is off, because the settings
-# are independent: display-only users still want to see how long a turn took
-# and what made it slow. The away string below is the one thing
-# that does not: it exists only to tell the model, so it is gated on
+# for the elapsed marker and stop.sh reads to close it; when CT_SUMMARY is on,
+# closes out a turn that was interrupted before Stop could fire; and clears
+# the per-turn tool log so ct_dominant_tool cannot blame a tool call from the
+# previous turn. All three happen even when context injection is off, because
+# injection is a separate setting: display-only users still want to see how
+# long a turn took and what made it slow. The away string below is the one
+# thing that does not: it exists only to tell the model, so it is gated on
 # INJECT_CONTEXT along with everything else that talks to it.
 #
 # Times come from `date`, never jq's `now|strftime`, which always renders UTC.

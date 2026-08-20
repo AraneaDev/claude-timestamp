@@ -2,8 +2,10 @@
 # SessionEnd hook -- user-facing.
 #
 # Reports what the session cost in wall-clock terms, then removes the state
-# files it accumulated. The numbers come from counters that message-display.sh
-# maintains per turn, so this hook only reads and formats them.
+# files it accumulated. Most of what it reports comes from counters that
+# user-prompt-submit.sh and stop.sh maintain per turn, but a session can end
+# mid-turn, with no Stop to close it, so this hook also closes that last turn
+# itself before reading anything.
 #
 # "Waiting" is the sum of prompt-to-reply times, which is the part of the
 # session you actually spent watching a cursor. The remainder of the elapsed
