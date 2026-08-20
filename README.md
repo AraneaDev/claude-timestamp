@@ -32,7 +32,9 @@ There is nothing to set up. The defaults work as soon as it is installed, and
 - **Shows how long a turn took.** `+2m14s` counts from the moment you pressed
   enter to the moment the reply appeared.
 - **Highlights slow turns.** Once a turn passes a threshold you set, its
-  duration changes colour so you notice it instead of reading past it.
+  duration changes colour so you notice it instead of reading past it. Turn on
+  `TOOL_TIMING` and it names what made the turn slow, too:
+  `[13:22:13 · Bash 1m58s]`.
 - **Marks where you stepped away.** A gap between messages is labelled, so a
   session you returned to the next morning still reads in order.
 - **Tells Claude the time.** The model receives the local time each prompt was
@@ -79,14 +81,29 @@ appear. An already-running session will not pick the plugin up.
 Nothing needs configuring. The defaults work, and the plugin tells you where to
 change them on first run.
 
+Run `/timestamps` inside Claude Code. Bare, it shows what you have now and
+offers a handful of presets, each previewed as the marker it actually produces:
+
+<p align="center">
+  <img src="assets/picker.png" alt="The in-chat picker, showing presets with a preview of each" width="760">
+</p>
+
+It also takes the request directly, so `/timestamps tokyo`, `/timestamps no
+colour` and `/timestamps 12 hour clock` each land in one step.
+
 Changes take effect on your **next message**. Every hook reads the config file
 each time it runs, so nothing needs restarting. Only installing the plugin
 needs a new session, because that is when hooks are bound.
 
-To change something, run `/timestamps` inside Claude Code. It takes the request
-directly, so `/timestamps tokyo`, `/timestamps no colour` and
-`/timestamps 12 hour clock` all work in one step. Run it bare and it will ask. For an interactive wizard with a live preview instead, run the setup
-script in a terminal, where it has a real TTY:
+Nothing about this runs a shell script. `/timestamps` reads
+`schema.json`, which ships with the plugin and describes every setting, and
+edits your config file directly.
+
+### From a terminal
+
+If you would rather answer the questions yourself, the setup script has an
+interactive wizard. It needs a real TTY, so run it in a terminal rather than
+asking Claude to:
 
 ```bash
 bash "$CLAUDE_PLUGIN_ROOT/hooks/scripts/setup.sh"
@@ -171,6 +188,12 @@ treated as a strftime string, so the escape hatch needs no separate setting.
 
 `TOOL_TIMING` is off by default because it is the only setting that costs
 anything per tool call. Everything else costs once per message.
+
+Alongside the config, the plugin writes `~/.claude/claude-timestamp.facts.json`
+at the start of every session. It holds what cannot be worked out by reading
+the configuration: whether this machine has a timezone database, whether the
+state directory is writable, and which version is installed. That is what lets
+`/timestamps` answer questions about your setup without running anything.
 
 ## What the sessions add up to
 

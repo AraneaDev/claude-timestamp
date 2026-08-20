@@ -236,6 +236,46 @@ def shot_hero():
     render(raw, ASSETS / "timestamps.png", cols, rows, first=first, last=last)
 
 
+def shot_picker():
+    """The in-chat picker, captured mid-question.
+
+    Driven the same way as the hero shot: a real session, typed into through a
+    pty. The picker is an interactive widget rather than program output, so the
+    capture deliberately stops while the question is still on screen and never
+    answers it.
+    """
+    if not subprocess.run(["which", "claude"], capture_output=True).returncode == 0:
+        raise SystemExit("claude is not on PATH; cannot capture the picker shot.")
+    work = WORK / "picker"
+    work.mkdir(parents=True, exist_ok=True)
+    conf = work / "config.conf"
+    conf.write_text(DEMO_CONFIG)
+
+    # Reading schema.json, the facts file and the config, then rendering the
+    # question, takes 40-50s in practice, well past what the brief's starting
+    # guess assumed. rows is generous (50) so the whole exchange -- the typed
+    # command, Claude's reasoning, and the question -- renders without
+    # scrolling anything off the top; render() then trims the blank rows left
+    # under the picker on its own.
+    cols, rows = 96, 50
+    os.chdir(work)
+    raw = capture_pty(
+        ["claude"],
+        keys=[(6.0, "/timestamps"), (7.5, "\r")],
+        cols=cols, rows=rows, settle=12, total=100,
+        env={"CLAUDE_TIMESTAMP_CONFIG": str(conf)},
+    )
+    (work / "picker.raw").write_bytes(raw)
+
+    # Crop past the welcome banner, which carries the account's name, email and
+    # organisation. Those do not belong in a published screenshot.
+    screen = DimScreen(cols, rows)
+    pyte.ByteStream(screen).feed(raw)
+    lines = screen.display
+    first = next((y for y in range(rows) if lines[y].lstrip().startswith("❯")), 12) - 1
+    render(raw, ASSETS / "picker.png", cols, rows, first=first)
+
+
 def shot_wizard():
     """The interactive wizard, driven through a pty so it has a real TTY.
 
@@ -324,8 +364,8 @@ def shot_stats():
     render(raw, ASSETS / "stats.png", cols=64, rows=22, crlf=True)
 
 
-SHOTS = {"hero": shot_hero, "wizard": shot_wizard, "doctor": shot_doctor,
-         "stats": shot_stats}
+SHOTS = {"hero": shot_hero, "picker": shot_picker, "wizard": shot_wizard,
+         "doctor": shot_doctor, "stats": shot_stats}
 
 if __name__ == "__main__":
     which = sys.argv[1] if len(sys.argv) > 1 else "all"
