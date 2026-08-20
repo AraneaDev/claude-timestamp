@@ -36,7 +36,7 @@ command -v jq >/dev/null 2>&1 || exit 0
 
 input="$(cat)"
 IFS=$'\x1f' read -r session_id tool_name event ms <<< "$(printf '%s' "$input" \
-  | jq -r '[(.session_id // "-"), (.tool_name // ""), (.hook_event_name // ""), (.duration_ms // "" | tostring)] | join("")')"
+  | jq -r '[(.session_id // "-"), (.tool_name // ""), (.hook_event_name // ""), (.duration_ms // "" | tostring)] | join("\u001f")')"
 
 # Absent, or present but not a whole number of milliseconds. Recording a zero
 # would drag every average down and could name a tool that took no time as the
