@@ -18,6 +18,8 @@ ct_load_config
 # to the model, and off means none of it.
 [ "$CT_ENABLED" = "on" ] || exit 0
 [ "$CT_TOOL_TIMING" = "on" ] || exit 0
+# Checked last, so the common case -- tool timing off -- costs a bash builtin
+# rather than a jq process fork on every tool call.
 command -v jq >/dev/null 2>&1 || exit 0
 
 input="$(cat)"

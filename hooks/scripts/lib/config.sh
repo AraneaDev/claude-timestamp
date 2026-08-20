@@ -393,6 +393,7 @@ ct_dominant_tool() {
     END {
       best = ""; top = 0
       for (t in sum) if (sum[t] > top) { top = sum[t]; best = t }
+      if (top > total) top = total
       if (best == "" || top * 2 < total) exit 1
       if (top < 60) printf "%s %ds", best, int(top + 0.5)
       else          printf "%s %dm%02ds", best, int(top / 60), int(top) % 60

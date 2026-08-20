@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # SessionStart hook.
 #
-# Two jobs, both one-time-per-session: make sure the plugin can actually run,
-# and make sure a new user can find the setup command. Everything here is
-# advisory -- the session is never blocked, so we always exit 0.
+# Three jobs, all one-time-per-session: make sure the plugin can actually run,
+# make sure a new user can find the config command, and publish facts.json --
+# what this machine can and cannot do, which /timestamps reads instead of
+# probing for itself. Everything here is advisory -- the session is never
+# blocked, so we always exit 0.
 #
 # systemMessage is the documented way to put text in front of the USER. Plain
 # stdout would only reach the model, which is the wrong audience for both of

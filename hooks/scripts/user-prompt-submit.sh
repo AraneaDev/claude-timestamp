@@ -1,16 +1,19 @@
 #!/usr/bin/env bash
 # UserPromptSubmit hook -- model-facing.
 #
-# Tells Claude the local time each prompt was sent. Claude Code wraps the
+# Tells Claude the local time each prompt was sent, and how long it was since
+# the last reply when that gap is worth mentioning. Claude Code wraps the
 # string in a <system-reminder>, so the model reads it as passive metadata and
 # never as part of what the user typed. The system prompt already carries
 # today's date, so this sends time + zone only -- no redundant date, fewer
 # tokens.
 #
 # This hook also stamps the start of the turn, which message-display.sh reads
-# for the elapsed marker and session-end.sh reads for the summary. That happens
-# even when context injection is off, because the settings are independent:
-# display-only users still want to see how long a turn took.
+# for the elapsed marker and session-end.sh reads for the summary, and clears
+# the per-turn tool log so ct_dominant_tool cannot blame a tool call from the
+# previous turn. Those three happen even when context injection is off,
+# because the settings are independent: display-only users still want to see
+# how long a turn took and what made it slow.
 #
 # Times come from `date`, never jq's `now|strftime`, which always renders UTC.
 set -euo pipefail

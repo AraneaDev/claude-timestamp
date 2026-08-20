@@ -6,7 +6,7 @@
 
 [![Release](https://img.shields.io/github/v/release/AraneaDev/claude-timestamp)](https://github.com/AraneaDev/claude-timestamp/releases)
 [![CI](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml/badge.svg)](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-291%20passing-2b8a3e)](tests/run.sh)
+[![Tests](https://img.shields.io/badge/tests-294%20passing-2b8a3e)](tests/run.sh)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-364fc7)](#platform-notes)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
@@ -34,7 +34,7 @@ There is nothing to set up. The defaults work as soon as it is installed, and
 - **Highlights slow turns.** Once a turn passes a threshold you set, its
   duration changes colour so you notice it instead of reading past it. Turn on
   `TOOL_TIMING` and it names what made the turn slow, too:
-  `[13:22:13 · Bash 1m58s]`.
+  `[13:22:13 +2m14s · Bash 1m58s]`.
 - **Marks where you stepped away.** A gap between messages is labelled, so a
   session you returned to the next morning still reads in order.
 - **Tells Claude the time.** The model receives the local time each prompt was
@@ -265,7 +265,7 @@ to whole seconds and the call counts carry the signal.
 ## Development
 
 ```bash
-bash tests/run.sh                                    # 291 assertions, no framework
+bash tests/run.sh                                    # 294 assertions, no framework
 shellcheck -S style -e SC1091 hooks/scripts/**/*.sh  # clean
 bash tools/check-docs.sh                             # README against the code
 ```

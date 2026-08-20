@@ -68,13 +68,15 @@ Applying a preset from `schema.json` is the same job in bulk: name the keys it
 writes before writing them, and write exactly the keys its `set` object lists
 and no others. Presets change several settings at once and the user should not
 have to discover which. `quieter`, `default` and `detailed` all write the same
-six keys, so moving between them never leaves a setting behind from the one
-before. `off` writes `ENABLED` alone, deliberately, so switching back on
-restores everything else as it was.
+five keys, so moving between them never leaves a setting behind from the one
+before. None of them touches `COLOR`: all three would write it to the same
+value, so it carries no residue either way, and leaving it out means a
+deliberate `COLOR=none` survives switching presets. `off` writes `ENABLED`
+alone, deliberately, so switching back on restores everything else as it was.
 
-`default` is the default marker, not a factory reset. It leaves the other ten
-keys as they are, `TZ` and `INJECT_CONTEXT` among them. That is usually what
-someone asking for the defaults back wants, a pinned timezone especially, but
+`default` is the default marker, not a factory reset. It leaves the other
+eleven keys as they are, `TZ` and `INJECT_CONTEXT` among them. That is usually
+what someone asking for the defaults back wants, a pinned timezone especially, but
 say which settings it left alone when you report, or the name promises more
 than it delivered.
 
@@ -128,11 +130,17 @@ Report what changed, from what to what, and that it is already live.
 Show them where they are, then offer the presets from `schema.json`.
 
 First render the current settings as the marker they actually produce, so they
-are looking at the thing rather than at a table:
+are looking at the thing rather than at a table. Show the clock only, never a
+duration: elapsed time and tool attribution are measured by the hook after a
+reply finishes, and you are answering mid-conversation, before this reply has
+one. A plausible-looking `+2m14s` here would be a guess wearing the shape of a
+measurement, not an illustrative example, so leave it out rather than label it.
+State the rest of the current settings in words, including whether elapsed and
+tool timing are on:
 
 ```
-Currently:  [13:22:13 +2m14s]
-            Europe/Amsterdam, dim, slow at 60s
+Currently:  [13:22:13]
+            Europe/Amsterdam, dim, elapsed on, tool timing off, slow at 60s
 ```
 
 The clock in that line is the time the plugin told you at the start of this
@@ -186,10 +194,12 @@ preset's own settings rather than the current ones:
   will not see.
 
 Colour cannot be drawn in a preview box, so name it in words: underneath the
-marker in the block above, and in the option's description here. The terminal
-wizard makes a point of previews being drawn by the same code as the real
-marker, and this question inherits that promise, so a preview that is a guess
-is worse than no picker at all.
+marker in the block above, and in the option's description here. None of the
+three presets sets `COLOR`, so the colour you name there is the current one,
+unchanged by whichever preset the user picks, not something the preset itself
+produces. The terminal wizard makes a point of previews being drawn by the
+same code as the real marker, and this question inherits that promise, so a
+preview that is a guess is worse than no picker at all.
 
 ## Showing what the sessions add up to
 

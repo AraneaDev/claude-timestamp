@@ -8,3 +8,4 @@
 
 # Screenshot tooling installs its Python dependencies here.
 tools/screenshots/.venv/
+__pycache__/

@@ -23,11 +23,17 @@ IFS=$'\x1f' read -r session_id cwd <<< "$(printf '%s' "$input" \
 
 ct_load_config "$cwd"
 
-# The master switch. Everything below draws on screen, writes state, or talks
-# to the model, and off means none of it.
-[ "$CT_ENABLED" = "on" ] || exit 0
+# The master switch gates everything that draws on screen or talks to the
+# model, but not cleanup: a session switched off mid-way still accumulated
+# state files, and skipping the clear here would strand them until the 7-day
+# sweep instead of at the session's own end. ct_clear_state returns 0 on a
+# bad or empty session id, so this is safe either way.
+if [ "$CT_ENABLED" != "on" ]; then
+  ct_clear_state "$session_id"
+  exit 0
+fi
 
-state_file="$(ct_state_file "$session_id")" || exit 0
+state_file="$(ct_state_file "$session_id")" || { ct_clear_state "$session_id"; exit 0; }
 
 summary=""
 

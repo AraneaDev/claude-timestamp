@@ -117,6 +117,19 @@ done < <(jq -r '.presets // {} | to_entries[] |
                 [$p, .key, .value] | @tsv' schema.json)
 [ "$presets_ok" -eq 1 ] && note "every preset writes keys the loader reads"
 
+# quieter/default/detailed are documented as writing an identical key set, so
+# switching between them can never leave a setting behind from the one before.
+# Nothing else enforces that claim.
+q_keys="$(jq -r '.presets.quieter.set // {} | keys | sort | @csv' schema.json)"
+d_keys="$(jq -r '.presets.default.set // {} | keys | sort | @csv' schema.json)"
+t_keys="$(jq -r '.presets.detailed.set // {} | keys | sort | @csv' schema.json)"
+if [ "$q_keys" = "$d_keys" ] && [ "$d_keys" = "$t_keys" ]; then
+  note "quieter, default and detailed write the same key set"
+else
+  note "key sets differ: quieter=$q_keys default=$d_keys detailed=$t_keys"
+  status=1
+fi
+
 echo "assertion count"
 actual="$(bash tests/run.sh 2>/dev/null | sed -n 's/^\([0-9]*\) passed.*/\1/p' | tail -1)"
 claimed="$(sed -n 's/.*# \([0-9]*\) assertions.*/\1/p' README.md | head -1)"

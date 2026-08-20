@@ -1016,6 +1016,15 @@ asserts "facts: a stale file is replaced" jq -e . "$CLAUDE_TIMESTAMP_FACTS"
 # Written by rename, so a concurrent reader cannot see a half-written file.
 is "facts: no temp file left behind" "" "$(find "$WORK" -name 'facts.json.*' 2>/dev/null)"
 
+# The absence of a temp file is necessary but not sufficient: a direct write
+# also leaves none behind. Pin the actual claim -- the file is replaced by
+# rename, not edited in place -- by checking the inode changes.
+printf '{}' > "$CLAUDE_TIMESTAMP_FACTS"
+before="$(ls -i "$CLAUDE_TIMESTAMP_FACTS" | awk '{print $1}')"
+printf '{"session_id":"facts"}' | bash "$SCRIPTS/session-start.sh" >/dev/null
+after="$(ls -i "$CLAUDE_TIMESTAMP_FACTS" | awk '{print $1}')"
+refutes "facts: replaced by rename, not written in place" test "$before" = "$after"
+
 # ct_write_facts resolves the plugin root via
 # `cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd` as a plain command-
 # substitution assignment. Under set -e that is NOT a context errexit skips
@@ -1074,6 +1083,12 @@ printf '{"session_id":"off-3","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submi
 printf 'ENABLED=off\n' > "$CLAUDE_TIMESTAMP_CONFIG"
 out="$(printf '{"session_id":"off-3"}' | bash "$SCRIPTS/session-end.sh")"
 is "enabled=off: no session summary" "" "$out"
+
+# Switching off mid-session must not strand that session's state files --
+# they would otherwise sit until the 7-day sweep instead of being cleared at
+# the session's own end.
+is "enabled=off: state is still cleared" "" \
+   "$(find "$(ct_state_dir)" -name 'off-3*' 2>/dev/null)"
 
 # The facts file must still be written, or /timestamps could never turn the
 # plugin back on. COLOR=banana is pinned alongside ENABLED=off so a config
@@ -1149,6 +1164,12 @@ is "attribution: sub-minute reads in seconds" "Bash 45s" "$(ct_dominant_tool "$l
 
 printf 'Bash 30\nRead 32\n' > "$log"
 is "attribution: sums per tool, not per call" "Read 32s" "$(ct_dominant_tool "$log" 62)"
+
+# Tool calls run concurrently, so four 30s Bash calls can finish inside a 32s
+# turn. The per-tool sum (120s) must never be rendered larger than the turn
+# actually took.
+printf 'Bash 30\nBash 30\nBash 30\nBash 30\n' > "$log"
+is "attribution: clamps a duration sum larger than the turn" "Bash 32s" "$(ct_dominant_tool "$log" 32)"
 
 : > "$log"
 refutes "attribution: silent on an empty log" ct_dominant_tool "$log" 134

@@ -12,13 +12,12 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/config.sh"
 ct_load_config
 
-# Checked before touching jq, so the disabled path costs one bash fork and a
-# small file read rather than a jq process on every tool call.
-#
 # The master switch. Everything below draws on screen, writes state, or talks
 # to the model, and off means none of it.
 [ "$CT_ENABLED" = "on" ] || exit 0
 [ "$CT_TOOL_TIMING" = "on" ] || exit 0
+# Checked last, so the common case -- tool timing off -- costs a bash builtin
+# rather than a jq process fork on every tool call.
 command -v jq >/dev/null 2>&1 || exit 0
 
 input="$(cat)"
