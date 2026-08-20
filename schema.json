@@ -1,0 +1,149 @@
+{
+  "keys": {
+    "TZ": {
+      "default": "",
+      "validator": "ct_is_valid_tz",
+      "type": "timezone",
+      "describes": "IANA timezone name such as Europe/Amsterdam, or empty for the machine's local time"
+    },
+    "DISPLAY_FORMAT": {
+      "default": "24h",
+      "validator": "ct_is_valid_format",
+      "values": [
+        "24h",
+        "short",
+        "12h",
+        "iso"
+      ],
+      "type": "format",
+      "describes": "clock format of the marker; anything containing a % is a strftime string"
+    },
+    "CONTEXT_FORMAT": {
+      "default": "24h",
+      "validator": "ct_is_valid_format",
+      "values": [
+        "24h",
+        "short",
+        "12h",
+        "iso"
+      ],
+      "type": "format",
+      "describes": "clock format of the time Claude is told"
+    },
+    "COLOR": {
+      "default": "dim",
+      "validator": "ct_is_valid_color",
+      "values": [
+        "none",
+        "dim",
+        "gray",
+        "red",
+        "green",
+        "yellow",
+        "blue",
+        "magenta",
+        "cyan"
+      ],
+      "describes": "colour of the marker; NO_COLOR disables colour regardless"
+    },
+    "ELAPSED": {
+      "default": "on",
+      "validator": "ct_is_onoff",
+      "values": [
+        "on",
+        "off"
+      ],
+      "describes": "show how long the turn took"
+    },
+    "SLOW_AFTER": {
+      "default": "60",
+      "validator": "ct_is_seconds",
+      "type": "seconds",
+      "zero": "disables",
+      "describes": "colour the duration once a turn takes at least this many seconds"
+    },
+    "SLOW_COLOR": {
+      "default": "yellow",
+      "validator": "ct_is_valid_color",
+      "values": [
+        "none",
+        "dim",
+        "gray",
+        "red",
+        "green",
+        "yellow",
+        "blue",
+        "magenta",
+        "cyan"
+      ],
+      "describes": "colour used for the duration of a slow turn"
+    },
+    "IDLE_AFTER": {
+      "default": "3600",
+      "validator": "ct_is_seconds",
+      "type": "seconds",
+      "zero": "disables",
+      "describes": "mark a gap of at least this many seconds between messages"
+    },
+    "DATE_ROLLOVER": {
+      "default": "on",
+      "validator": "ct_is_onoff",
+      "values": [
+        "on",
+        "off"
+      ],
+      "describes": "show the date on the first message after the session crosses midnight"
+    },
+    "SUMMARY": {
+      "default": "on",
+      "validator": "ct_is_onoff",
+      "values": [
+        "on",
+        "off"
+      ],
+      "describes": "report session totals on exit"
+    },
+    "SUBAGENTS": {
+      "default": "on",
+      "validator": "ct_is_onoff",
+      "values": [
+        "on",
+        "off"
+      ],
+      "describes": "stamp messages from subagents as well as the main conversation"
+    },
+    "TOOL_TIMING": {
+      "default": "off",
+      "validator": "ct_is_onoff",
+      "values": [
+        "on",
+        "off"
+      ],
+      "describes": "time individual tool calls; the only setting that costs anything per tool call rather than per message"
+    },
+    "HISTORY": {
+      "default": "on",
+      "validator": "ct_is_onoff",
+      "values": [
+        "on",
+        "off"
+      ],
+      "describes": "record each finished session; timings only, no message text, no paths"
+    },
+    "HISTORY_LIMIT": {
+      "default": "200",
+      "validator": "ct_is_seconds",
+      "type": "count",
+      "describes": "how many recorded sessions to keep"
+    },
+    "INJECT_CONTEXT": {
+      "default": "true",
+      "validator": "ct_is_bool",
+      "values": [
+        "true",
+        "false"
+      ],
+      "describes": "tell Claude the local time each prompt was sent"
+    }
+  }
+}

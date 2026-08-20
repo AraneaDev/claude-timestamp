@@ -33,6 +33,57 @@ if [ -n "$extra" ]; then
 fi
 [ "$status" -eq 0 ] && note "all $(printf '%s\n' "$code_keys" | wc -l | tr -d ' ') settings are documented"
 
+echo "schema agrees with the loader"
+schema_keys="$(jq -r '.keys | keys[]' schema.json | sort -u)"
+
+s_missing="$(comm -23 <(printf '%s\n' "$code_keys") <(printf '%s\n' "$schema_keys"))"
+s_extra="$(comm -13 <(printf '%s\n' "$code_keys") <(printf '%s\n' "$schema_keys"))"
+if [ -n "$s_missing" ]; then
+  note "NOT in schema.json: $(printf '%s' "$s_missing" | tr '\n' ' ')"
+  status=1
+fi
+if [ -n "$s_extra" ]; then
+  note "in schema.json but not read by the loader: $(printf '%s' "$s_extra" | tr '\n' ' ')"
+  status=1
+fi
+
+# Defaults must match what ct_load_config actually sets. Only keys the loader
+# understands are compared, so its internal CT_* scratch variables are skipped.
+# A space separates key and value rather than a tab: BSD sed does not expand
+# \t in a replacement, and every default here is a single token with no
+# spaces, so a space is unambiguous (CT_TZ="" yields an empty want, which is
+# correct -- its default is the empty string).
+schema_defaults_ok=1
+while read -r key want; do
+  [ -n "$key" ] || continue
+  case "$schema_keys" in *"$key"*) ;; *) continue ;; esac
+  have="$(jq -r --arg k "$key" '.keys[$k].default' schema.json)"
+  if [ "$want" != "$have" ]; then
+    note "$key defaults to '$want' in the loader but '$have' in schema.json"
+    schema_defaults_ok=0
+    status=1
+  fi
+done < <(sed -n 's/^  CT_\([A-Z_]*\)="\([^"]*\)".*/\1 \2/p' hooks/scripts/lib/config.sh)
+[ "$schema_defaults_ok" -eq 1 ] && note "every default matches the loader"
+
+# Every enumerated value must actually pass the validator named for that key.
+# Comparing against the validator itself rather than against its source text
+# means a validator that changes shape cannot quietly pass this check.
+# shellcheck source=/dev/null
+. hooks/scripts/lib/config.sh
+values_ok=1
+while IFS="$(printf '\t')" read -r key validator value; do
+  [ -n "$key" ] || continue
+  if ! "$validator" "$value"; then
+    note "$key lists '$value' but $validator rejects it"
+    values_ok=0
+    status=1
+  fi
+done < <(jq -r '.keys | to_entries[] | select(.value.values) |
+                . as $e | .value.values[] |
+                [$e.key, $e.value.validator, .] | @tsv' schema.json)
+[ "$values_ok" -eq 1 ] && note "every listed value passes its validator"
+
 echo "assertion count"
 actual="$(bash tests/run.sh 2>/dev/null | sed -n 's/^\([0-9]*\) passed.*/\1/p' | tail -1)"
 claimed="$(sed -n 's/.*# \([0-9]*\) assertions.*/\1/p' README.md | head -1)"
