@@ -368,6 +368,37 @@ ct_tool_log() {
   printf '%s.tools' "$base"
 }
 
+# The tool log for the current turn only. The session-wide log answers "what
+# made this session slow"; this one answers "what made this reply slow", which
+# is a different question and needs a log that starts empty at every prompt.
+ct_turn_tool_log() {
+  local base
+  base="$(ct_state_file "${1:-}")" || return 1
+  printf '%s.turntools' "$base"
+}
+
+# Name the tool responsible for a slow turn, or say nothing.
+#
+# A tool has to account for at least half the turn before it is worth naming.
+# Below that the marker would be pointing at something that was not the reason,
+# which is worse than staying quiet. Returns non-zero when nothing dominates,
+# so the caller can simply test it.
+ct_dominant_tool() {
+  local log="${1:-}" total="${2:-0}"
+  [ -r "$log" ] || return 1
+  case "$total" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$total" -gt 0 ] || return 1
+  awk -v total="$total" '
+    { sum[$1] += $2 }
+    END {
+      best = ""; top = 0
+      for (t in sum) if (sum[t] > top) { top = sum[t]; best = t }
+      if (best == "" || top * 2 < total) exit 1
+      if (top < 60) printf "%s %ds", best, int(top + 0.5)
+      else          printf "%s %dm%02ds", best, int(top / 60), int(top) % 60
+    }' "$log"
+}
+
 # Seconds -> 45s / 2m14s / 1h03m. Refuses anything that is not a whole number,
 # which also covers a clock that moved backwards.
 ct_format_duration() {

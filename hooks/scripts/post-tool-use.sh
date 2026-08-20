@@ -34,7 +34,14 @@ log="$(ct_tool_log "$session_id")" || exit 0
 case "$tool_name" in ''|*[![:alnum:]_-]*) tool_name="unknown" ;; esac
 
 mkdir -p "$(ct_state_dir)"
-printf '%s %s\n' "$tool_name" "$(ct_duration_between "$started" "$(ct_now_precise)")" >> "$log"
+duration="$(ct_duration_between "$started" "$(ct_now_precise)")"
+printf '%s %s\n' "$tool_name" "$duration" >> "$log"
+
+# The session-wide log answers "what made this session slow"; this one
+# answers "what made this reply slow". Both need the same line.
+if turn_log="$(ct_turn_tool_log "$session_id")"; then
+  printf '%s %s\n' "$tool_name" "$duration" >> "$turn_log"
+fi
 
 # The same script serves both events, because a failed call is still a call
 # that took time. Only the tally of failures differs.

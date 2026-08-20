@@ -1132,6 +1132,66 @@ contains "enabled: a project can pin it" "ENABLED=off" \
   "$(cat "$project/.claude/claude-timestamp.conf" 2>/dev/null)"
 
 echo
+echo "slow turn attribution"
+
+fresh
+mkdir -p "$(ct_state_dir)"
+log="$(ct_state_dir)/attr.turntools"
+
+printf 'Bash 118\nRead 2\n' > "$log"
+is "attribution: names the dominant tool" "Bash 1m58s" "$(ct_dominant_tool "$log" 134)"
+
+printf 'Bash 40\nRead 2\n' > "$log"
+refutes "attribution: silent when no tool dominates" ct_dominant_tool "$log" 134
+
+printf 'Bash 45\n' > "$log"
+is "attribution: sub-minute reads in seconds" "Bash 45s" "$(ct_dominant_tool "$log" 60)"
+
+printf 'Bash 30\nRead 32\n' > "$log"
+is "attribution: sums per tool, not per call" "Read 32s" "$(ct_dominant_tool "$log" 62)"
+
+: > "$log"
+refutes "attribution: silent on an empty log" ct_dominant_tool "$log" 134
+refutes "attribution: silent on a missing log" ct_dominant_tool "$(ct_state_dir)/nope" 134
+refutes "attribution: silent when the turn was instant" ct_dominant_tool "$log" 0
+
+# The per-turn log must be cleared at each prompt, or the second turn inherits
+# the first turn's tools and blames the wrong one.
+fresh 'TOOL_TIMING=on'
+printf '{"session_id":"turnlog","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+printf 'Bash 99\n' > "$(ct_turn_tool_log turnlog)"
+printf '{"session_id":"turnlog","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+is "attribution: the per-turn log is cleared each prompt" "" "$(cat "$(ct_turn_tool_log turnlog)")"
+
+# End to end through the marker.
+fresh 'TOOL_TIMING=on' 'SLOW_AFTER=1'
+printf '{"session_id":"marker","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+printf '%s' "$(( $(date +%s) - 200 ))" > "$(ct_state_file marker)"
+printf 'Bash 190\n' > "$(ct_turn_tool_log marker)"
+out="$(strip_ansi "$(printf '{"index":0,"session_id":"marker","delta":"x"}' \
+  | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')")"
+contains "attribution: appears in the marker" "Bash 3m10s" "$out"
+contains "attribution: the separator is a middle dot" "· Bash" "$out"
+
+# Off by default, because it rides on TOOL_TIMING.
+fresh 'SLOW_AFTER=1'
+printf '{"session_id":"noattr","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+printf '%s' "$(( $(date +%s) - 200 ))" > "$(ct_state_file noattr)"
+printf 'Bash 190\n' > "$(ct_turn_tool_log noattr)"
+out="$(strip_ansi "$(printf '{"index":0,"session_id":"noattr","delta":"x"}' \
+  | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')")"
+lacks "attribution: absent when tool timing is off" "Bash" "$out"
+
+# A fast turn is not annotated even when a tool dominated it.
+fresh 'TOOL_TIMING=on' 'SLOW_AFTER=600'
+printf '{"session_id":"fast","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+printf '%s' "$(( $(date +%s) - 200 ))" > "$(ct_state_file fast)"
+printf 'Bash 190\n' > "$(ct_turn_tool_log fast)"
+out="$(strip_ansi "$(printf '{"index":0,"session_id":"fast","delta":"x"}' \
+  | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')")"
+lacks "attribution: absent on a fast turn" "Bash" "$out"
+
+echo
 echo "----"
 printf '%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

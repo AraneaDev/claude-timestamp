@@ -52,6 +52,12 @@ if state_file="$(ct_state_file "$session_id")"; then
     # moment, so the running total for this turn starts at zero.
     printf '0' > "${state_file}.counted"
   fi
+
+  # Cleared unconditionally rather than under TOOL_TIMING, so switching tool
+  # timing on mid-session cannot inherit a log from before it was on.
+  if turn_log="$(ct_turn_tool_log "$session_id")"; then
+    : > "$turn_log"
+  fi
 fi
 
 [ "$CT_INJECT_CONTEXT" = "false" ] && exit 0
