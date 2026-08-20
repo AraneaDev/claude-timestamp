@@ -9,11 +9,12 @@ Settings take effect on the **next message**. Every hook reads the config file
 each time it runs, so nothing needs restarting. Say so when you report back,
 because people reasonably assume otherwise.
 
-Do all of this by reading and editing files, with Read, Edit and Write. Nothing
-here needs a shell: not reading the settings, not working out the time, not
-applying a change. There is a terminal wizard, and the last section says how to
-reach it, but driving it from here is slower, noisier, and needs a Bash
-permission the user does not otherwise have to grant.
+Do all of this by reading and editing files, with Read, Edit and Write. Do not
+use the Bash tool for any of it: not to read the settings, not to work out the
+time, not to check whether a program is installed, not to apply a change. There
+is a terminal wizard, and the last section says how to reach it, but driving it
+from here is slower, noisier, and needs a Bash permission the user does not
+otherwise have to grant.
 
 ## What the user asked for
 
@@ -32,9 +33,10 @@ $ARGUMENTS
    state directory is writable, and which plugin version is installed. It is
    rewritten at every session start, so it describes this machine as it is now.
 
-   If it is missing, the plugin has not started a session since this version
-   was installed, or `jq` is not installed. Say which you suspect rather than
-   guessing at the facts it would have held.
+   If it is missing, either no session has started since this version was
+   installed, or `jq` is not installed. The files cannot tell you which, and
+   the last section says what to do about that. Do not guess at the facts the
+   file would have held.
 
 3. `~/.claude/claude-timestamp.conf` is the user's settings. A key that is
    absent means the default from `schema.json`, so an absent key is not a
@@ -62,6 +64,20 @@ you editing the line next to it.
 - The file does not exist: create it with a `# claude-timestamp configuration`
   header comment and only the keys you are setting.
 
+Applying a preset from `schema.json` is the same job in bulk: name the keys it
+writes before writing them, and write exactly the keys its `set` object lists
+and no others. Presets change several settings at once and the user should not
+have to discover which. `quieter`, `default` and `detailed` all write the same
+six keys, so moving between them never leaves a setting behind from the one
+before. `off` writes `ENABLED` alone, deliberately, so switching back on
+restores everything else as it was.
+
+`default` is the default marker, not a factory reset. It leaves the other ten
+keys as they are, `TZ` and `INJECT_CONTEXT` among them. That is usually what
+someone asking for the defaults back wants, a pinned timezone especially, but
+say which settings it left alone when you report, or the name promises more
+than it delivered.
+
 Refuse to write a value `schema.json` does not accept, and say what the
 acceptable ones are. A bad value is not silently ignored: the plugin replaces
 it with the default and complains at the next session start.
@@ -75,6 +91,12 @@ To change a project's settings rather than the user's, edit the project file
 instead, and write only the keys being pinned. A project config exists to pin
 one or two things, so writing the full set would shadow the user's own
 configuration and freeze it at today's values.
+
+When a project pins the very key the request is about, editing the user's file
+would achieve nothing: the project layer is read second and wins. Do not write
+it anyway and report success. Say which file pins that key, and ask whether to
+change that file instead, because a project config is usually committed and
+shared with everyone working in the repository.
 
 ## When the request is specific
 
@@ -95,8 +117,9 @@ Some phrasings and what they mean:
 | "why was that slow" | `TOOL_TIMING=on`, and explain it names the worst tool in the marker from now on |
 
 A request that is really the name of a preset is specific too: "quieter",
-"more detail", "back to the defaults", "off". Apply that preset rather than
-asking, and name the keys it writes.
+"more detail", "off". Apply that preset rather than asking, and name the keys
+it writes. "Back to the defaults" is the `default` preset, which resets the
+marker and nothing else, so name what it did not reset when you report.
 
 Report what changed, from what to what, and that it is already live.
 
@@ -118,12 +141,18 @@ made-up time and say it is an example. Either way there is nothing to look up.
 
 Add a line naming the project config when one is in play.
 
-Then ask with AskUserQuestion, one question, with each preset as an option and
-its rendered marker as the option's description. Add two more options: "change
-one thing", which asks which setting and then drills into it, and "walk every
-setting", which goes through them in the order `schema.json` lists them.
+Then ask with AskUserQuestion. One question, and the four presets as its four
+options: the tool accepts at most four, and it always offers an "Other" of its
+own for free text. Give each option the preset's `describes` line and its
+rendered marker as the description.
 
-Every preview must render what that preset really produces:
+"Other" is where a request to change one particular thing arrives, so take
+whatever they type there and drill into that setting. Offer walking every
+setting in the text above the question rather than spending an option on it,
+and if they ask for that, go through them in the order `schema.json` lists
+them.
+
+Every rendered marker must show what that preset really produces:
 
 - The marker is the clock, in `DISPLAY_FORMAT`, inside square brackets.
 - `ELAPSED=on` adds how long the turn took: `[13:22:13 +2m14s]`.
@@ -137,10 +166,6 @@ Every preview must render what that preset really produces:
 Colour cannot be shown in chat, so name it in words on the line underneath, as
 the example above does. The terminal wizard makes a point of previews being
 drawn by the same code as the real marker, and this inherits that promise.
-
-When a preset is chosen, name the keys it writes before writing them, and write
-exactly the keys its `set` object lists and no others. Presets change several
-settings at once and the user should not have to discover which.
 
 ## Showing what the sessions add up to
 
@@ -158,8 +183,13 @@ they ask what is stored.
 Read the facts file and the config files, and check them against
 `schema.json`:
 
-- No facts file: no session has started since the plugin was installed, or
-  `jq` is missing. Timestamps need `jq`.
+- A facts file that exists proves `jq` works: the hook that writes it exits
+  before writing anything when `jq` is missing.
+- No facts file: either no session has started since this version was
+  installed, or `jq` is missing. Nothing on disk separates those two, so do not
+  go looking for a way to tell. Say it is one of the two and let the user
+  settle it: when `jq` is missing the plugin says so out loud at the start of
+  every session, so they will know whether they have seen that.
 - `state_dir_writable` is false: the plugin cannot record turn starts, so
   elapsed times and the summary will be missing.
 - `tz_database` is false and `TZ` is pinned to an IANA name: the plugin is

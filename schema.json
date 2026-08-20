@@ -155,7 +155,7 @@
   "presets": {
     "quieter": {
       "describes": "just the time, nothing else",
-      "set": { "ENABLED": "on", "DISPLAY_FORMAT": "short", "ELAPSED": "off" }
+      "set": { "ENABLED": "on", "DISPLAY_FORMAT": "short", "ELAPSED": "off", "COLOR": "dim", "SLOW_AFTER": "60", "TOOL_TIMING": "off" }
     },
     "default": {
       "describes": "the time and how long the turn took",
@@ -166,7 +166,7 @@
       "set": { "ENABLED": "on", "DISPLAY_FORMAT": "24h", "ELAPSED": "on", "COLOR": "dim", "SLOW_AFTER": "30", "TOOL_TIMING": "on" }
     },
     "off": {
-      "describes": "no marker at all, without uninstalling",
+      "describes": "no marker at all, without uninstalling; the only preset that writes one key, so switching back on restores the rest as they were",
       "set": { "ENABLED": "off" }
     }
   }

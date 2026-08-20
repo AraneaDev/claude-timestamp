@@ -87,6 +87,19 @@ done < <(jq -r '.keys | to_entries[] | select(.value.values) |
 # A preset that names a key the loader does not read, or a value its validator
 # rejects, would write a config the plugin then silently ignores.
 presets_ok=1
+
+# A preset with no keys at all produces no rows below, so the loop cannot see
+# it: jq would fail mid-stream inside a process substitution, whose exit status
+# is discarded, and the check would report success on a broken schema.
+while read -r preset; do
+  [ -n "$preset" ] || continue
+  note "preset $preset writes no keys"
+  presets_ok=0
+  status=1
+done < <(jq -r '.presets // {} | to_entries[] |
+                select((.value.set | type) != "object" or (.value.set | length) == 0) |
+                .key' schema.json)
+
 while IFS="$(printf '\t')" read -r preset key value; do
   [ -n "$preset" ] || continue
   validator="$(jq -r --arg k "$key" '.keys[$k].validator // empty' schema.json)"
@@ -100,7 +113,7 @@ while IFS="$(printf '\t')" read -r preset key value; do
     status=1
   fi
 done < <(jq -r '.presets // {} | to_entries[] |
-                .key as $p | .value.set | to_entries[] |
+                .key as $p | (.value.set // {}) | to_entries[] |
                 [$p, .key, .value] | @tsv' schema.json)
 [ "$presets_ok" -eq 1 ] && note "every preset writes keys the loader reads"
 
