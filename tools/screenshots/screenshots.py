@@ -1,15 +1,17 @@
 """Regenerate the screenshots in assets/.
 
-Both shots are captured from the real thing rather than mocked up. The hero
-shot drives an actual Claude Code session inside a pty, and the doctor shot
-runs the real setup script. Nothing here fabricates output.
+Every shot is captured from the real thing rather than mocked up. The hero and
+picker shots each drive an actual Claude Code session inside a pty. The wizard
+shot runs the real setup script through a pty too, since it needs a TTY. The
+doctor and stats shots run the real setup script directly and capture its
+output. Nothing here fabricates output.
 
 pyte is a terminal emulator, so what gets rendered is whatever was actually
 painted, escape codes and all. It models bold and italics but has no notion of
 SGR 2 (dim), which is exactly what this plugin uses by default, so Screen is
 subclassed below to track it.
 
-Usage:  python screenshots.py [hero|wizard|doctor|all]
+Usage:  python screenshots.py [hero|picker|wizard|doctor|stats|all]
 
 There is deliberately no shot of the end-of-session summary. Producing one
 means exiting the TUI under automation, and it does not go quietly: typing
@@ -243,13 +245,39 @@ def shot_picker():
     pty. The picker is an interactive widget rather than program output, so the
     capture deliberately stops while the question is still on screen and never
     answers it.
+
+    Unlike every other shot here, this one does not set CLAUDE_TIMESTAMP_CONFIG.
+    That variable is honoured by the hooks that paint the transcript markers,
+    but /timestamps is a prompt: it reads the literal path
+    ~/.claude/claude-timestamp.conf and cannot be redirected by the
+    environment. Pointing the hooks at a demo config while /timestamps read the
+    real one produced a frame that visibly disagreed with itself -- the hooks'
+    duration was coloured past a demo SLOW_AFTER while the picker's own text
+    named the real, much higher, threshold. Leaving the variable unset means
+    both halves read the same file, so the picker shows whatever the real
+    account is actually configured with. That is a mild, known privacy cost,
+    no worse than what the crop below already accepts by publishing the
+    account's real settings as text.
+
+    Reproducibility warning: the keys/settle/total below were tuned against a
+    work directory `claude` had already been run in before, in a nested child
+    session (this repo's own tooling runs inside one), which is exempt from
+    the interactive workspace-trust dialog a normal top-level session shows
+    the first time it sees a new directory. That exemption made it impossible
+    to observe, from here, what a genuinely first-ever run looks like or to
+    script an answer to a dialog that never rendered. If this shot is ever run
+    against a directory `claude` has never seen -- a clean checkout, a fresh
+    CI runner -- from an ordinary (non-nested) terminal, the first invocation
+    may show that dialog and swallow the typed keys before anything is ready
+    to receive them, producing a capture of nothing but the welcome banner. If
+    that happens: it is the trust dialog, not these timings. Run `claude` once
+    by hand in the work directory below to accept it, then re-run this shot;
+    the directory stays trusted after that.
     """
     if not subprocess.run(["which", "claude"], capture_output=True).returncode == 0:
         raise SystemExit("claude is not on PATH; cannot capture the picker shot.")
     work = WORK / "picker"
     work.mkdir(parents=True, exist_ok=True)
-    conf = work / "config.conf"
-    conf.write_text(DEMO_CONFIG)
 
     # Reading schema.json, the facts file and the config, then rendering the
     # question, takes 40-50s in practice, well past what the brief's starting
@@ -263,7 +291,6 @@ def shot_picker():
         ["claude"],
         keys=[(6.0, "/timestamps"), (7.5, "\r")],
         cols=cols, rows=rows, settle=12, total=100,
-        env={"CLAUDE_TIMESTAMP_CONFIG": str(conf)},
     )
     (work / "picker.raw").write_bytes(raw)
 

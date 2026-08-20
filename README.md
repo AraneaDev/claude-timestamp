@@ -118,7 +118,7 @@ it. The colour list and the result line are rendered by the same code that
 draws the real marker, so a preview cannot drift from what you will actually
 see.
 
-It also takes flags, which is what `/timestamps` uses:
+It also takes flags, so several settings can be set from a terminal in one call:
 
 ```bash
 setup.sh --tz=Asia/Tokyo --display=short --color=dim --slow-after=30
@@ -298,10 +298,11 @@ bash tools/screenshots/make.sh doctor   # just one
 ```
 
 It drives the real programs, the wizard and doctor through a pty and the hero
-shot through an actual Claude Code session, then renders what was painted using
-a terminal emulator. Nothing in those images is mocked up. The hero shot
-therefore needs a working login and spends tokens, and its durations differ
-every run because they are real measurements. Python dependencies install into
+and picker shots through an actual Claude Code session, then renders what was
+painted using a terminal emulator. Nothing in those images is mocked up. The
+hero and picker shots therefore need a working login and spend tokens, and the
+hero shot's durations differ every run because they are real measurements.
+Python dependencies install into
 a virtualenv beside the script.
 
 ## Releases
