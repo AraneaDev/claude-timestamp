@@ -140,6 +140,10 @@ preview() {
     fi
   fi
   printf '%s[%s]%s Sure, here is what I found.\n' "$base_start" "$body" "$base_end"
+  # Every other line in this sample is real: the actual color, the actual
+  # format. This one is not -- with the plugin off, no hook draws it, so a
+  # reader who only skims the marker should not walk away thinking it works.
+  [ "$CT_ENABLED" = "on" ] || echo "(sample only -- ENABLED=$CT_ENABLED, so no hook actually draws this)"
 }
 
 # What the recorded sessions add up to.
@@ -232,6 +236,7 @@ doctor() {
   echo
 
   echo "Configuration"
+  echo "  enabled         $CT_ENABLED$([ "$CT_ENABLED" != "on" ] && echo " - the plugin is switched off; nothing below is actually running")"
   if [ -n "${CT_CONFIG_PROBLEMS:-}" ]; then
     echo "  PROBLEMS"
     printf '%s\n' "$CT_CONFIG_PROBLEMS" | sed 's/^  /    /'
@@ -407,6 +412,7 @@ show_config() {
   echo
   [ -n "${CT_PROJECT_CONFIG:-}" ] && echo "Project: $(ct_tilde "$CT_PROJECT_CONFIG") (layered on top)"
   echo
+  echo "  Enabled         $CT_ENABLED"
   echo "  Timezone        ${CT_TZ:-<machine local>}"
   echo "  Display format  $CT_DISPLAY_FORMAT"
   echo "  Context format  $CT_CONTEXT_FORMAT"

@@ -1065,18 +1065,44 @@ fresh 'ENABLED=off'
 out="$(printf '{"index":0,"session_id":"off-2","delta":"hello"}' | bash "$SCRIPTS/message-display.sh")"
 is "enabled=off: no marker is drawn" "" "$out"
 
-fresh 'ENABLED=off'
+# A real turn is recorded with ENABLED=on, then the plugin is switched off
+# before session-end.sh runs -- state exists (turns > 0), so the empty output
+# proves session-end.sh's own guard fired rather than there being nothing to
+# summarise. That is also the realistic "switched off mid-session" path.
+fresh 'ENABLED=on'
 printf '{"session_id":"off-3","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+printf 'ENABLED=off\n' > "$CLAUDE_TIMESTAMP_CONFIG"
 out="$(printf '{"session_id":"off-3"}' | bash "$SCRIPTS/session-end.sh")"
 is "enabled=off: no session summary" "" "$out"
 
 # The facts file must still be written, or /timestamps could never turn the
-# plugin back on.
-fresh 'ENABLED=off'
+# plugin back on. COLOR=banana is pinned alongside ENABLED=off so a config
+# problem exists that would otherwise produce a systemMessage -- proving
+# silence here comes from the ENABLED guard, not from there being nothing to
+# report.
+fresh 'ENABLED=off' 'COLOR=banana'
 rm -f "$CLAUDE_TIMESTAMP_FACTS"
 out="$(printf '{"session_id":"off-4"}' | bash "$SCRIPTS/session-start.sh")"
 asserts "enabled=off: facts are still published" test -r "$CLAUDE_TIMESTAMP_FACTS"
 is "enabled=off: session start stays quiet" "" "$out"
+
+# The tool-timing hooks fire per tool call rather than per message, so they
+# get their own ENABLED=off check. TOOL_TIMING=on so, absent the guard, both
+# would actually write.
+fresh 'ENABLED=off' 'TOOL_TIMING=on'
+tool_state="$(ct_tool_state_file "off-5" "t1")"
+printf '{"session_id":"off-5","tool_use_id":"t1"}' | bash "$SCRIPTS/pre-tool-use.sh" >/dev/null
+refutes "enabled=off: pre-tool-use writes no state" test -r "$tool_state"
+
+# The state file is planted directly rather than via pre-tool-use.sh, whose
+# own guard already blocks it above -- this isolates post-tool-use.sh's guard
+# so the assertion below actually exercises it.
+mkdir -p "$(ct_state_dir)"
+ct_now_precise > "$tool_state"
+tool_log="$(ct_tool_log "off-5")"
+printf '{"session_id":"off-5","tool_use_id":"t1","tool_name":"Bash","hook_event_name":"PostToolUse"}' \
+  | bash "$SCRIPTS/post-tool-use.sh" >/dev/null
+refutes "enabled=off: post-tool-use writes no log" test -s "$tool_log"
 
 fresh 'ENABLED=on'
 out="$(printf '{"index":0,"session_id":"on-1","delta":"hello"}' | bash "$SCRIPTS/message-display.sh")"
