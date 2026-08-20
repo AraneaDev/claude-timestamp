@@ -141,10 +141,27 @@ made-up time and say it is an example. Either way there is nothing to look up.
 
 Add a line naming the project config when one is in play.
 
-Then ask with AskUserQuestion. One question, and the four presets as its four
-options: the tool accepts at most four, and it always offers an "Other" of its
-own for free text. Give each option the preset's `describes` line and its
-rendered marker as the description.
+Then ask with AskUserQuestion. One question, single-select, and the four
+presets as its four options: the tool accepts at most four, and it always
+offers an "Other" of its own for free text.
+
+Each option carries two fields, and both matter. The `description` is the
+sentence about what that preset changes, which is its `describes` in
+`schema.json`. The `preview` is the marker itself, rendered as that preset
+would really produce it. The previews are the point of this question: they turn
+four names into four things the user can look at and compare, which is what
+picking a marker actually needs. They are supported on single-select questions
+only, so do not set `multiSelect` on this one.
+
+The result reads roughly like this:
+
+```
+? What would you like?
+  > Quieter      [13:22]
+    Default      [13:22:13 +2m14s]
+    Detailed     [13:22:13 +2m14s · Bash 1m58s]
+    Off          no marker at all
+```
 
 "Other" is where a request to change one particular thing arrives, so take
 whatever they type there and drill into that setting. Offer walking every
@@ -152,20 +169,27 @@ setting in the text above the question rather than spending an option on it,
 and if they ask for that, go through them in the order `schema.json` lists
 them.
 
-Every rendered marker must show what that preset really produces:
+Every preview must render what that preset really produces, under that
+preset's own settings rather than the current ones:
 
-- The marker is the clock, in `DISPLAY_FORMAT`, inside square brackets.
+- The marker is the clock, in that preset's `DISPLAY_FORMAT`, inside square
+  brackets.
 - `ELAPSED=on` adds how long the turn took: `[13:22:13 +2m14s]`.
 - A turn at or past `SLOW_AFTER` seconds has that duration drawn in
   `SLOW_COLOR`, and with `TOOL_TIMING=on` the tool that took at least half the
   turn is named after it: `[13:22:13 +2m14s · Bash 1m58s]`.
-- `ENABLED=off` produces no marker at all, so its preview is that absence.
-- The date never appears unless the format asks for it, because `DATE_ROLLOVER`
-  only shows a date after the session crosses midnight.
+- `ENABLED=off` produces no marker at all, so its preview says exactly that,
+  in words, rather than showing an empty box.
+- Never put a date in a preview unless `DISPLAY_FORMAT` itself asks for one.
+  `DATE_ROLLOVER` shows a date only on the first message after the session
+  crosses midnight, so a dated preview would be promising something the user
+  will not see.
 
-Colour cannot be shown in chat, so name it in words on the line underneath, as
-the example above does. The terminal wizard makes a point of previews being
-drawn by the same code as the real marker, and this inherits that promise.
+Colour cannot be drawn in a preview box, so name it in words: underneath the
+marker in the block above, and in the option's description here. The terminal
+wizard makes a point of previews being drawn by the same code as the real
+marker, and this question inherits that promise, so a preview that is a guess
+is worse than no picker at all.
 
 ## Showing what the sessions add up to
 
@@ -197,6 +221,11 @@ Read the facts file and the config files, and check them against
 - A value `schema.json` rejects: the plugin is using the default instead.
 - `ENABLED=off`: everything is switched off, which is easy to forget having
   done.
+
+If none of those explain it, stop there rather than inventing a next step. Say
+what you checked and what each answer was, so the user can see the ground you
+covered. A person at a terminal can look at things no file records, and the
+line below is how they get there.
 
 If the user would rather answer the questions themselves in a terminal, the
 wizard needs a real TTY:
