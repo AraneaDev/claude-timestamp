@@ -526,41 +526,59 @@ is "tool use id is sanitised" "$(ct_state_dir)/s.tool.etcpasswd" "$(ct_tool_stat
 refutes "an empty tool use id is refused" ct_tool_state_file "s" ""
 
 if command -v jq >/dev/null 2>&1; then
-  # Disabled: the hooks must write nothing at all.
+  # Disabled: the hook must write nothing at all.
   fresh 'TOOL_TIMING=off'
-  printf '{"session_id":"tools","tool_use_id":"t1","tool_name":"Bash"}' | bash "$SCRIPTS/pre-tool-use.sh"
-  if [ -e "$(ct_state_dir)/tools.tool.t1" ]; then
-    fail "TOOL_TIMING=off records nothing" "no state file" "file created"
+  printf '{"session_id":"tools","tool_use_id":"t1","tool_name":"Bash","duration_ms":1000}' \
+    | bash "$SCRIPTS/post-tool-use.sh"
+  if [ -e "$(ct_tool_log tools)" ]; then
+    fail "TOOL_TIMING=off records nothing" "no log" "log created"
   else
     pass "TOOL_TIMING=off records nothing"
   fi
 
   fresh 'TOOL_TIMING=on'
 
-  # Two overlapping calls, interleaved the way parallel tool use actually runs:
-  # both start before either finishes. Name-keyed state would lose one of them.
-  printf '{"session_id":"tools","tool_use_id":"t1","tool_name":"Bash"}' | bash "$SCRIPTS/pre-tool-use.sh"
-  printf '{"session_id":"tools","tool_use_id":"t2","tool_name":"Bash"}' | bash "$SCRIPTS/pre-tool-use.sh"
-  printf '{"session_id":"tools","tool_use_id":"t3","tool_name":"Read"}' | bash "$SCRIPTS/pre-tool-use.sh"
-  asserts "a started call is recorded" test -r "$(ct_state_dir)/tools.tool.t1"
-  printf '{"session_id":"tools","tool_use_id":"t2","tool_name":"Bash"}' | bash "$SCRIPTS/post-tool-use.sh"
-  printf '{"session_id":"tools","tool_use_id":"t1","tool_name":"Bash"}' | bash "$SCRIPTS/post-tool-use.sh"
-  printf '{"session_id":"tools","tool_use_id":"t3","tool_name":"Read"}' | bash "$SCRIPTS/post-tool-use.sh"
+  # Three calls, one of them a different tool. No pairing state is involved any
+  # more, so a call is logged on its own rather than needing a start to match.
+  printf '{"session_id":"tools","tool_use_id":"t1","tool_name":"Bash","duration_ms":40000}' \
+    | bash "$SCRIPTS/post-tool-use.sh"
+  printf '{"session_id":"tools","tool_use_id":"t2","tool_name":"Bash","duration_ms":1200}' \
+    | bash "$SCRIPTS/post-tool-use.sh"
+  printf '{"session_id":"tools","tool_use_id":"t3","tool_name":"Read","duration_ms":400}' \
+    | bash "$SCRIPTS/post-tool-use.sh"
 
   log="$(ct_tool_log tools)"
   is "every completed call is logged" "3" "$(wc -l < "$log" | tr -d ' ')"
   is "the log records tool names" "2" "$(grep -c '^Bash ' "$log")"
-  if [ -e "$(ct_state_dir)/tools.tool.t1" ]; then
-    fail "a completed call clears its start file" "no file" "file remains"
+  is "milliseconds are converted to seconds" "Bash 40.000" "$(sed -n 1p "$log")"
+  is "a sub-second call keeps its precision" "Read 0.400" "$(sed -n 3p "$log")"
+
+  # The per-turn log gets the same line, because the marker reads that one.
+  is "the per-turn log gets the same lines" "3" "$(wc -l < "$(ct_turn_tool_log tools)" | tr -d ' ')"
+
+  # No pairing state means no per-call files to leave behind.
+  if ls "$(ct_state_dir)"/tools.tool.* >/dev/null 2>&1; then
+    fail "no per-call state is created" "no .tool. files" "files created"
   else
-    pass "a completed call clears its start file"
+    pass "no per-call state is created"
   fi
 
-  # A post without a matching pre must not invent an entry.
-  printf '{"session_id":"tools","tool_use_id":"never-started","tool_name":"Bash"}' | bash "$SCRIPTS/post-tool-use.sh"
-  is "an unmatched completion is ignored" "3" "$(wc -l < "$log" | tr -d ' ')"
+  # An older harness sends no duration. Logging a zero would drag every average
+  # down and could name a tool that took no time as the reason a turn was slow.
+  printf '{"session_id":"tools","tool_use_id":"t4","tool_name":"Bash"}' \
+    | bash "$SCRIPTS/post-tool-use.sh"
+  is "a call with no duration is not logged" "3" "$(wc -l < "$log" | tr -d ' ')"
 
-  # Aggregation in the summary.
+  printf '{"session_id":"tools","tool_use_id":"t5","tool_name":"Bash","duration_ms":"soon"}' \
+    | bash "$SCRIPTS/post-tool-use.sh"
+  is "a duration that is not a number is not logged" "3" "$(wc -l < "$log" | tr -d ' ')"
+
+  # A tool name that could steer a write is reduced before it reaches the log.
+  printf '{"session_id":"tools","tool_use_id":"t6","tool_name":"../evil","duration_ms":500}' \
+    | bash "$SCRIPTS/post-tool-use.sh"
+  is "an unusable tool name is recorded as unknown" "1" "$(grep -c '^unknown ' "$log")"
+
+  # Aggregation in the summary, unchanged: it reads the same two fields.
   base="$(ct_state_file "tools")"
   printf '%s' "$(( $(date +%s) - 600 ))" > "$base.start"
   printf '2' > "$base.turns"; printf '30' > "$base.wait"
@@ -855,14 +873,12 @@ if command -v jq >/dev/null 2>&1; then
   is_near "a marked break is added to the time away" 7200 "$(ct_read_counter "$(ct_state_dir)/gap.idle")" 3
 
   fresh 'TOOL_TIMING=on'
-  printf '{"session_id":"f","tool_use_id":"t1","tool_name":"Bash"}' | bash "$SCRIPTS/pre-tool-use.sh"
-  printf '{"session_id":"f","tool_use_id":"t1","tool_name":"Bash","hook_event_name":"PostToolUseFailure"}' \
+  printf '{"session_id":"f","tool_use_id":"t1","tool_name":"Bash","duration_ms":1000,"hook_event_name":"PostToolUseFailure"}' \
     | bash "$SCRIPTS/post-tool-use.sh"
   is "a failed call is counted" "1" "$(ct_read_counter "$(ct_state_file f).failed")"
   is "a failed call is still timed" "1" "$(wc -l < "$(ct_tool_log f)" | tr -d ' ')"
 
-  printf '{"session_id":"f","tool_use_id":"t2","tool_name":"Bash"}' | bash "$SCRIPTS/pre-tool-use.sh"
-  printf '{"session_id":"f","tool_use_id":"t2","tool_name":"Bash","hook_event_name":"PostToolUse"}' \
+  printf '{"session_id":"f","tool_use_id":"t2","tool_name":"Bash","duration_ms":1000,"hook_event_name":"PostToolUse"}' \
     | bash "$SCRIPTS/post-tool-use.sh"
   is "a successful call is not counted as failed" "1" "$(ct_read_counter "$(ct_state_file f).failed")"
 fi
@@ -1116,21 +1132,12 @@ out="$(printf '{"session_id":"off-4"}' | bash "$SCRIPTS/session-start.sh")"
 asserts "enabled=off: facts are still published" test -r "$CLAUDE_TIMESTAMP_FACTS"
 is "enabled=off: session start stays quiet" "" "$out"
 
-# The tool-timing hooks fire per tool call rather than per message, so they
-# get their own ENABLED=off check. TOOL_TIMING=on so, absent the guard, both
-# would actually write.
+# The tool-timing hook fires per tool call rather than per message, so it
+# gets its own ENABLED=off check. TOOL_TIMING=on and a real duration so,
+# absent the guard, it would actually write.
 fresh 'ENABLED=off' 'TOOL_TIMING=on'
-tool_state="$(ct_tool_state_file "off-5" "t1")"
-printf '{"session_id":"off-5","tool_use_id":"t1"}' | bash "$SCRIPTS/pre-tool-use.sh" >/dev/null
-refutes "enabled=off: pre-tool-use writes no state" test -r "$tool_state"
-
-# The state file is planted directly rather than via pre-tool-use.sh, whose
-# own guard already blocks it above -- this isolates post-tool-use.sh's guard
-# so the assertion below actually exercises it.
-mkdir -p "$(ct_state_dir)"
-ct_now_precise > "$tool_state"
 tool_log="$(ct_tool_log "off-5")"
-printf '{"session_id":"off-5","tool_use_id":"t1","tool_name":"Bash","hook_event_name":"PostToolUse"}' \
+printf '{"session_id":"off-5","tool_use_id":"t1","tool_name":"Bash","duration_ms":5000,"hook_event_name":"PostToolUse"}' \
   | bash "$SCRIPTS/post-tool-use.sh" >/dev/null
 refutes "enabled=off: post-tool-use writes no log" test -s "$tool_log"
 
