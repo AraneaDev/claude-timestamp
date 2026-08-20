@@ -1,10 +1,12 @@
-"""Regenerate the screenshots in assets/.
+"""Regenerate the screenshots (and the one animation) in assets/.
 
-Every shot is captured from the real thing rather than mocked up. The hero and
-picker shots each drive an actual Claude Code session inside a pty. The wizard
-shot runs the real setup script through a pty too, since it needs a TTY. The
-doctor and stats shots run the real setup script directly and capture its
-output. Nothing here fabricates output.
+Every shot is captured from the real thing rather than mocked up. The hero
+and picker shots each drive an actual Claude Code session inside a pty. The
+wizard shot runs the real setup script through a pty too, since it needs a
+TTY. The doctor and stats shots run the real setup script directly and
+capture its output. Nothing here fabricates output -- the hero shot is an
+animated GIF built from a real recording, timed to real seconds, not a sped
+up or looped approximation of one.
 
 pyte is a terminal emulator, so what gets rendered is whatever was actually
 painted, escape codes and all. It models bold and italics but has no notion of
@@ -13,6 +15,12 @@ subclassed below to track it.
 
 Usage:  python screenshots.py [hero|picker|wizard|doctor|stats|all]
 
+Costs: hero and picker each drive a real Claude Code session (tokens, and
+however long the model takes to answer). wizard, doctor and stats run local
+scripts only and are free and offline. Plain `all` therefore spends two real
+sessions every time it runs -- pass a single name if that is not what you
+want.
+
 There is deliberately no shot of the end-of-session summary. Producing one
 means exiting the TUI under automation, and it does not go quietly: typing
 /exit opens the command autocomplete and the newline picks from the menu,
@@ -20,10 +28,13 @@ while Ctrl-D is ignored whenever a history suggestion is sitting in the input.
 The README shows that output as text instead.
 
 The hero shot starts a real session and therefore spends tokens. It also
-depends on how fast the model answers, so the durations differ every run; that
-is the point, they are real measurements rather than props.
+depends on how fast the model answers, so the durations differ every run;
+that is the point, they are real measurements rather than props. Its GIF's
+own playback speed is likewise real: frame durations are read off the
+recording's true timestamps, never compressed, so a viewer watching it
+experiences the same seconds the session actually took.
 """
-import fcntl, json, os, pty, select, struct, subprocess, sys, termios, time
+import fcntl, json, os, pickle, pty, select, struct, subprocess, sys, termios, time
 from pathlib import Path
 
 import pyte
@@ -85,12 +96,20 @@ class DimScreen(pyte.Screen):
         self._dim = False
 
 
-def capture_pty(argv, keys, cols, rows, settle=12, total=150, env=None):
+def capture_pty(argv, keys, cols, rows, settle=12, total=150, env=None, record=False):
     """Run argv in a pty, type `keys`, return everything it painted.
 
     keys is a list of (seconds_from_start, text). Text and the newline that
     submits it are sent separately in the shot definitions, because an Enter
     arriving while the TUI is busy gets swallowed.
+
+    With record=True, also return the true arrival time of every chunk read
+    from the pty as (seconds_since_start, chunk) pairs, plus the wall-clock
+    duration of the whole capture. That is the raw material an animation
+    needs to place frames at the moments they actually happened, rather than
+    at a compressed or evenly-spaced approximation of them. record=False (the
+    default) changes nothing about the existing behaviour or return value --
+    the still shots that call this do not pay for what they do not use.
     """
     pid, fd = pty.fork()
     if pid == 0:
@@ -104,6 +123,7 @@ def capture_pty(argv, keys, cols, rows, settle=12, total=150, env=None):
     start = last = time.time()
     pending = [(d, t.encode()) for d, t in keys]
     raw = bytearray()
+    timeline = [] if record else None
     while time.time() - start < total:
         while pending and time.time() - start >= pending[0][0]:
             os.write(fd, pending.pop(0)[1])
@@ -116,9 +136,12 @@ def capture_pty(argv, keys, cols, rows, settle=12, total=150, env=None):
             if not data:
                 break
             raw += data
+            if record:
+                timeline.append((time.time() - start, data))
             last = time.time()
         elif not pending and time.time() - last > settle:
             break
+    elapsed = time.time() - start
     try:
         os.write(fd, b"\x03")
         time.sleep(0.2)
@@ -129,6 +152,8 @@ def capture_pty(argv, keys, cols, rows, settle=12, total=150, env=None):
         os.waitpid(pid, os.WNOHANG)
     except ChildProcessError:
         pass
+    if record:
+        return bytes(raw), timeline, elapsed
     return bytes(raw)
 
 
@@ -151,25 +176,34 @@ def blend(fg, bg, amount):
 GLYPH_SUBSTITUTIONS = {"⎿": "└"}
 
 
-def render(raw, out, cols, rows, first=None, last=None, scale=2, crlf=False):
-    screen = DimScreen(cols, rows)
-    if crlf:
-        # Plain command output uses bare newlines. A terminal needs the CR to
-        # return to column zero, or every line starts where the last one ended.
-        raw = raw.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
-    pyte.ByteStream(screen).feed(raw)
-
+def font_metrics(scale):
     font = ImageFont.truetype(find_font("DejaVuSansMono.ttf"), 15 * scale)
     boldf = ImageFont.truetype(find_font("DejaVuSansMono-Bold.ttf"), 15 * scale)
     cw, ch, pad = int(font.getlength("M")), int(15 * scale * 1.45), 14 * scale
+    return font, boldf, cw, ch, pad
 
-    used = [y for y in range(rows) if screen.display[y].strip()]
-    top = first if first is not None else (used[0] if used else 0)
-    bot = last if last is not None else (used[-1] if used else rows - 1)
 
+def compose_frame(screen, cols, top, bot, font, boldf, cw, ch, pad, content_bot=None):
+    """Paint one rectangular window of a pyte screen to an RGB image.
+
+    Shared by the still-shot renderer and the GIF frame sampler, so a frame
+    of the animation is drawn by exactly the same code path -- same font
+    metrics, same dim blend, same glyph substitutions -- as a still.
+
+    content_bot, when given, is <= bot and holds the canvas size at (top,bot)
+    while leaving every row past it blank. The GIF sampler uses this: the
+    still shots crop `bot` to land just above the rule-and-input-box chrome
+    in the *final* frame, but that chrome sits at a lower row with every line
+    the session prints, so at an earlier sampled moment the still shots'
+    fixed (top, bot) window can still contain it. Blanking past content_bot
+    keeps every frame the same pixel size (required for a GIF) without ever
+    painting that chrome.
+    """
+    if content_bot is None:
+        content_bot = bot
     img = Image.new("RGB", (cols * cw + pad * 2, (bot - top + 1) * ch + pad * 2), to_rgb(BG))
     d, bg = ImageDraw.Draw(img), to_rgb(BG)
-    for y in range(top, bot + 1):
+    for y in range(top, min(bot, content_bot) + 1):
         for x in range(cols):
             c = screen.buffer[y][x]
             if not c.data or c.data == " ":
@@ -180,9 +214,178 @@ def render(raw, out, cols, rows, first=None, last=None, scale=2, crlf=False):
             glyph = GLYPH_SUBSTITUTIONS.get(c.data, c.data)
             d.text((pad + x * cw, pad + (y - top) * ch), glyph,
                    font=boldf if c.bold else font, fill=fg)
+    return img
+
+
+def render(raw, out, cols, rows, first=None, last=None, scale=2, crlf=False):
+    screen = DimScreen(cols, rows)
+    if crlf:
+        # Plain command output uses bare newlines. A terminal needs the CR to
+        # return to column zero, or every line starts where the last one ended.
+        raw = raw.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
+    pyte.ByteStream(screen).feed(raw)
+
+    font, boldf, cw, ch, pad = font_metrics(scale)
+
+    used = [y for y in range(rows) if screen.display[y].strip()]
+    top = first if first is not None else (used[0] if used else 0)
+    bot = last if last is not None else (used[-1] if used else rows - 1)
+
+    img = compose_frame(screen, cols, top, bot, font, boldf, cw, ch, pad)
     out.parent.mkdir(parents=True, exist_ok=True)
     img.save(out)
     print(f"wrote {out.relative_to(ROOT)}  ({img.width}x{img.height})")
+
+
+def _rule_row(screen, top, bot):
+    """Find the horizontal rule that opens the footer/input-box chrome.
+
+    Claude Code always draws a full-width run of "-" above the persistent
+    input box, at whatever row currently sits right after the transcript so
+    far. Its row moves down as the transcript grows, which is exactly why it
+    cannot be cropped out with one fixed row picked from the final frame
+    alone (see compose_frame's content_bot).
+    """
+    for y in range(top, bot + 1):
+        line = screen.display[y].strip()
+        if len(line) >= 10 and set(line) <= set("─-—_"):
+            return y
+    return None
+
+
+def _content_bottom(screen, top, bot):
+    """Where this moment's real content ends, within a fixed (top, bot) window.
+
+    Prefers the row just above the footer rule (see _rule_row); before that
+    chrome has rendered at all (the first instant or two of the recording),
+    falls back to the last non-blank row so nothing below whatever has
+    actually been printed gets shown.
+    """
+    rule = _rule_row(screen, top, bot)
+    if rule is not None:
+        return max(top - 1, rule - 1)
+    used = [y for y in range(top, bot + 1) if screen.display[y].strip()]
+    return used[-1] if used else top - 1
+
+
+def _window_snapshot(screen, cols, top, content_bot):
+    """A cheap hashable fingerprint of one rectangular window of a screen.
+
+    Used only to tell whether two sampled moments looked different, so
+    identical consecutive samples can be merged into one longer-held GIF
+    frame instead of two identical ones -- real time still elapses either
+    way, it is just spent as one frame's duration rather than several. Only
+    scans down to content_bot, matching what compose_frame actually paints,
+    so a change hidden below the visible content (like the footer's context
+    percentage ticking) does not spawn a pointless extra frame.
+    """
+    parts = [str(content_bot)]
+    for y in range(top, content_bot + 1):
+        row = screen.buffer[y]
+        dim = screen.dim
+        for x in range(cols):
+            c = row[x]
+            parts.append(c.data or " ")
+            parts.append(c.fg)
+            parts.append("1" if c.bold else "0")
+            parts.append("1" if dim.get((y, x)) else "0")
+    return "".join(parts)
+
+
+def sample_frames(timeline, elapsed, cols, rows, top, bot, scale, dt):
+    """Replay a timed byte stream into (image, real_seconds_shown) frames.
+
+    The recording is walked in fixed dt buckets covering [0, elapsed] --
+    dt chosen well above any delay a GIF player would silently round up to,
+    so no bucket is ever faster than what was actually captured. Each
+    bucket's displayed content is the screen state after every byte that had
+    actually arrived by that bucket's end, so the very last bucket always
+    reflects the true final state. Consecutive buckets that look identical
+    are merged into one frame whose duration is their combined real time,
+    which is what keeps a long idle stretch from costing one GIF frame per
+    dt: sum(duration for every returned frame) always equals `elapsed`
+    exactly, whether that time was spent as one frame or a hundred.
+
+    (top, bot) is the fixed window later frames all share pixel-for-pixel;
+    within it, each sample also gets its own content_bot (see
+    _content_bottom) so the footer/input-box chrome -- which sits at a
+    different row every time the transcript grows -- never gets painted.
+    """
+    screen = DimScreen(cols, rows)
+    stream = pyte.ByteStream(screen)
+    font, boldf, cw, ch, pad = font_metrics(scale)
+
+    steps = max(1, round(elapsed / dt))
+    bounds = [elapsed * i / steps for i in range(steps + 1)]
+
+    idx = 0
+    frames = []
+    prev_snap = None
+    for i in range(steps):
+        t_end = bounds[i + 1]
+        while idx < len(timeline) and timeline[idx][0] <= t_end:
+            stream.feed(timeline[idx][1])
+            idx += 1
+        content_bot = _content_bottom(screen, top, bot)
+        snap = _window_snapshot(screen, cols, top, content_bot)
+        duration = bounds[i + 1] - bounds[i]
+        if snap != prev_snap:
+            img = compose_frame(screen, cols, top, bot, font, boldf, cw, ch, pad,
+                                 content_bot=content_bot)
+            frames.append([img, duration])
+            prev_snap = snap
+        else:
+            frames[-1][1] += duration
+    return frames
+
+
+def save_gif(frames, out, elapsed):
+    """Write sample_frames() output as a GIF whose playback matches real time.
+
+    Every frame is quantised against one shared, exact palette (the terminal
+    background plus this script's own ANSI colours and their dim blends)
+    instead of Pillow's default per-frame adaptive palette. The colours
+    actually on screen are already flat and few, so an exact palette needs no
+    dithering and keeps large runs of identical pixels, which is what makes
+    LZW/GIF compression cheap here; a wobbling adaptive palette across frames
+    would both look worse and compress worse.
+
+    Per-frame durations are rounded to whole milliseconds with the leftover
+    pushed onto the final frame, so the file's total duration matches
+    `elapsed` to the millisecond rather than drifting from rounding a few
+    hundred frames independently.
+    """
+    colors = [to_rgb(BG)]
+    for v in PALETTE.values():
+        rgb = to_rgb(v)
+        if rgb not in colors:
+            colors.append(rgb)
+        dim = blend(rgb, to_rgb(BG), 0.45)
+        if dim not in colors:
+            colors.append(dim)
+    pal_img = Image.new("P", (1, 1))
+    pal_img.putpalette([c for rgb in colors for c in rgb])
+
+    total_ms = round(elapsed * 1000)
+    quantised = []
+    remaining_ms = total_ms
+    for i, (img, secs) in enumerate(frames):
+        q = img.quantize(palette=pal_img, dither=Image.Dither.NONE)
+        if i == len(frames) - 1:
+            ms = remaining_ms
+        else:
+            ms = round(secs * 1000)
+            remaining_ms -= ms
+        quantised.append((q, ms))
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+    imgs = [q for q, _ in quantised]
+    durations = [ms for _, ms in quantised]
+    imgs[0].save(out, format="GIF", save_all=True, append_images=imgs[1:],
+                 duration=durations, loop=0, optimize=True, disposal=2)
+    size = out.stat().st_size
+    print(f"wrote {out.relative_to(ROOT)}  ({imgs[0].width}x{imgs[0].height}, "
+          f"{len(imgs)} frames, {sum(durations) / 1000:.1f}s, {size / 1024:.0f} KiB)")
 
 
 DEMO_CONFIG = """\
@@ -214,16 +417,27 @@ TOOL_TIMING=on
 
 
 def shot_hero():
-    """A real session: two quick turns, then one slow enough to name its tool.
+    """A real session, recorded and played back as a GIF at real speed.
 
-    The third prompt has to make Claude actually run something slow, or
-    TOOL_TIMING has nothing to attribute. It asks for an exact count that
-    cannot be recalled or estimated, only computed, and rules out every
-    interpreter but bash's own (slow) integer arithmetic so the trial
-    division can't be handed off to something fast. That keeps it a single
-    dominant Bash call rather than work split across tools -- and being pure
-    arithmetic with no filesystem or network access, it can't touch anything
-    outside this work directory even by accident.
+    Two quick turns, then one slow enough to name its tool. The third prompt
+    has to make Claude actually run something slow, or TOOL_TIMING has
+    nothing to attribute. It asks for an exact count that cannot be recalled
+    or estimated, only computed, and rules out every interpreter but bash's
+    own (slow) integer arithmetic so the trial division can't be handed off
+    to something fast. That keeps it a single dominant Bash call rather than
+    work split across tools -- and being pure arithmetic with no filesystem
+    or network access, it can't touch anything outside this work directory
+    even by accident. Prompts are spaced tight (a few seconds apart) rather
+    than the leisurely gaps an earlier still version of this shot used, so
+    the whole recording -- and the GIF's own runtime -- stays under a minute
+    without asking a reader to sit through dead air.
+
+    This is the only place the README shows the marker, the duration or the
+    tool attribution, so legibility comes first: frames are rendered at the
+    same scale as every other shot rather than shrunk to save bytes. If the
+    size budget is tight, sample_frames() is called with a larger dt (fewer
+    frames per second) instead -- a chunkier animation that is still readable
+    beats a smooth one that is not.
     """
     if not subprocess.run(["which", "claude"], capture_output=True).returncode == 0:
         raise SystemExit("claude is not on PATH; cannot capture the hero shot.")
@@ -234,30 +448,38 @@ def shot_hero():
 
     cols, rows = 96, 90
     os.chdir(work)
-    raw = capture_pty(
+    raw, timeline, elapsed = capture_pty(
         ["claude"],
         keys=[
-            (6.0, "What is the capital of Portugal? One word, no punctuation."), (7.0, "\r"),
-            (24.0, "Name three Portuguese cities, comma separated, nothing else."), (26.0, "\r"),
-            (44.0, "Run one bash command that counts, by trial division using only "
+            (2.0, "What is the capital of Portugal? One word, no punctuation."), (3.0, "\r"),
+            (9.0, "Name three Portuguese cities, comma separated, nothing else."), (10.5, "\r"),
+            (16.0, "Run one bash command that counts, by trial division using only "
                     "bash's own integer arithmetic (no python, bc, or awk), how many "
-                    "integers below 300000 are prime. Actually execute it, don't "
-                    "estimate. Reply with just the final count."), (47.0, "\r"),
+                    "integers below 220000 are prime. Actually execute it, don't "
+                    "estimate. Reply with just the final count."), (18.0, "\r"),
         ],
-        cols=cols, rows=rows, settle=16, total=200,
-        env={"CLAUDE_TIMESTAMP_CONFIG": str(conf)},
+        cols=cols, rows=rows, settle=10, total=110,
+        env={"CLAUDE_TIMESTAMP_CONFIG": str(conf)}, record=True,
     )
     (work / "hero.raw").write_bytes(raw)
+    (work / "hero.timeline.pkl").write_bytes(pickle.dumps((timeline, elapsed)))
 
     # Crop past the welcome banner and stop before the status line. The banner
     # carries the account's name, email and organisation, which do not belong
-    # in a published screenshot.
+    # in a published GIF. The same fixed window is used for every sampled
+    # frame, not recomputed per frame -- this rows buffer is generous enough
+    # (verified against the captured raw below) that nothing in this session
+    # scrolls, so a row position printed to means the same thing at every
+    # moment in the recording.
     screen = DimScreen(cols, rows)
     pyte.ByteStream(screen).feed(raw)
     lines = screen.display
     first = next((y for y in range(rows) if lines[y].lstrip().startswith("❯")), 12) - 1
     last = max((y for y in range(rows) if lines[y].strip().startswith("✻")), default=rows - 1)
-    render(raw, ASSETS / "timestamps.png", cols, rows, first=first, last=last)
+
+    frames = sample_frames(timeline, elapsed, cols, rows, first, last, scale=2, dt=0.45)
+    save_gif(frames, ASSETS / "timestamps.gif", elapsed)
+    print(f"  real session duration: {elapsed:.1f}s")
 
 
 def shot_picker():
