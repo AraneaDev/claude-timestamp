@@ -1020,8 +1020,12 @@ is "facts: no temp file left behind" "" "$(find "$WORK" -name 'facts.json.*' 2>/
 # also leaves none behind. Pin the actual claim -- the file is replaced by
 # rename, not edited in place -- by checking the inode changes.
 printf '{}' > "$CLAUDE_TIMESTAMP_FACTS"
+# shellcheck disable=SC2012  # a fixed temp path, and `ls -i` is the only
+# inode read that works on GNU, BSD and Git Bash alike.
 before="$(ls -i "$CLAUDE_TIMESTAMP_FACTS" | awk '{print $1}')"
 printf '{"session_id":"facts"}' | bash "$SCRIPTS/session-start.sh" >/dev/null
+# shellcheck disable=SC2012  # a fixed temp path, and `ls -i` is the only
+# inode read that works on GNU, BSD and Git Bash alike.
 after="$(ls -i "$CLAUDE_TIMESTAMP_FACTS" | awk '{print $1}')"
 refutes "facts: replaced by rename, not written in place" test "$before" = "$after"
 
