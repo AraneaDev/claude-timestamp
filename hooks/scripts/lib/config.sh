@@ -49,6 +49,7 @@ ct_tilde() {
 # after a bounded number of steps so a symlink loop cannot hang a hook.
 ct_find_project_config() {
   local dir="${1:-}" steps=0
+  CT_PROJECT_SEARCH_CAPPED=""
   [ -n "$dir" ] || return 1
   [ -d "$dir" ] || return 1
   dir="$(cd "$dir" 2>/dev/null && pwd)" || return 1
@@ -64,6 +65,21 @@ ct_find_project_config() {
     dir="$(dirname "$dir")"
     steps=$((steps + 1))
   done
+  # Giving up at the cap and finding nothing look identical to a caller, and
+  # doctor's "none for this directory" then reads as an answer when it was a
+  # timeout. Recorded so it can say which happened.
+  #
+  # A distinct exit status (2) carries that fact out as well as the variable
+  # does: ct_load_config's caller reaches this function through
+  # `project="$(ct_find_project_config ...)"`, and command substitution always
+  # runs in a subshell, so an assignment made in here to CT_PROJECT_SEARCH_CAPPED
+  # never survives back out to it -- only the exit status does. A caller that
+  # invokes this function directly, without capturing its output, still sees
+  # the variable set normally.
+  if [ "$steps" -ge 40 ]; then
+    CT_PROJECT_SEARCH_CAPPED=1
+    return 2
+  fi
   return 1
 }
 
@@ -143,6 +159,7 @@ ct_load_config() {
 
   CT_CONFIG_PROBLEMS=""
   CT_PROJECT_CONFIG=""
+  CT_PROJECT_SEARCH_CAPPED=""
 
   local file
   file="$(ct_config_path)"
@@ -157,10 +174,16 @@ ct_load_config() {
     # decide whether to do anything at all before reading their payload, so
     # they have no cwd to pass yet, and paying for a jq process per tool call
     # just to look one up would cost more than it is worth.
-    local project
+    local project project_rc
     if project="$(ct_find_project_config "${1:-${PWD:-}}")"; then
       CT_PROJECT_CONFIG="$project"
       _ct_read_config_file "$project"
+    else
+      # The command substitution above ran the search in a subshell, so the
+      # variable it sets on a capped search was already lost; only its exit
+      # status (2 for capped, 1 for a plain miss) made it back out.
+      project_rc=$?
+      [ "$project_rc" -eq 2 ] && CT_PROJECT_SEARCH_CAPPED=1
     fi
   fi
 

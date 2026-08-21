@@ -41,8 +41,8 @@ Flags
   --marker=TEMPLATE           The marker's layout. %time %elapsed %tool %date
                               are the parts; a {...} group disappears when
                               every part inside it is empty.
-  --time-color=COLOR          Colour of %time. inherit follows --color, which
-                              is also the default.
+  --time-color=COLOR          Colour of %time and %date. inherit follows
+                              --color, which is also the default.
   --elapsed-color=COLOR       Colour of %elapsed, or inherit. A slow turn
                               still uses --slow-color.
   --tool-color=COLOR          Colour of %tool. inherit follows --color, which
@@ -311,6 +311,10 @@ doctor() {
   fi
   if [ -n "${CT_PROJECT_CONFIG:-}" ]; then
     echo "  project file    $(ct_tilde "$CT_PROJECT_CONFIG")"
+  elif [ -n "${CT_PROJECT_SEARCH_CAPPED:-}" ]; then
+    echo "  project file    none found, but the search stopped after 40 levels"
+    echo "                  rather than reaching the top, so one further up was"
+    echo "                  not looked at."
   else
     echo "  project file    none for this directory"
   fi

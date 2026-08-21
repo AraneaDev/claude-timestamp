@@ -288,9 +288,11 @@ preview that is a guess is worse than no picker at all.
 
 If the user asks how long they have been spending, or how much of it was
 waiting, read `~/.claude/claude-timestamp-history.tsv`. One finished session per
-line, tab separated: when, seconds, turns, waited, idle, failed tools. It is
-capped at `HISTORY_LIMIT` lines, 200 by default, so it fits in one read and the
-totals are yours to add up.
+line, tab separated: when, seconds, turns, waited, idle, failed tools. The
+timestamp is in the configured timezone, the same one the markers use. A line
+that does not have six fields has been damaged and should be reported rather
+than counted. It is capped at `HISTORY_LIMIT` lines, 200 by default, so it fits
+in one read and the totals are yours to add up.
 
 It holds timings only, no message text and no paths, which is worth saying if
 they ask what is stored.

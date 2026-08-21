@@ -33,6 +33,11 @@ claim in the README is tested rather than asserted.
 `SC1091` is excluded because every hook resolves its library path at runtime,
 which shellcheck cannot follow.
 
+`tools/check-docs.sh` also holds a baseline, `tools/known-gaps.txt`, listing
+checks the tree is known to fail. A listed check that passes is itself an
+error, so a fix cannot land without the baseline being tidied. The file being
+empty means every check is live.
+
 ## Working on it
 
 Changes go through a pull request. `main` is protected and requires the six

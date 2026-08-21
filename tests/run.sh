@@ -2182,6 +2182,29 @@ refutes "no project config is reported as not found" ct_find_project_config "$PR
 refutes "a missing directory is not searched"        ct_find_project_config "$PROJ/nowhere"
 refutes "an empty directory argument finds nothing"  ct_find_project_config ""
 
+# Giving up at the 40-level cap and genuinely finding nothing look identical
+# to a caller unless something records which one happened.
+# CT_PROJECT_SEARCH_CAPPED is that record.
+DEEP="$PROJ/deep"
+rm -rf "$DEEP"
+d="$DEEP"
+i=0
+while [ "$i" -lt 45 ]; do
+  d="$d/lvl$i"
+  i=$((i + 1))
+done
+mkdir -p "$d"
+
+capped() {
+  ( unset CLAUDE_TIMESTAMP_CONFIG
+    HOME="$PROJ/nonexistent-home"
+    ct_find_project_config "$1" >/dev/null 2>&1
+    printf '%s' "${CT_PROJECT_SEARCH_CAPPED:-}" )
+}
+is "the search flags a walk that hit the cap"    "1" "$(capped "$d")"
+is "a found config leaves the cap flag unset"    ""  "$(capped "$PROJ/repo")"
+is "nothing found short of the cap leaves it unset" "" "$(capped "$PROJ/plain")"
+
 # CLAUDE_TIMESTAMP_CONFIG names one exact file, so it must not pick up a
 # project layer as well. The rest of this suite depends on that.
 out="$( cd "$PROJ/repo" && CLAUDE_TIMESTAMP_CONFIG="$PROJ/home/.claude/claude-timestamp.conf" \
@@ -2497,6 +2520,12 @@ contains "doctor names the project file" "project file" "$out"
 out="$( cd "$PROJ/plain" && unset CLAUDE_TIMESTAMP_CONFIG && HOME="$PROJ/home" \
         bash "$SCRIPTS/setup.sh" --doctor 2>&1 )"
 contains "doctor says when there is no project file" "none for this directory" "$out"
+lacks "doctor stays quiet about the cap when the search did not hit it" \
+      "40 levels" "$out"
+
+out="$( cd "$d" && unset CLAUDE_TIMESTAMP_CONFIG && HOME="$PROJ/nonexistent-home" \
+        bash "$SCRIPTS/setup.sh" --doctor 2>&1 )"
+contains "doctor names the cap when the search hit it" "stopped after 40 levels" "$out"
 
 echo
 echo "doctor"

@@ -6,8 +6,13 @@
 # anyone can pass --no-verify, and a different clone will not have it until
 # core.hooksPath is set there too.
 #
-# Enable in a clone with:
-#   git config core.hooksPath tools/githooks
+# Install by copying into .git/hooks/, the same way pre-commit is installed:
+#   cp .githooks/pre-commit .githooks/pre-push .git/hooks/
+#
+# Copied rather than reached through core.hooksPath for the reason
+# CONTRIBUTING.md gives: a tracked hook only exists in the working tree while a
+# branch containing it is checked out, so it would be missing on exactly the
+# branches that predate it.
 #
 # Bypass once, deliberately:
 #   git push --no-verify

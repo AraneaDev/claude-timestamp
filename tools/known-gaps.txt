@@ -5,5 +5,3 @@
 # go. That is what stops a fix landing without the baseline being tidied.
 #
 # This file being empty is the completion signal for the audit remediation.
-help-schema
-comment-paths

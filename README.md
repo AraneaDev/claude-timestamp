@@ -6,7 +6,7 @@
 
 [![Release](https://img.shields.io/github/v/release/AraneaDev/claude-timestamp)](https://github.com/AraneaDev/claude-timestamp/releases)
 [![CI](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml/badge.svg)](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-597%20passing-2b8a3e)](tests/run.sh)
+[![Tests](https://img.shields.io/badge/tests-602%20passing-2b8a3e)](tests/run.sh)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-364fc7)](#platform-notes)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
@@ -232,6 +232,10 @@ file is found by walking up from the directory the conversation is about, so it
 applies from subdirectories too, and the search stops at your home directory so
 your own config is never mistaken for a project one.
 
+The search also stops at the filesystem root, so a config directly in `/` is
+not picked up, and after forty levels, which `--doctor` reports when it
+happens.
+
 Which files are in play is shown by `--doctor` and `--show`.
 
 ### Settings
@@ -257,10 +261,10 @@ cannot run anything.
 | `SLOW_COLOR` | `yellow` | Colour used for a slow turn |
 | `IDLE_AFTER` | `3600` | Mark a gap this long between messages, `0` disables |
 | `DATE_ROLLOVER` | `on` | Show the date on the first message after midnight |
-| `SUMMARY` | `on` | Report session totals on exit |
+| `SUMMARY` | `on` | Report session totals on exit. Independent of `HISTORY`: both read the same counters, which are kept either way |
 | `SUBAGENTS` | `on` | Stamp subagent messages as well |
 | `TOOL_TIMING` | `off` | Record what each tool call cost and name the slowest |
-| `HISTORY` | `on` | Record each finished session, for `/timestamps` and `--stats` |
+| `HISTORY` | `on` | Record each finished session, for `/timestamps` and `--stats`. Independent of `SUMMARY` |
 | `HISTORY_LIMIT` | `200` | How many recorded sessions to keep, 1 or more; `HISTORY=off` keeps none |
 
 Colour behaviour, including when it is suppressed and how `NO_COLOR` and
@@ -390,7 +394,7 @@ no database.
 ## Development
 
 ```bash
-bash tests/run.sh                                    # 597 assertions, no framework
+bash tests/run.sh                                    # 602 assertions, no framework
 shellcheck -S style -e SC1091 hooks/scripts/**/*.sh  # clean
 bash tools/check-docs.sh                             # README against the code
 ```
