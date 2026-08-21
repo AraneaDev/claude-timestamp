@@ -1571,20 +1571,33 @@ fi
 # must stop rather than spin: the default it keeps offering can itself be
 # invalid, which is what a TZ environment variable naming a zone this machine
 # does not have produces.
+#
+# Three assertions, because "it exited" is not the claim being made. A wizard
+# that died on an unrelated error before reaching a single question also exits
+# non-124, and would pass a bare termination check while proving nothing about
+# the EOF plumbing. So this also pins that it got as far as the timezone
+# question -- the loop that used to spin -- and that it ran all the way out to
+# the write confirmation rather than stopping there.
+#
+# Note the output is captured rather than discarded. On a regression the wizard
+# spins printing prompts, so this file can grow large before the timeout fires;
+# it lives in $WORK, which the suite's EXIT trap removes.
 if command -v timeout >/dev/null 2>&1; then
-  if timeout 10 env TZ=Mars/Olympus HOME="$WORK" \
-       CLAUDE_TIMESTAMP_CONFIG="$WORK/wizard-eof.conf" \
-       bash "$SCRIPTS/setup.sh" </dev/null >/dev/null 2>&1; then
-    pass "wizard: terminates on exhausted stdin with an invalid default"
+  eof_out="$WORK/wizard-eof.out"
+  rc=0
+  timeout 10 env TZ=Mars/Olympus HOME="$WORK" \
+    CLAUDE_TIMESTAMP_CONFIG="$WORK/wizard-eof.conf" \
+    bash "$SCRIPTS/setup.sh" </dev/null > "$eof_out" 2>&1 || rc=$?
+  if [ "$rc" -eq 124 ]; then
+    fail "wizard: terminates on exhausted stdin with an invalid default" \
+         "an exit" "timed out after 10s"
   else
-    rc=$?
-    if [ "$rc" -eq 124 ]; then
-      fail "wizard: terminates on exhausted stdin with an invalid default" \
-           "an exit" "timed out after 10s"
-    else
-      pass "wizard: terminates on exhausted stdin with an invalid default"
-    fi
+    pass "wizard: terminates on exhausted stdin with an invalid default"
   fi
+  contains "wizard: reached the timezone question before giving up" \
+           "Timezone" "$(cat "$eof_out")"
+  contains "wizard: ran through to the write confirmation" \
+           "Write this configuration?" "$(cat "$eof_out")"
 else
   echo "  skip timeout not installed, wizard EOF case not run"
 fi
