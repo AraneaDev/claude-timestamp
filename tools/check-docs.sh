@@ -13,6 +13,37 @@ cd "$ROOT" || exit 1
 status=0
 note() { printf '  %s\n' "$*"; }
 
+# Ids the tree is known to fail, so a check can land before its fix does.
+KNOWN_GAPS="$(sed 's/#.*//' tools/known-gaps.txt 2>/dev/null | tr -d ' \t' | grep -v '^$' || true)"
+
+# Record a check's outcome against the baseline. A known gap that fails is
+# reported and tolerated; a known gap that passes is an error, because the
+# line should have been deleted with the fix.
+gate() {
+  local id="$1" ok="$2" message="$3" known=0
+  case "
+$KNOWN_GAPS
+" in *"
+$id
+"*) known=1 ;; esac
+
+  if [ "$ok" -eq 1 ]; then
+    if [ "$known" -eq 1 ]; then
+      note "GAP CLOSED: $id now passes, delete it from tools/known-gaps.txt"
+      status=1
+    else
+      note "$message"
+    fi
+  else
+    if [ "$known" -eq 1 ]; then
+      note "known gap: $id - $message"
+    else
+      note "$message"
+      status=1
+    fi
+  fi
+}
+
 echo "settings documented"
 # Keys the loader actually understands, taken from its own case statement.
 code_keys="$(sed -n 's/^      \([A-Z_]*\)).*CT_.*=.*$/\1/p' hooks/scripts/lib/config.sh | sort -u)"
@@ -189,6 +220,105 @@ if [ -n "$lint_missing" ]; then
   status=1
 else
   note "every tracked shell script is linted"
+fi
+
+echo "help text agrees with the schema"
+# setup.sh's usage() is the only description of a setting that check-docs did
+# not read, which is how --time-color came to say it colours %time when it
+# also colours %date. Assert that every marker placeholder a schema key
+# describes is named by the flag's help line.
+hs_ok=1
+hs_detail=""
+while IFS="$(printf '\t')" read -r flag key; do
+  [ -n "$flag" ] || continue
+  help_line="$(sed -n "s/^  --${flag}=[A-Z]*  *//p" hooks/scripts/setup.sh | head -1)"
+  describes="$(jq -r --arg k "$key" '.keys[$k].describes // ""' schema.json)"
+  for ph in %time %elapsed %tool %date; do
+    case "$describes" in
+      *"$ph"*)
+        case "$help_line" in
+          *"$ph"*) ;;
+          *) hs_ok=0; hs_detail="$hs_detail --$flag omits $ph;" ;;
+        esac
+        ;;
+    esac
+  done
+done <<'EOF'
+time-color	TIME_COLOR
+elapsed-color	ELAPSED_COLOR
+tool-color	TOOL_COLOR
+marker	MARKER
+EOF
+
+if [ "$hs_ok" -eq 1 ]; then
+  gate help-schema 1 "every flag's help names the placeholders its schema key does"
+else
+  gate help-schema 0 "help text drifts from schema.json:$hs_detail"
+fi
+
+echo "paths named in comments"
+# .githooks/pre-push once told contributors to point core.hooksPath at a
+# "tools" subdirectory that had never existed. A path written into a comment
+# is documentation, and it goes stale exactly as silently as the README.
+# (Deliberately not spelling that path out here as a real-looking one: this
+# check would then find it and never stop calling it a gap.)
+cp_missing=""
+while read -r path; do
+  [ -n "$path" ] || continue
+  [ -e "$path" ] || cp_missing="$cp_missing $path"
+done < <(
+  { grep -rhoE '(^|[^A-Za-z0-9_/.-])(hooks/scripts|tools|tests|assets|commands|docs|\.githooks|\.github|\.claude-plugin)/[A-Za-z0-9_./-]+' \
+         --include='*.sh' --include='*.md' --include='*.yml' \
+         hooks tools tests commands .github .claude-plugin README.md CONTRIBUTING.md 2>/dev/null
+    # Git hook scripts carry no extension, so --include above would silently
+    # skip them; grep them by name instead of by glob.
+    grep -hoE '(^|[^A-Za-z0-9_/.-])(hooks/scripts|tools|tests|assets|commands|docs|\.githooks|\.github|\.claude-plugin)/[A-Za-z0-9_./-]+' \
+         .githooks/pre-push .githooks/pre-commit 2>/dev/null
+  } | sed 's/^[^A-Za-z0-9_/.-]*//' | sed 's/[.,:;)]*$//' | sort -u
+)
+
+if [ -n "$cp_missing" ]; then
+  gate comment-paths 0 "named in a comment but absent:$cp_missing"
+else
+  gate comment-paths 1 "every repo path named in a comment exists"
+fi
+
+echo "hooks run under strict mode"
+sm_missing=""
+for f in hooks/scripts/*.sh; do
+  case "$f" in */pre-tool-use.sh) continue ;; esac   # a deliberate bare no-op shim
+  grep -q '^set -euo pipefail$' "$f" || sm_missing="$sm_missing $f"
+done
+if [ -n "$sm_missing" ]; then
+  gate hook-strict-mode 0 "missing set -euo pipefail:$sm_missing"
+else
+  gate hook-strict-mode 1 "every hook sets -euo pipefail"
+fi
+
+echo "state files are cleaned up"
+# ct_clear_state removes "$base" and "$base".*, so every suffix written
+# anywhere is covered by construction. That only holds while the glob is there,
+# and it is one edit away from becoming an explicit list that a new state file
+# then falls off.
+# shellcheck disable=SC2016  # this is a literal grep pattern, not a subshell
+if grep -q 'rm -f "$base" "$base"\.\*' hooks/scripts/lib/*.sh; then
+  gate state-glob 1 "ct_clear_state's glob covers every state suffix"
+else
+  gate state-glob 0 "ct_clear_state no longer removes \"\$base\".*"
+fi
+
+echo "prose style"
+ps_detail=""
+for f in README.md CONTRIBUTING.md; do
+  n="$(grep -c '—' "$f" || true)"
+  [ "$n" = "0" ] || ps_detail="$ps_detail $f has $n em dash(es);"
+  n="$(grep -icE '\b(we|our)\b' "$f" || true)"
+  [ "$n" = "0" ] || ps_detail="$ps_detail $f has $n we/our self-reference(s);"
+done
+if [ -n "$ps_detail" ]; then
+  gate prose-style 0 "house style:$ps_detail"
+else
+  gate prose-style 1 "README and CONTRIBUTING carry no em dashes and no we/our"
 fi
 
 echo "assertion count"
