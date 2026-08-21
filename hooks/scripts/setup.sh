@@ -441,7 +441,7 @@ CONF
 # today's values. Only the settings named on the command line are written,
 # merged with whatever the file already pinned.
 write_project_config() {
-  local file dir key value existing out="" marker_named named line ekey known
+  local file dir key value existing out="" marker_named named line ekey known carried
   # $PWD/.claude/claude-timestamp.conf is the account config when $PWD is the
   # home directory, and ct_find_project_config refuses to read that file as a
   # project layer. Writing it here would produce a file that calls itself a
@@ -495,6 +495,7 @@ write_project_config() {
   while [ "$#" -gt 0 ]; do
     key="$1"; value="$2"; shift 2
     named=1
+    carried=0
     [ -n "$value" ] || { [ "$key" = "MARKER" ] && [ "$marker_named" = "1" ]; } || named=0
     if [ "$named" = "0" ]; then
       # Not named now. Keep it only if this project already pinned it -- and
@@ -505,6 +506,7 @@ write_project_config() {
       # empty pin"; presence can.
       if printf '%s\n' "$existing" | grep -q "^${key}="; then
         value="$(printf '%s\n' "$existing" | sed -n "s/^${key}=//p" | tail -1)"
+        carried=1
       else
         continue
       fi
@@ -513,8 +515,18 @@ write_project_config() {
       TZ)                                    [ "$value" = "local" ]    && value="" ;;
       TIME_COLOR|ELAPSED_COLOR|TOOL_COLOR)   [ "$value" = "inherit" ]  && value="" ;;
     esac
-    out="${out}${key}=$(conf_value "$value")
+    # A carried value is raw text lifted verbatim out of the existing file --
+    # already in its written form, quotes and all. Serialising it again is how
+    # one quote pair becomes two, then three on the next unrelated write. Only
+    # a value that came from a flag this run is still semantic and needs
+    # conf_value to render it.
+    if [ "$carried" = "1" ]; then
+      out="${out}${key}=${value}
 "
+    else
+      out="${out}${key}=$(conf_value "$value")
+"
+    fi
   done
 
   # A key this run does not recognise -- one a newer version of the plugin

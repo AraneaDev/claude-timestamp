@@ -2267,6 +2267,29 @@ markerspace_read_back="$(
 )"
 is "a project marker's trailing space survives the round trip" "%time " "$markerspace_read_back"
 
+# write_project_config carries an unnamed key forward as raw text lifted out
+# of the existing file with sed -- already serialised, quotes and all. Running
+# conf_value over that carried text a second time wraps it again, and the next
+# unrelated write wraps it a third: two chained writes that never name MARKER
+# again must not compound the quoting on a value this run did not touch.
+rm -rf "$PROJ/writable-markerchain"; mkdir -p "$PROJ/writable-markerchain"
+( cd "$PROJ/writable-markerchain" && unset CLAUDE_TIMESTAMP_CONFIG && HOME="$PROJ/home" \
+    bash "$SCRIPTS/setup.sh" --project --marker='%time ' >/dev/null 2>&1 )
+( cd "$PROJ/writable-markerchain" && unset CLAUDE_TIMESTAMP_CONFIG && HOME="$PROJ/home" \
+    bash "$SCRIPTS/setup.sh" --project --time-color=cyan >/dev/null 2>&1 )
+( cd "$PROJ/writable-markerchain" && unset CLAUDE_TIMESTAMP_CONFIG && HOME="$PROJ/home" \
+    bash "$SCRIPTS/setup.sh" --project --elapsed-color=green >/dev/null 2>&1 )
+written_markerchain="$PROJ/writable-markerchain/.claude/claude-timestamp.conf"
+is "a carried marker is not re-quoted across chained writes" "1" \
+  "$(grep -c "^MARKER='%time '\$" "$written_markerchain")"
+markerchain_read_back="$(
+  unset CLAUDE_TIMESTAMP_CONFIG
+  HOME="$PROJ/home"
+  ct_load_config "$PROJ/writable-markerchain"
+  printf '%s' "$CT_MARKER_TEMPLATE"
+)"
+is "a carried marker's trailing space still survives three chained writes" "%time " "$markerchain_read_back"
+
 rm -rf "$PROJ/writable-timecolor"; mkdir -p "$PROJ/writable-timecolor"
 ( cd "$PROJ/writable-timecolor" && unset CLAUDE_TIMESTAMP_CONFIG && HOME="$PROJ/home" \
     bash "$SCRIPTS/setup.sh" --project --time-color=cyan >/dev/null 2>&1 )
