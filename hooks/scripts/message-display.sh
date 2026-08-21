@@ -6,8 +6,10 @@
 # sees are both untouched, so the marker cannot confuse Claude.
 #
 # It draws, and it keeps only what drawing needs: the last message's time and
-# the last date rendered, both of which the idle divider and the midnight
-# rollover read. The session's accounts are kept by the prompt and stop hooks,
+# the last date rendered. The idle divider and the midnight rollover read
+# those, and the last message's time has a second reader -- the prompt hook,
+# which falls back to it to close a turn that ended in an interrupt rather
+# than a Stop. The session's accounts are kept by the prompt and stop hooks,
 # which is where a turn actually begins and ends.
 #
 # The event fires repeatedly as a message streams, with a zero-based `index`
@@ -37,9 +39,13 @@ input="$(cat)"
 # `.index // 0` -- so an absent key must fall through to the parse, same as
 # a delta whose own text happens to contain the pattern: one extra fork,
 # rejected by the parse below, which remains the only thing that decides.
+# The same is true of a key present with a non-numeric value -- null, false,
+# a quoted "0" -- which `.index // 0` also coerces to 0: the guard requires a
+# digit right after the colon, so anything else falls through to the parse
+# rather than being mistaken for proof of a later batch.
 # The patterns live in variables because bash 3.2 needs an unquoted
 # expansion here to treat them as regexes rather than literals.
-ct_has_index='"index"[[:space:]]*:'
+ct_has_index='"index"[[:space:]]*:[[:space:]]*[0-9]'
 ct_first_batch='"index"[[:space:]]*:[[:space:]]*0[[:space:],}]'
 if [[ "$input" =~ $ct_has_index ]] && ! [[ "$input" =~ $ct_first_batch ]]; then
   exit 0

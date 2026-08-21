@@ -340,6 +340,14 @@ if command -v jq >/dev/null 2>&1; then
   out="$(printf '{"session_id":"test-session","index":5,"delta":"still skipped"}' | bash "$SCRIPTS/message-display.sh")"
   is "message-display still emits nothing for an ordinary later batch" "" "$out"
 
+  # An index key present with a non-numeric value -- null, false, a quoted
+  # "0" -- is coerced to 0 by the downstream `.index // 0`, the same as a
+  # missing key. The guard must not mistake "present but not a digit" for
+  # proof of a later batch.
+  out="$(printf '{"session_id":"test-session","index":null,"delta":"null index"}' | bash "$SCRIPTS/message-display.sh")"
+  contains "message-display stamps a payload with a null index" "null index" \
+    "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.displayContent')"
+
   out="$(printf '{"session_id":"test-session","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh")"
   contains "user-prompt-submit injects context" "Message sent at local time" "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext')"
   if [ -r "$(ct_state_dir)/test-session" ]; then
@@ -728,6 +736,26 @@ if command -v jq >/dev/null 2>&1; then
   printf '{"session_id":"tools","tool_use_id":"t5","tool_name":"Bash","duration_ms":"soon"}' \
     | bash "$SCRIPTS/post-tool-use.sh"
   is "a duration that is not a number is not logged" "3" "$(wc -l < "$log" | tr -d ' ')"
+
+  # A duration_ms string with a leading zero must be read as decimal, not as
+  # octal by the shell arithmetic that divides it into seconds. The exit
+  # status is asserted explicitly: an unhandled leading zero used to abort
+  # the hook non-zero, breaking the branch-wide "every hook exits 0" rule.
+  printf '{"session_id":"tools","tool_use_id":"t7","tool_name":"Bash","duration_ms":"0123"}' \
+    | bash "$SCRIPTS/post-tool-use.sh"
+  status=$?
+  is "a leading-zero duration still exits 0" "0" "$status"
+  is "a leading-zero duration is read as decimal, not truncated as octal" \
+    "Bash 0.123 ok" "$(sed -n 4p "$log")"
+
+  # "0800" is not valid octal (8 is not an octal digit), which is exactly the
+  # value that used to abort the hook with an unbound-variable error.
+  printf '{"session_id":"tools","tool_use_id":"t8","tool_name":"Bash","duration_ms":"0800"}' \
+    | bash "$SCRIPTS/post-tool-use.sh"
+  status=$?
+  is "a leading-zero duration with an invalid-octal digit still exits 0" "0" "$status"
+  is "0800 is logged as 0.800 seconds, not misread as octal" \
+    "Bash 0.800 ok" "$(sed -n 5p "$log")"
 
   # A tool name that could steer a write is reduced before it reaches the log.
   printf '{"session_id":"tools","tool_use_id":"t6","tool_name":"../evil","duration_ms":500}' \

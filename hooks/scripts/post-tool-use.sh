@@ -38,10 +38,17 @@ input="$(cat)"
 IFS=$'\x1f' read -r session_id tool_name event ms <<< "$(printf '%s' "$input" \
   | jq -r '[(.session_id // "-"), (.tool_name // ""), (.hook_event_name // ""), (.duration_ms // "" | tostring)] | join("\u001f")')"
 
-# Absent, or present but not a whole number of milliseconds. Recording a zero
-# would drag every average down and could name a tool that took no time as the
-# reason a turn was slow, so the call goes unrecorded instead.
+# Absent, or not composed entirely of digits: there is no usable duration, so
+# the call goes unrecorded rather than logged with a made-up number. A
+# genuine zero passes this check and is recorded like any other value --
+# "took no time" is real information, not a reason to drop the line.
 case "$ms" in ''|*[!0-9]*) exit 0 ;; esac
+
+# Force base 10. "$ms" is all digits at this point, but a leading zero --
+# e.g. "0800" -- makes bash arithmetic read it as octal, where 8 is not a
+# valid digit, aborting the hook; "10#" pins the base so the digits are read
+# as the decimal the sender meant. Do not remove this as noise.
+ms=$((10#$ms))
 
 # Milliseconds to seconds, in the shell rather than through awk, so a hook that
 # already fires once per tool call does not fork a second time to divide by a

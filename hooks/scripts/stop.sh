@@ -26,8 +26,15 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/config.sh"
 input="$(cat)"
 # The payload carries the directory the conversation is about, which is what
 # decides whether a project has its own settings.
-IFS=$'\x1f' read -r session_id cwd <<< "$(printf '%s' "$input" \
-  | jq -r '[(.session_id // ""), (.cwd // "")] | join("\u001f")')"
+IFS=$'\x1f' read -r session_id cwd agent_id <<< "$(printf '%s' "$input" \
+  | jq -r '[(.session_id // ""), (.cwd // ""), (.agent_id // "")] | join("\u001f")')"
+
+# Defensive, not a fix for anything reproduced: Stop and SubagentStop come
+# from one dispatcher that hooks.json binds separately by event name, so a
+# subagent finishing should never reach a script bound only to Stop. Checking
+# anyway makes that assumption explicit rather than implicit -- a subagent
+# completing is not the end of the user's turn, and must not close one.
+[ -n "$agent_id" ] && exit 0
 
 ct_load_config "$cwd"
 
