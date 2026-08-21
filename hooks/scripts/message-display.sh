@@ -93,8 +93,9 @@ if [ "$CT_DATE_ROLLOVER" = "on" ] && [ -n "$state_file" ]; then
     previous="$(cat "$date_file")"
     [ -n "$previous" ] && [ "$previous" != "$today" ] && date_part="$(ct_now '%b %d')"
   fi
-  mkdir -p "$(ct_state_dir)"
-  printf '%s' "$today" > "$date_file"
+  if ct_state_ready; then
+    printf '%s' "$today" > "$date_file"
+  fi
 fi
 
 # Elapsed time for this turn, measured from when the prompt was submitted.
