@@ -25,6 +25,20 @@ command -v jq >/dev/null 2>&1 || exit 0
 
 input="$(cat)"
 
+# MessageDisplay fires once per batch of newly completed lines, and only the
+# first batch of a message is stamped, so the overwhelming majority of
+# invocations have nothing to do. Deciding that in the shell keeps them from
+# forking jq to find out.
+#
+# This is a filter, not a parser. A real index of zero always matches, so no
+# first batch is ever wrongly skipped; a delta whose own text happens to match
+# costs one fork and is then rejected by the parse below, which remains the
+# only thing that decides. The pattern lives in a variable because bash 3.2
+# needs an unquoted expansion here to treat it as a regex rather than a
+# literal.
+ct_first_batch='"index"[[:space:]]*:[[:space:]]*0[[:space:],}]'
+[[ "$input" =~ $ct_first_batch ]] || exit 0
+
 # One cheap jq call decides whether there is any work to do at all.
 # Split on the ASCII unit separator rather than a tab. cwd can contain spaces,
 # and tab is IFS whitespace, which means bash collapses runs of it and silently
