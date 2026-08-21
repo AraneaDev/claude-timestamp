@@ -927,12 +927,58 @@ is "marker: a template with no parts is literal" "hello" \
 asserts "valid: the default template"   ct_is_valid_marker "$DEFTPL"
 asserts "valid: a bare percent"         ct_is_valid_marker '%time 100%'
 asserts "valid: a trailing percent"     ct_is_valid_marker '%time %'
-asserts "valid: nested groups"          ct_is_valid_marker '%time{ {%elapsed}}'
+refutes "invalid: nested groups"        ct_is_valid_marker '%time{ {%elapsed}}'
+
+# Nesting is rejected rather than rendered: _ct_span assumes a span holds no
+# braces, so a nested group's inner braces would leak as literal text and the
+# inner group would never get the chance to vanish. The validator guarantees
+# none of these three ever reaches the renderer.
+refutes "invalid: doubled nested group"        ct_is_valid_marker '{{%time}}'
+refutes "invalid: two groups, one nested"      ct_is_valid_marker '%time{ (%elapsed){ · %tool}}'
+refutes "invalid: nested group after a placeholder" ct_is_valid_marker '{%tool{ (%elapsed)}}'
 asserts "valid: no placeholders at all" ct_is_valid_marker 'hello'
 refutes "invalid: unknown placeholder"  ct_is_valid_marker '%elapsd'
 refutes "invalid: a placeholder with a suffix" ct_is_valid_marker '%timex'
 refutes "invalid: unbalanced open brace"  ct_is_valid_marker '[%time{ %elapsed]'
 refutes "invalid: unbalanced close brace" ct_is_valid_marker '[%time} %elapsed]'
+
+# The suite itself runs under set -uo pipefail with no -e, and every marker
+# assertion above sits inside $(m ...), which suppresses -e for the callee's
+# whole dynamic extent -- so nothing above can see a bare non-zero return from
+# an internal helper abort the caller. Every hook in this repo starts with
+# set -euo pipefail, so this is the shape that actually runs in production.
+marker_survives_set_e() {
+  local tpl="$1" want="$2"
+  bash -c '
+      set -euo pipefail
+      . "$1/hooks/scripts/lib/config.sh"
+      ct_render_marker "$2" T E O D
+      [ "$CT_MARKER" = "$3" ]
+    ' _ "$ROOT" "$tpl" "$want" >/dev/null 2>&1
+}
+for row in "100%|100%" "%time 100%|T 100%" "%|%" "%elapsd|%elapsd" "%timex|%timex"; do
+  tpl="${row%%|*}"; want="${row#*|}"
+  if marker_survives_set_e "$tpl" "$want"; then
+    pass "marker: renders under set -e without aborting [$tpl]"
+  else
+    fail "marker: renders under set -e without aborting [$tpl]" "an exit 0" "aborted or wrong output"
+  fi
+done
+
+# Neither function may print, since message-display.sh writes JSON to stdout
+# and a helper that printed -- to either stream -- would corrupt the hook's
+# output or its diagnostics. Checked against a malformed template, the case
+# most likely to tempt an errant echo.
+errfile="$WORK/marker-print-probe.$$"
+out="$(ct_render_marker '{%time' T E O D 2>"$errfile")"
+err="$(cat "$errfile" 2>/dev/null)"; rm -f "$errfile"
+is "marker: render prints nothing to stdout" "" "$out"
+is "marker: render prints nothing to stderr" "" "$err"
+
+out2="$(ct_is_valid_marker '{%time' 2>"$errfile")"
+err2="$(cat "$errfile" 2>/dev/null)"; rm -f "$errfile"
+is "marker: validate prints nothing to stdout" "" "$out2"
+is "marker: validate prints nothing to stderr" "" "$err2"
 
 # Every template below is rendered and validated under a timeout, so a missing
 # index increment fails the suite instead of hanging it. The inputs are the

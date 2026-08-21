@@ -413,7 +413,7 @@ _ct_span() {
   while [ "$i" -lt "$n" ]; do
     ch="${s:i:1}"
     if [ "$ch" = "%" ]; then
-      _ct_word "$s" "$i"; rc=$?
+      rc=0; _ct_word "$s" "$i" || rc=$?
       if [ "$rc" -eq 0 ]; then
         _ct_part "$_CT_W"; val="$_CT_V"
         if [ -n "$val" ]; then
@@ -478,7 +478,6 @@ _ct_all_empty() {
 #
 # CT_MARKER is this library's public interface -- nothing in this file reads
 # it yet, since the caller that will (task 4) does not exist.
-# shellcheck disable=SC2034
 ct_render_marker() {
   local tpl="${1:-}"
   local out i n depth j grp k
@@ -518,16 +517,25 @@ ct_render_marker() {
       i="$k"
     fi
   done
+  # shellcheck disable=SC2034  # CT_MARKER is this library's public interface
   CT_MARKER="$out"
   return 0
 }
 
-# Whether a template is renderable: no unknown placeholder, no unbalanced brace.
+# Whether a template is renderable: no unknown placeholder, no unbalanced
+# brace, and no nested group.
 #
 # A '%' followed by letters must spell one of the four names. A typo is rejected
 # rather than rendered literally, because a user who writes %elapsd wants to
 # know it did nothing, not to read it back on every message. A '%' followed by
 # anything else is literal, so "100%" needs no escaping.
+#
+# A '{' while already inside a group is rejected rather than supported: nesting
+# only buys decoration inside decoration, which a flat template can already
+# express, and the renderer only ever scans for a group's own top-level braces
+# (_ct_span assumes no braces at all), so a nested group would be accepted here
+# and mis-rendered there. Depth is capped at 1 instead of taught to the
+# renderer.
 ct_is_valid_marker() {
   local s="${1:-}"
   local i=0 n depth ch rc
@@ -535,14 +543,18 @@ ct_is_valid_marker() {
   while [ "$i" -lt "$n" ]; do
     ch="${s:i:1}"
     case "$ch" in
-      '{') depth=$(( depth + 1 )); i=$(( i + 1 )) ;;
+      '{')
+        depth=$(( depth + 1 ))
+        [ "$depth" -gt 1 ] && return 1
+        i=$(( i + 1 ))
+        ;;
       '}')
         depth=$(( depth - 1 ))
         [ "$depth" -lt 0 ] && return 1
         i=$(( i + 1 ))
         ;;
       '%')
-        _ct_word "$s" "$i"; rc=$?
+        rc=0; _ct_word "$s" "$i" || rc=$?
         [ "$rc" -eq 1 ] && return 1
         if [ "$rc" -eq 0 ]; then i=$(( i + _CT_WLEN )); else i=$(( i + 1 )); fi
         ;;
