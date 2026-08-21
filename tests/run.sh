@@ -2130,6 +2130,15 @@ out="$(bash "$SCRIPTS/setup.sh" --stats 2>&1)"
 contains "stats: reports the damaged row"    "1 unreadable" "$out"
 contains "stats: still totals the good ones" "sessions        1" "$out"
 
+# A file with rows but none of them readable was unreachable before this
+# task; the early return must land before the heading, not after it.
+fresh 'HISTORY=on'
+printf 'broken\nalso broken\n' > "$CLAUDE_TIMESTAMP_HISTORY"
+out="$(bash "$SCRIPTS/setup.sh" --stats 2>&1)"
+contains "stats: an all-damaged file says so"      "No readable sessions" "$out"
+contains "stats: and counts what it could not read" "2 unreadable"        "$out"
+lacks    "stats: no totals are printed for nothing" "sessions        "    "$out"
+
 bash "$SCRIPTS/setup.sh" --history=off --history-limit=50 >/dev/null
 ct_load_config
 is "--history is accepted"       "off" "$CT_HISTORY"
@@ -2782,7 +2791,7 @@ contains "attribution: the separator is a middle dot" "· Bash" "$out"
 fresh 'SLOW_AFTER=1'
 printf '{"session_id":"noattr","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
 printf '%s' "$(( $(date +%s) - 200 ))" > "$(ct_state_file noattr)"
-printf 'Bash 190\n' > "$(ct_turn_tool_log noattr)"
+printf 'Bash 190.000 ok\n' > "$(ct_turn_tool_log noattr)"
 out="$(strip_ansi "$(printf '{"index":0,"session_id":"noattr","delta":"x"}' \
   | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')")"
 lacks "attribution: absent when tool timing is off" "Bash" "$out"
@@ -2791,7 +2800,7 @@ lacks "attribution: absent when tool timing is off" "Bash" "$out"
 fresh 'TOOL_TIMING=on' 'SLOW_AFTER=600'
 printf '{"session_id":"fast","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
 printf '%s' "$(( $(date +%s) - 200 ))" > "$(ct_state_file fast)"
-printf 'Bash 190\n' > "$(ct_turn_tool_log fast)"
+printf 'Bash 190.000 ok\n' > "$(ct_turn_tool_log fast)"
 out="$(strip_ansi "$(printf '{"index":0,"session_id":"fast","delta":"x"}' \
   | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')")"
 lacks "attribution: absent on a fast turn" "Bash" "$out"
