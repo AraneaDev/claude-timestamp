@@ -153,34 +153,20 @@ ct_render_marker "$CT_MARKER_TEMPLATE" \
 marker=""
 [ -n "$CT_MARKER" ] && marker="${base_start}${CT_MARKER}${base_end} "
 
-# A gap since the previous message means you stepped away. Marked on its own
-# line above the message, because MessageDisplay can only replace a delta --
-# there is no way to draw a standalone separator between turns.
+# A gap since the previous turn means you stepped away. Marked on its own line
+# above the message, because MessageDisplay can only replace a delta -- there
+# is no way to draw a standalone separator between turns.
+#
+# The figure is measured and accumulated by the prompt hook, which is the only
+# place both ends of the gap are known. This hook draws it and clears it, so a
+# break is marked exactly once.
 divider=""
 if [ -n "$state_file" ]; then
-  last_file="${state_file}.last"
-  # Guarded on IDLE_AFTER because the divider and the .idle total are its
-  # display feature; the timestamp below is not optional even when this is
-  # off, because a turn that ends without a Stop is reconciled from .last, so
-  # switching the divider off must not switch off the evidence the summary
-  # needs.
-  if [ "$CT_IDLE_AFTER" -gt 0 ] 2>/dev/null; then
-    last="$(ct_read_counter "$last_file")"
-    if [ "$last" -gt 0 ]; then
-      gap=$((now - last))
-      if [ "$gap" -ge "$CT_IDLE_AFTER" ]; then
-        divider="$(ct_paint "$CT_COLOR" "-- $(ct_humanize_gap "$gap") later --")
+  if gap="$(ct_take_away "$session_id")" && [ -n "$gap" ]; then
+    divider="$(ct_paint "$CT_COLOR" "-- $(ct_humanize_gap "$gap") later --")
 "
-        # Total the breaks so the summary can separate time you spent waiting on
-        # a reply from time you were not at the keyboard at all.
-        if [ "$CT_SUMMARY" = "on" ]; then
-          printf '%s' "$(( $(ct_read_counter "${state_file}.idle") + gap ))" > "${state_file}.idle"
-        fi
-      fi
-    fi
   fi
-  mkdir -p "$(ct_state_dir)"
-  printf '%s' "$now" > "$last_file"
+  ct_note_message "$session_id" "$now"
 fi
 
 printf '%s' "$input" | jq --arg prefix "${divider}${marker}" '{

@@ -50,7 +50,7 @@ if state_file="$(ct_state_file "$session_id")"; then
   # itself that was observed: up to the last message drawn on screen. This has
   # to happen before the new turn is opened, or the evidence is gone.
   ct_turn_close "$session_id" "$(ct_read_counter "${state_file}.last")"
-
+  ct_record_away "$session_id" "$now"
   ct_turn_open "$session_id" "$now"
 
   # Cleared unconditionally rather than under TOOL_TIMING, so switching tool
@@ -62,20 +62,14 @@ fi
 
 [ "$CT_INJECT_CONTEXT" = "false" ] && exit 0
 
-# How long the user was away, when they were. The gap is measured from the last
-# assistant message, which message-display.sh records, so this is the same
-# break the idle divider draws on screen. Told to the model because a reply
-# that carries on mid-thought after three hours reads as though nothing
-# happened.
+# How long the user was away, when they were. The same figure the divider
+# draws, from the same measurement, so the screen and the model never disagree.
+# Told to the model because a reply that carries on mid-thought after three
+# hours reads as though nothing happened.
 away=""
-if [ -n "${state_file:-}" ] && [ "$CT_IDLE_AFTER" -gt 0 ] 2>/dev/null; then
-  last="$(ct_read_counter "${state_file}.last")"
-  if [ "$last" -gt 0 ]; then
-    gap=$(( $(date +%s) - last ))
-    if [ "$gap" -ge "$CT_IDLE_AFTER" ]; then
-      away=", after a $(ct_humanize_gap "$gap") break"
-    fi
-  fi
+if [ -n "${state_file:-}" ]; then
+  gap="$(ct_read_counter "${state_file}.away")"
+  [ "$gap" -gt 0 ] && away=", after a $(ct_humanize_gap "$gap") break"
 fi
 
 # The zone is always appended, whatever the chosen format, so the model can

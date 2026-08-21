@@ -622,20 +622,22 @@ if command -v jq >/dev/null 2>&1; then
   out="$(printf '{"session_id":"test-session","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')"
   lacks "a turn under the threshold is unpainted" "[36m" "$out"
 
-  # Idle divider.
-  fresh 'COLOR=none' 'ELAPSED=off' 'IDLE_AFTER=3600' 'DATE_ROLLOVER=off'
-  printf '%s' "$(( $(date +%s) - 7200 ))" > "$(ct_state_dir)/test-session.last"
+  # Idle divider. message-display.sh only draws and clears a staged gap now;
+  # the measurement and the IDLE_AFTER gate live in ct_record_away, exercised
+  # separately under "counting time away and failures".
+  fresh 'COLOR=none' 'ELAPSED=off' 'DATE_ROLLOVER=off'
+  printf '7200' > "$(ct_state_dir)/test-session.away"
   out="$(printf '{"session_id":"test-session","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')"
   contains "an idle gap is marked" "2h later" "$out"
 
-  # The hook just recorded now, so the next message is not idle.
+  # ct_take_away cleared what it printed, so a second message draws nothing.
   out="$(printf '{"session_id":"test-session","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')"
   lacks "a fresh gap is not marked" "later" "$out"
 
-  fresh 'COLOR=none' 'ELAPSED=off' 'IDLE_AFTER=0' 'DATE_ROLLOVER=off'
-  printf '%s' "$(( $(date +%s) - 7200 ))" > "$(ct_state_dir)/test-session.last"
+  # No gap staged at all: nothing to draw.
+  fresh 'COLOR=none' 'ELAPSED=off' 'DATE_ROLLOVER=off'
   out="$(printf '{"session_id":"test-session","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')"
-  lacks "IDLE_AFTER=0 disables the marker" "later" "$out"
+  lacks "no staged gap means no marker" "later" "$out"
 
   # Subagents.
   fresh 'COLOR=none' 'SUBAGENTS=off' 'IDLE_AFTER=0'
@@ -1674,10 +1676,100 @@ if command -v jq >/dev/null 2>&1; then
   echo
   echo "counting time away and failures"
 
+  # The break is now measured and accumulated by the prompt hook, from the
+  # previous turn's close, not drawn on screen by message-display.sh.
   fresh 'COLOR=none' 'ELAPSED=off' 'IDLE_AFTER=3600' 'DATE_ROLLOVER=off'
-  printf '%s' "$(( $(date +%s) - 7200 ))" > "$(ct_state_dir)/gap.last"
-  printf '{"session_id":"gap","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" >/dev/null
+  printf '%s' "$(( $(date +%s) - 7200 ))" > "$(ct_state_dir)/gap.closed"
+  printf '{"session_id":"gap","cwd":"%s"}' "$WORK" | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
   is_near "a marked break is added to the time away" 7200 "$(ct_read_counter "$(ct_state_dir)/gap.idle")" 3
+
+  # ct_record_away, ct_take_away and ct_note_message directly, exercising the
+  # edge cases the hooks rely on but do not spell out themselves.
+  fresh 'IDLE_AFTER=1800'
+  base="$(ct_state_file "away-fn")"
+  ct_clear_state "away-fn"; mkdir -p "$(ct_state_dir)"
+
+  # The first prompt of a session has no .closed: nothing recorded, nothing
+  # staged.
+  ct_record_away "away-fn" "$(date +%s)"
+  is "ct_record_away: no .closed records nothing" "0" "$(ct_read_counter "$base.idle")"
+  is "ct_record_away: no .closed stages nothing"   "0" "$(ct_read_counter "$base.away")"
+
+  # A gap under the threshold: recorded and staged nowhere.
+  now="$(date +%s)"
+  printf '%s' "$(( now - 100 ))" > "$base.closed"
+  ct_record_away "away-fn" "$now"
+  is "ct_record_away: under the threshold records nothing" "0" "$(ct_read_counter "$base.idle")"
+  is "ct_record_away: under the threshold stages nothing"   "0" "$(ct_read_counter "$base.away")"
+
+  # A gap over the threshold: added to .idle, and written to .away.
+  now="$(date +%s)"
+  printf '%s' "$(( now - 3600 ))" > "$base.closed"
+  ct_record_away "away-fn" "$now"
+  is_near "ct_record_away: a real gap is added to .idle"  3600 "$(ct_read_counter "$base.idle")" 2
+  is_near "ct_record_away: a real gap is staged in .away" 3600 "$(ct_read_counter "$base.away")" 2
+
+  # A second gap replaces the staged figure rather than piling onto it -- a
+  # turn that drew no message of its own must not leave a stale break behind
+  # for the divider to draw twice over.
+  printf '%s' "$(( now - 1800 ))" > "$base.closed"
+  ct_record_away "away-fn" "$now"
+  is_near "ct_record_away: .away is replaced, not accumulated" 1800 "$(ct_read_counter "$base.away")" 2
+  is_near "ct_record_away: .idle keeps accumulating"           5400 "$(ct_read_counter "$base.idle")" 3
+
+  # IDLE_AFTER=0 disables the feature entirely: accumulate nothing, stage
+  # nothing, even against a gap that would otherwise clearly qualify.
+  fresh 'IDLE_AFTER=0'
+  ct_clear_state "away-fn"; mkdir -p "$(ct_state_dir)"
+  printf '%s' "$(( $(date +%s) - 7200 ))" > "$base.closed"
+  ct_record_away "away-fn" "$(date +%s)"
+  is "ct_record_away: IDLE_AFTER=0 records nothing" "0" "$(ct_read_counter "$base.idle")"
+  is "ct_record_away: IDLE_AFTER=0 stages nothing"   "0" "$(ct_read_counter "$base.away")"
+
+  # ct_take_away prints the staged gap and clears it in the same call.
+  fresh 'IDLE_AFTER=1800'
+  ct_clear_state "away-fn"; mkdir -p "$(ct_state_dir)"
+  printf '2100' > "$base.away"
+  is "ct_take_away: prints the staged gap" "2100" "$(ct_take_away "away-fn")"
+  is "ct_take_away: clears what it printed" ""     "$(ct_take_away "away-fn")"
+
+  # ct_note_message writes .last and touches nothing else.
+  ct_clear_state "away-fn"; mkdir -p "$(ct_state_dir)"
+  ct_note_message "away-fn" "12345"
+  is "ct_note_message: writes .last"          "12345" "$(cat "$base.last")"
+  is "ct_note_message: does not touch .idle"  "0"      "$(ct_read_counter "$base.idle")"
+
+  # Waiting and away are disjoint intervals that tile the session, so their sum
+  # can never exceed the elapsed total. It used to: away was measured from the
+  # previous message rather than the previous turn's close, so it swallowed the
+  # tail of that turn, which waiting had already counted.
+  fresh 'IDLE_AFTER=3600' 'SUMMARY=on'
+  sid="tiling"
+  base="$(ct_state_file "$sid")"
+  now="$(date +%s)"
+  # Turn 1: prompted 7200s ago, last message 3700s ago, closed 3700s ago.
+  # Then away 3600s. Turn 2: prompted 100s ago, closing now.
+  printf '%s' "$(( now - 7200 ))" > "$base.start"
+  printf '%s' "$(( now - 7200 ))" > "$base"
+  printf '%s' "$(( now - 3700 ))" > "$base.last"
+  printf '%s' "$(( now - 3700 ))" > "$base.closed"
+  printf '%s' "3500"              > "$base.wait"
+  printf '1'                      > "$base.turns"
+
+  printf '{"session_id":"%s","cwd":"%s"}' "$sid" "$WORK" \
+    | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  is_near "away: measured from the turn close, not the last message" \
+          3700 "$(ct_read_counter "$base.idle")" 2
+
+  printf '{"session_id":"%s","cwd":"%s"}' "$sid" "$WORK" | bash "$SCRIPTS/stop.sh" >/dev/null
+  ct_session_totals "$sid"
+  elapsed=$(( $(date +%s) - _CT_START ))
+  if [ "$(( _CT_WAIT + _CT_IDLE ))" -le "$elapsed" ]; then
+    pass "away: waiting plus away never exceeds the session"
+  else
+    fail "away: waiting plus away never exceeds the session" \
+         "at most $elapsed" "$(( _CT_WAIT + _CT_IDLE ))"
+  fi
 
   fresh 'TOOL_TIMING=on'
   printf '{"session_id":"f","tool_use_id":"t1","tool_name":"Bash","duration_ms":1000,"hook_event_name":"PostToolUseFailure"}' \
@@ -2204,28 +2296,30 @@ lacks "attribution: absent on a fast turn" "Bash" "$out"
 echo
 echo "away context"
 
+# The gap is measured from the previous turn's close, not the previous
+# message, so the fixture stages a .closed rather than a .last.
 fresh 'IDLE_AFTER=1800'
 mkdir -p "$(ct_state_dir)"
-printf '%s' "$(( $(date +%s) - 10800 ))" > "$(ct_state_file away).last"
+printf '%s' "$(( $(date +%s) - 10800 ))" > "$(ct_state_file away).closed"
 out="$(printf '{"session_id":"away","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh" \
   | jq -r '.hookSpecificOutput.additionalContext')"
 contains "away: a long gap is reported" "after a 3h break" "$out"
 contains "away: the time is still there" "Message sent at local time" "$out"
 
 fresh 'IDLE_AFTER=1800'
-printf '%s' "$(( $(date +%s) - 60 ))" > "$(ct_state_file near).last"
+printf '%s' "$(( $(date +%s) - 60 ))" > "$(ct_state_file near).closed"
 out="$(printf '{"session_id":"near","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh" \
   | jq -r '.hookSpecificOutput.additionalContext')"
 lacks "away: a short gap is not reported" "break" "$out"
 
 fresh 'IDLE_AFTER=0'
-printf '%s' "$(( $(date +%s) - 10800 ))" > "$(ct_state_file disabled).last"
+printf '%s' "$(( $(date +%s) - 10800 ))" > "$(ct_state_file disabled).closed"
 out="$(printf '{"session_id":"disabled","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh" \
   | jq -r '.hookSpecificOutput.additionalContext')"
 lacks "away: silent when idle marking is off" "break" "$out"
 
 fresh 'IDLE_AFTER=1800' 'INJECT_CONTEXT=false'
-printf '%s' "$(( $(date +%s) - 10800 ))" > "$(ct_state_file noinject).last"
+printf '%s' "$(( $(date +%s) - 10800 ))" > "$(ct_state_file noinject).closed"
 out="$(printf '{"session_id":"noinject","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh")"
 is "away: nothing is injected when context injection is off" "" "$out"
 

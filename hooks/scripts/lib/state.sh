@@ -145,6 +145,57 @@ ct_turn_close() {
   return 0
 }
 
+# Record how long the user was away, and stage it for the divider.
+#
+# The gap runs from the previous turn's close to this prompt. Measuring from
+# the previous message instead is wrong twice over: it swallows the tail of the
+# previous turn, which ct_close_turn has already counted as waiting, and it
+# cannot be measured until a reply renders, by which point the reply's own
+# latency is inside the figure too.
+#
+# The staged value is written, never added to. A gap that no message ever draws
+# -- a turn that produced nothing -- is replaced by the next prompt's, rather
+# than accumulating into a divider that claims a break that never happened.
+ct_record_away() {
+  local sid="${1:-}" now="${2:-0}" base closed gap
+  base="$(ct_state_file "$sid")" || return 0
+  case "$now" in ''|*[!0-9]*) return 0 ;; esac
+  [ "${CT_IDLE_AFTER:-0}" -gt 0 ] 2>/dev/null || return 0
+
+  closed="$(ct_read_counter "${base}.closed")"
+  [ "$closed" -gt 0 ] || return 0
+  gap=$(( now - closed ))
+  [ "$gap" -ge "$CT_IDLE_AFTER" ] || return 0
+
+  mkdir -p "$(ct_state_dir)" 2>/dev/null || return 0
+  printf '%s' "$(( $(ct_read_counter "${base}.idle") + gap ))" > "${base}.idle"
+  printf '%s' "$gap" > "${base}.away"
+  return 0
+}
+
+# Take the staged gap, if there is one. Printing and clearing in one call means
+# a divider is drawn exactly once per break.
+ct_take_away() {
+  local sid="${1:-}" base gap
+  base="$(ct_state_file "$sid")" || return 0
+  gap="$(ct_read_counter "${base}.away")"
+  rm -f "${base}.away" 2>/dev/null || true
+  [ "$gap" -gt 0 ] || return 0
+  printf '%s' "$gap"
+  return 0
+}
+
+# Note that a message was drawn. Read by the prompt and session-end hooks to
+# close a turn that ended in an interrupt rather than a Stop.
+ct_note_message() {
+  local sid="${1:-}" now="${2:-0}" base
+  base="$(ct_state_file "$sid")" || return 0
+  case "$now" in ''|*[!0-9]*) return 0 ;; esac
+  mkdir -p "$(ct_state_dir)" 2>/dev/null || return 0
+  printf '%s' "$now" > "${base}.last"
+  return 0
+}
+
 # The session's totals, clamped.
 #
 # Waiting and away are disjoint intervals by construction, so their sum cannot
