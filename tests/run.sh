@@ -488,14 +488,22 @@ if command -v jq >/dev/null 2>&1; then
   contains "session end closes a turn still open" "40s of it waiting" "$out"
 
   # The ordering every normal session takes: Stop closes the turn, then
-  # SessionEnd runs behind it. SessionEnd's own reconciliation must see the
-  # turn already closed and add nothing on top of what Stop already recorded.
-  # The comparisons use the values Stop actually wrote rather than a value
-  # predicted from the clock, so they are exact without needing a tolerance.
+  # SessionEnd runs behind it. In production .last already holds a real value
+  # by the time Stop fires, because every message drawn stamps it first, so
+  # this sets .last to a value strictly after the turn started and no later
+  # than now to match. Without that, SessionEnd's reconciliation call would
+  # pass ended=0 and could never double-count regardless of the .closed
+  # guard -- .last is what makes this exercise the guard at all.
+  #
+  # Both offsets come from one reading of the clock, and the comparisons use
+  # the values Stop actually wrote rather than a value predicted from the
+  # clock, so they are exact without needing a tolerance.
   ct_clear_state "acct"; mkdir -p "$(ct_state_dir)"
-  printf '%s' "$(( $(date +%s) - 900 ))" > "$base.start"
+  now="$(date +%s)"
+  printf '%s' "$(( now - 900 ))" > "$base.start"
   printf '1' > "$base.turns"
-  printf '%s' "$(( $(date +%s) - 45 ))" > "$base"
+  printf '%s' "$(( now - 45 ))" > "$base"
+  printf '%s' "$(( now - 10 ))" > "$base.last"
   printf '{"session_id":"acct","hook_event_name":"Stop"}' | bash "$SCRIPTS/stop.sh"
   started="$(cat "$base")"
   waited="$(ct_read_counter "$base.wait")"
