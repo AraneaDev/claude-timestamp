@@ -6,7 +6,7 @@
 
 [![Release](https://img.shields.io/github/v/release/AraneaDev/claude-timestamp)](https://github.com/AraneaDev/claude-timestamp/releases)
 [![CI](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml/badge.svg)](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-453%20passing-2b8a3e)](tests/run.sh)
+[![Tests](https://img.shields.io/badge/tests-461%20passing-2b8a3e)](tests/run.sh)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-364fc7)](#platform-notes)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
@@ -90,6 +90,80 @@ offers a handful of presets, each previewed as the marker it actually produces:
 
 It also takes the request directly, so `/timestamps tokyo`, `/timestamps no
 colour` and `/timestamps 12 hour clock` each land in one step.
+
+### The marker's layout
+
+`MARKER` decides what the marker is made of and how it is arranged. The parts
+are `%time`, `%elapsed`, `%tool` and `%date`, and a `{...}` group disappears
+when every part inside it is empty:
+
+Every line below was produced by running the renderer, not written by hand.
+The first column is the setting, the second is what appears on screen.
+
+```
+MARKER=                                          renders as
+
+[{%date }%time{ %elapsed}{ · %tool}]             [13:22:13 +2m14s · Bash 1m58s]
+[{%date }%time{ %elapsed}{ · %tool}]             [13:22:13]
+   the default, on a turn with no duration and no tool
+
+%time                                            13:22:13
+%time{ %elapsed}                                 13:22:13 +2m14s
+%time{ → %elapsed}                               13:22:13 → +2m14s
+%time{ (%elapsed)}                               13:22:13 (+2m14s)
+%time{ (%elapsed)}                               13:22:13
+   the same template, on a turn with no duration
+
+⟨%time⟩                                          ⟨13:22:13⟩
+{%date }%time                                    Aug 21 13:22:13
+%elapsed                                         +2m14s
+[%time %elapsed]                                 [13:22:13]
+   an empty part eats one run of spaces
+```
+
+**Groups matter when a part carries decoration.** `%time (%elapsed)` leaves an
+empty pair of brackets behind on a turn with no duration. `%time{ (%elapsed)}`
+does not, because the whole group goes when the part inside it is empty. Outside
+a group, an empty part eats one run of spaces, which is why `[%time %elapsed]`
+closes up on its own without needing a group at all.
+
+**Groups do not nest.** A `{` inside a group makes the template invalid, and the
+plugin falls back to the default and says so at the next session start. Flat
+templates express nearly everything nesting would.
+
+**A `%` that does not begin a part is literal**, so `100%` needs no escaping. A
+`%` followed by letters must spell one of the four names exactly: `%elapsd` is
+rejected as a typo rather than printed back at you, and `%timex` is rejected too
+rather than quietly meaning `%time` followed by an `x`.
+
+### Colour, and where it applies
+
+Each part takes its own colour through `TIME_COLOR`, `ELAPSED_COLOR` and
+`TOOL_COLOR`. An empty one follows `COLOR`, which is what "inherit" means in the
+settings table. `SLOW_COLOR` still wins over `ELAPSED_COLOR` once a turn crosses
+`SLOW_AFTER`, because a slow turn being obvious is the point of that setting.
+
+Colour is written as ANSI escape sequences, which only help where something
+interprets them. A terminal does. Claude Code in VS Code, and other clients that
+render the text as-is, do not, and an escape sequence sent there arrives as
+visible `[2m` characters wrapped around the marker.
+
+So the plugin sends colour only when it is running in a terminal session, and
+sends plain text everywhere else. Nothing needs configuring: the marker simply
+arrives clean in VS Code and coloured in a terminal.
+
+Two environment variables override that, and both are read before anything else:
+
+- **`NO_COLOR`**: never send colour, whatever `COLOR` says. Any non-empty value.
+- **`FORCE_COLOR`**: send colour even outside a terminal, for a client you know renders it.
+
+`NO_COLOR` wins when both are set. `setup.sh --doctor` reports which client it
+detected and whether colour is being suppressed, which is the quickest way to
+find out why a marker looks plainer than expected.
+
+`ELAPSED` and `TOOL_TIMING` decide whether those parts have anything to say;
+`MARKER` decides where they go. A part with nothing to say leaves no trace,
+whichever of the two silenced it.
 
 Changes take effect on your **next message**. Every hook reads the config file
 each time it runs, so nothing needs restarting. Only installing the plugin
@@ -300,7 +374,7 @@ no database.
 ## Development
 
 ```bash
-bash tests/run.sh                                    # 453 assertions, no framework
+bash tests/run.sh                                    # 461 assertions, no framework
 shellcheck -S style -e SC1091 hooks/scripts/**/*.sh  # clean
 bash tools/check-docs.sh                             # README against the code
 ```

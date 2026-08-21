@@ -210,7 +210,7 @@ in `schema.json`:
 - Outside a group, an empty part eats one run of spaces, so `[%time %elapsed]`
   reads correctly when the duration is absent. A part decorated with anything
   other than spaces needs a group: write `%time{ (%elapsed)}`, not
-  `%time (%elapsed)`, or the brackets will be left behind on their own.
+  `%time (%elapsed)`, or the parentheses will be left behind on their own.
 
 Refuse to write a template that fails any of those, and say which rule it broke.
 A bad value is not silently ignored: the plugin replaces it with the default and

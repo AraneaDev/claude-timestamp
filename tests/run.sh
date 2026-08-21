@@ -845,6 +845,24 @@ ct_load_config
 is "--tool-timing is accepted" "on" "$CT_TOOL_TIMING"
 refutes "rejects a non on/off tool-timing value" bash "$SCRIPTS/setup.sh" --tool-timing=sometimes
 
+fresh
+bash "$SCRIPTS/setup.sh" --marker='%time' >/dev/null
+ct_load_config
+is "setup: writes a marker template" "%time" "$CT_MARKER_TEMPLATE"
+
+fresh
+bash "$SCRIPTS/setup.sh" --time-color=cyan --elapsed-color=green --tool-color=gray >/dev/null
+ct_load_config
+is "setup: writes the time colour"    "cyan"  "$CT_TIME_COLOR"
+is "setup: writes the elapsed colour" "green" "$CT_ELAPSED_COLOR"
+is "setup: writes the tool colour"    "gray"  "$CT_TOOL_COLOR"
+
+fresh 'MARKER=%time'
+refutes "setup: refuses an invalid template" \
+  bash "$SCRIPTS/setup.sh" --marker='%elapsd'
+ct_load_config
+is "setup: and leaves the old one alone" "%time" "$CT_MARKER_TEMPLATE"
+
 echo
 echo "tool timing"
 
@@ -1387,10 +1405,10 @@ else
 fi
 
 # Answers in prompt order: enabled, timezone, display format, elapsed, slow
-# after, idle after, summary, colour, tell-Claude, write. Tool timing and
-# context format are skipped because summary and tell-Claude are answered off
-# and false.
-printf 'off\n%s\nshort\non\n30\n0\noff\ncyan\nfalse\ny\n' "$tz_answer" \
+# after, idle after, summary, colour, marker (blank keeps the default), tell-
+# Claude, write. Tool timing and context format are skipped because summary
+# and tell-Claude are answered off and false.
+printf 'off\n%s\nshort\non\n30\n0\noff\ncyan\n\nfalse\ny\n' "$tz_answer" \
   | bash "$SCRIPTS/setup.sh" >/dev/null 2>&1
 ct_load_config
 is "the wizard writes enabled"        "off"        "$CT_ENABLED"
@@ -1404,13 +1422,13 @@ is "the wizard writes the injection"  "false"      "$CT_INJECT_CONTEXT"
 # Answering off then back on in a fresh run proves the question round-trips
 # rather than only ever moving in one direction.
 fresh 'ENABLED=off'
-printf 'on\n%s\nshort\non\n30\n0\noff\ncyan\nfalse\ny\n' "$tz_answer" \
+printf 'on\n%s\nshort\non\n30\n0\noff\ncyan\n\nfalse\ny\n' "$tz_answer" \
   | bash "$SCRIPTS/setup.sh" >/dev/null 2>&1
 ct_load_config
 is "the wizard round-trips enabled back on" "on" "$CT_ENABLED"
 
 fresh 'COLOR=green'
-printf 'off\nlocal\niso\non\n0\n0\non\non\nred\ntrue\n24h\nn\n' \
+printf 'off\nlocal\niso\non\n0\n0\non\non\nred\n\ntrue\n24h\nn\n' \
   | bash "$SCRIPTS/setup.sh" >/dev/null 2>&1
 ct_load_config
 is "answering no writes nothing"          "green" "$CT_COLOR"
@@ -1671,6 +1689,11 @@ asserts "doctor exits zero when healthy" bash "$SCRIPTS/setup.sh" --doctor
 fresh "TOOL_TIMING=on"
 out="$(bash -c 'unset EPOCHREALTIME; . "$1" --doctor' _ "$SCRIPTS/setup.sh" 2>&1)"
 lacks "doctor's tool-timing line ignores EPOCHREALTIME" "whole seconds only" "$out"
+
+fresh 'MARKER=%time' 'TIME_COLOR=cyan'
+out="$(bash "$SCRIPTS/setup.sh" --doctor)"
+contains "doctor: reports the template"     "%time" "$out"
+contains "doctor: reports a part colour"    "cyan"  "$out"
 
 echo
 echo "facts file"

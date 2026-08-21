@@ -36,6 +36,13 @@ Flags
   --context=FORMAT            Same values; used for the model-facing time.
   --color=COLOR               none | dim | gray | cyan | blue | green
                               | yellow | magenta | red.
+  --marker=TEMPLATE           The marker's layout. %time %elapsed %tool %date
+                              are the parts; a {...} group disappears when
+                              every part inside it is empty.
+  --time-color=COLOR          Colour of %time. Empty follows --color.
+  --elapsed-color=COLOR       Colour of %elapsed. A slow turn still uses
+                              --slow-color.
+  --tool-color=COLOR          Colour of %tool. Empty follows --color.
   --elapsed=on|off            Show how long the turn took.
   --slow-after=SECONDS        Colour the duration once a turn takes this long
                               (0 disables).
@@ -102,6 +109,19 @@ valid_color() {
   return 1
 }
 
+valid_marker() {
+  ct_is_valid_marker "$1" && return 0
+  echo "That marker template is not usable. The parts are %time, %elapsed, %tool and %date," >&2
+  echo "a {...} group disappears when every part inside it is empty, and braces must balance." >&2
+  return 1
+}
+
+valid_part_color() {
+  ct_is_valid_part_color "$1" && return 0
+  echo "Unknown colour '$1'. Pick: none dim gray red green yellow blue magenta cyan, or leave it empty to follow COLOR." >&2
+  return 1
+}
+
 valid_seconds() {
   ct_is_seconds "$2" && return 0
   echo "$1 must be a whole number of seconds, got '$2'." >&2
@@ -125,21 +145,25 @@ valid_bool() {
 # Draw the marker exactly as message-display.sh would, so a preview is not a
 # separate implementation that can drift from the real thing.
 preview() {
-  local sample=134 body elapsed base_start base_end
-  base_start="$(ct_color_start "$CT_COLOR")"
-  base_end="$(ct_color_end "$CT_COLOR")"
-  body="$(ct_now "$CT_DISPLAY_FORMAT")"
+  local sample=134 elapsed elapsed_color p_time p_elapsed p_tool
+  ct_paint_part "$CT_TIME_COLOR" "$(ct_now "$CT_DISPLAY_FORMAT")" "$CT_COLOR"; p_time="$_CT_PART"
+  p_elapsed=""
   if [ "$CT_ELAPSED" = "on" ]; then
     elapsed="$(ct_format_elapsed "$sample")"
+    elapsed_color="$CT_ELAPSED_COLOR"
     # Mirrors the slow-turn branch in message-display.sh, so a preview showing
     # an unpainted duration always means the threshold really was not crossed.
     if [ "$CT_SLOW_AFTER" -gt 0 ] 2>/dev/null && [ "$sample" -ge "$CT_SLOW_AFTER" ]; then
-      body="$body $(ct_paint "$CT_SLOW_COLOR" "$elapsed")$base_start"
-    else
-      body="$body $elapsed"
+      elapsed_color="$CT_SLOW_COLOR"
     fi
+    ct_paint_part "$elapsed_color" "$elapsed" "$CT_COLOR"; p_elapsed="$_CT_PART"
   fi
-  printf '%s[%s]%s Sure, here is what I found.\n' "$base_start" "$body" "$base_end"
+  p_tool=""
+  if [ "$CT_TOOL_TIMING" = "on" ]; then
+    ct_paint_part "$CT_TOOL_COLOR" "Bash 1m58s" "$CT_COLOR"; p_tool="$_CT_PART"
+  fi
+  ct_render_marker "$CT_MARKER_TEMPLATE" "$p_time" "$p_elapsed" "$p_tool" ""
+  printf '%s%s%s Sure, here is what I found.\n' "$(ct_color_start "$CT_COLOR")" "$CT_MARKER" "$(ct_color_end "$CT_COLOR")"
   # Every other line in this sample is real: the actual color, the actual
   # format. This one is not -- with the plugin off, no hook draws it, so a
   # reader who only skims the marker should not walk away thinking it works.
@@ -264,6 +288,8 @@ doctor() {
   echo "  display format  $CT_DISPLAY_FORMAT -> $(ct_now "$CT_DISPLAY_FORMAT")"
   echo "  context format  $CT_CONTEXT_FORMAT -> $(ct_now "$CT_CONTEXT_FORMAT") $(ct_zone)"
   echo "  color           $CT_COLOR$([ -n "${NO_COLOR:-}" ] && echo " (overridden: NO_COLOR is set)")"
+  echo "  marker          $CT_MARKER_TEMPLATE"
+  echo "  part colours    time ${CT_TIME_COLOR:-<inherit>}, elapsed ${CT_ELAPSED_COLOR:-<inherit>}, tool ${CT_TOOL_COLOR:-<inherit>}"
   echo "  entrypoint      ${CLAUDE_CODE_ENTRYPOINT:-<unset>}$(case "${CLAUDE_CODE_ENTRYPOINT-cli}" in cli) ;; *) { [ -n "${NO_COLOR:-}" ] || [ -n "${FORCE_COLOR:-}" ]; } || echo " (colour suppressed: not a terminal session)" ;; esac)"
   echo "  elapsed         $CT_ELAPSED"
   echo "  slow after      $([ "$CT_SLOW_AFTER" -gt 0 ] 2>/dev/null && echo "${CT_SLOW_AFTER}s in $CT_SLOW_COLOR" || echo "off")"
@@ -319,6 +345,15 @@ CONTEXT_FORMAT=$CT_CONTEXT_FORMAT
 
 # none dim gray red green yellow blue magenta cyan. NO_COLOR also disables it.
 COLOR=$CT_COLOR
+
+# The marker's layout. %time %elapsed %tool %date are the parts, and a {...}
+# group disappears when every part inside it is empty.
+MARKER=$CT_MARKER_TEMPLATE
+
+# Colour of each part. Empty follows COLOR. A slow turn still uses SLOW_COLOR.
+TIME_COLOR=$CT_TIME_COLOR
+ELAPSED_COLOR=$CT_ELAPSED_COLOR
+TOOL_COLOR=$CT_TOOL_COLOR
 
 # Show how long the turn took, e.g. [14:03 +2m14s].
 ELAPSED=$CT_ELAPSED
@@ -474,6 +509,7 @@ wizard() {
   echo
 
   local answer
+  local tpl wp_time wp_el wp_tool
 
   # Enabled
   echo "Master switch for the whole plugin. Off silences every hook without"
@@ -563,6 +599,28 @@ wizard() {
   done
   echo
 
+  # The marker's layout. Shown as three real renderings rather than described,
+  # because a template is much easier to recognise than to read.
+  echo "The marker's layout is a template. %time %elapsed %tool %date are the"
+  echo "parts, and a {...} group disappears when every part inside it is empty."
+  echo
+  for tpl in '[{%date }%time{ %elapsed}{ · %tool}]' '%time' '%time{ → %elapsed}'; do
+    ct_paint_part "$CT_TIME_COLOR"    "$(ct_now "$CT_DISPLAY_FORMAT")" "$CT_COLOR"; wp_time="$_CT_PART"
+    ct_paint_part "$CT_ELAPSED_COLOR" "+2m14s"                          "$CT_COLOR"; wp_el="$_CT_PART"
+    ct_paint_part "$CT_TOOL_COLOR"    "Bash 1m58s"                      "$CT_COLOR"; wp_tool="$_CT_PART"
+    ct_render_marker "$tpl" "$wp_time" "$wp_el" "$wp_tool" ""
+    printf '  %-38s %s%s%s\n' "$tpl" \
+      "$(ct_color_start "$CT_COLOR")" "$CT_MARKER" "$(ct_color_end "$CT_COLOR")"
+  done
+  while :; do
+    answer="$(ask "  Marker" "$CT_MARKER_TEMPLATE")"
+    if valid_marker "$answer"; then CT_MARKER_TEMPLATE="$answer"; break; fi
+    # Input is exhausted, so re-asking would spin forever on a value that can
+    # never become valid. Every other question here breaks the same way.
+    [ -n "${CT_ASK_EOF:-}" ] && break
+  done
+  echo
+
   # Model-facing context
   echo "Claude can also be told the local time each prompt was sent, so it can"
   echo "reason about when things happened. This costs a few tokens per message."
@@ -596,6 +654,7 @@ main() {
   local set_tz="" set_display="" set_context="" set_color="" set_elapsed="" set_inject="" set_rollover=""
   local set_slow="" set_slowcolor="" set_idle="" set_summary="" set_subagents="" set_tooltiming=""
   local set_history="" set_historylimit="" set_enabled=""
+  local set_marker="" set_timecolor="" set_elapsedcolor="" set_toolcolor=""
 
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -605,6 +664,10 @@ main() {
       --display=*)        set_display="${1#*=}"; interactive=0 ;;
       --context=*)        set_context="${1#*=}"; interactive=0 ;;
       --color=*)          set_color="${1#*=}";   interactive=0 ;;
+      --marker=*)         set_marker="${1#*=}";  interactive=0 ;;
+      --time-color=*)     set_timecolor="${1#*=}";    interactive=0 ;;
+      --elapsed-color=*)  set_elapsedcolor="${1#*=}"; interactive=0 ;;
+      --tool-color=*)     set_toolcolor="${1#*=}";    interactive=0 ;;
       --elapsed=*)        set_elapsed="${1#*=}"; interactive=0 ;;
       --enabled=*)        set_enabled="${1#*=}";  interactive=0 ;;
       --date-rollover=*)  set_rollover="${1#*=}"; interactive=0 ;;
@@ -642,6 +705,10 @@ main() {
   [ -n "$set_display" ] && CT_DISPLAY_FORMAT="$set_display"
   [ -n "$set_context" ] && CT_CONTEXT_FORMAT="$set_context"
   if [ -n "$set_color" ];   then valid_color "$set_color" || exit 2; CT_COLOR="$set_color"; fi
+  if [ -n "$set_marker" ]; then valid_marker "$set_marker" || exit 2; CT_MARKER_TEMPLATE="$set_marker"; fi
+  if [ -n "$set_timecolor" ]; then valid_part_color "$set_timecolor" || exit 2; CT_TIME_COLOR="$set_timecolor"; fi
+  if [ -n "$set_elapsedcolor" ]; then valid_part_color "$set_elapsedcolor" || exit 2; CT_ELAPSED_COLOR="$set_elapsedcolor"; fi
+  if [ -n "$set_toolcolor" ]; then valid_part_color "$set_toolcolor" || exit 2; CT_TOOL_COLOR="$set_toolcolor"; fi
   if [ -n "$set_elapsed" ]; then valid_onoff ELAPSED "$set_elapsed" || exit 2; CT_ELAPSED="$set_elapsed"; fi
   if [ -n "$set_inject" ];  then valid_bool INJECT_CONTEXT "$set_inject" || exit 2; CT_INJECT_CONTEXT="$set_inject"; fi
   if [ -n "$set_rollover" ]; then valid_onoff DATE_ROLLOVER "$set_rollover" || exit 2; CT_DATE_ROLLOVER="$set_rollover"; fi
