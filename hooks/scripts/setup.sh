@@ -349,6 +349,25 @@ doctor() {
   fi
 }
 
+# Render one value for the config file.
+#
+# The parser trims whitespace and unwraps a matching pair of quotes, which
+# makes quoting the escape mechanism for a value whose own edges matter. A
+# marker ending in a space is the case that needs it: it is legal, meaningful,
+# and used to come back one character shorter than it went in.
+conf_value() {
+  local v="${1:-}"
+  case "$v" in
+    ''|*[!\ ]*)
+      case "$v" in
+        ' '*|*' '|\"*|\'*) printf "'%s'" "$v" ;;
+        *)                 printf '%s' "$v" ;;
+      esac
+      ;;
+    *) printf "'%s'" "$v" ;;
+  esac
+}
+
 write_config() {
   local file dir
   file="$(ct_config_path)"
@@ -366,15 +385,15 @@ ENABLED=$CT_ENABLED
 TZ=$CT_TZ
 
 # 24h | short | 12h | iso, or any strftime string (anything with a % in it).
-DISPLAY_FORMAT=$CT_DISPLAY_FORMAT
-CONTEXT_FORMAT=$CT_CONTEXT_FORMAT
+DISPLAY_FORMAT=$(conf_value "$CT_DISPLAY_FORMAT")
+CONTEXT_FORMAT=$(conf_value "$CT_CONTEXT_FORMAT")
 
 # none dim gray red green yellow blue magenta cyan. NO_COLOR also disables it.
 COLOR=$CT_COLOR
 
 # The marker's layout. %time %elapsed %tool %date are the parts, and a {...}
 # group disappears when every part inside it is empty.
-MARKER=$CT_MARKER_TEMPLATE
+MARKER=$(conf_value "$CT_MARKER_TEMPLATE")
 
 # Colour of each part. Empty follows COLOR. A slow turn still uses SLOW_COLOR.
 TIME_COLOR=$CT_TIME_COLOR
@@ -494,7 +513,7 @@ write_project_config() {
       TZ)                                    [ "$value" = "local" ]    && value="" ;;
       TIME_COLOR|ELAPSED_COLOR|TOOL_COLOR)   [ "$value" = "inherit" ]  && value="" ;;
     esac
-    out="${out}${key}=${value}
+    out="${out}${key}=$(conf_value "$value")
 "
   done
 
@@ -900,7 +919,14 @@ main() {
   if [ -n "$set_subagents" ]; then valid_onoff SUBAGENTS "$set_subagents" || exit 2; CT_SUBAGENTS="$set_subagents"; fi
   if [ -n "$set_tooltiming" ]; then valid_onoff TOOL_TIMING "$set_tooltiming" || exit 2; CT_TOOL_TIMING="$set_tooltiming"; fi
   if [ -n "$set_history" ]; then valid_onoff HISTORY "$set_history" || exit 2; CT_HISTORY="$set_history"; fi
-  if [ -n "$set_historylimit" ]; then valid_seconds HISTORY_LIMIT "$set_historylimit" || exit 2; CT_HISTORY_LIMIT="$set_historylimit"; fi
+  if [ -n "$set_historylimit" ]; then
+    if ! ct_is_history_limit "$set_historylimit"; then
+      echo "--history-limit must be a whole number of 1 or more, got '$set_historylimit'." >&2
+      echo "To keep no history at all, use --history=off." >&2
+      exit 2
+    fi
+    CT_HISTORY_LIMIT="$set_historylimit"
+  fi
   if [ -n "$set_enabled" ]; then valid_onoff ENABLED "$set_enabled" || exit 2; CT_ENABLED="$set_enabled"; fi
 
   if [ "$project_scope" = "1" ]; then

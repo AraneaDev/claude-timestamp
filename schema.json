@@ -195,9 +195,10 @@
     },
     "HISTORY_LIMIT": {
       "default": "200",
-      "validator": "ct_is_seconds",
+      "validator": "ct_is_history_limit",
       "type": "count",
-      "describes": "how many recorded sessions to keep"
+      "minimum": 1,
+      "describes": "how many recorded sessions to keep; 1 or more, and HISTORY=off is how you keep none"
     },
     "INJECT_CONTEXT": {
       "default": "true",

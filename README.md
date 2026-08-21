@@ -6,7 +6,7 @@
 
 [![Release](https://img.shields.io/github/v/release/AraneaDev/claude-timestamp)](https://github.com/AraneaDev/claude-timestamp/releases)
 [![CI](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml/badge.svg)](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-574%20passing-2b8a3e)](tests/run.sh)
+[![Tests](https://img.shields.io/badge/tests-588%20passing-2b8a3e)](tests/run.sh)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-364fc7)](#platform-notes)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
@@ -261,7 +261,7 @@ cannot run anything.
 | `SUBAGENTS` | `on` | Stamp subagent messages as well |
 | `TOOL_TIMING` | `off` | Record what each tool call cost and name the slowest |
 | `HISTORY` | `on` | Record each finished session, for `/timestamps` and `--stats` |
-| `HISTORY_LIMIT` | `200` | How many recorded sessions to keep |
+| `HISTORY_LIMIT` | `200` | How many recorded sessions to keep, 1 or more; `HISTORY=off` keeps none |
 
 Colour behaviour, including when it is suppressed and how `NO_COLOR` and
 `FORCE_COLOR` override that, is covered above under **Colour, and where it
@@ -390,7 +390,7 @@ no database.
 ## Development
 
 ```bash
-bash tests/run.sh                                    # 574 assertions, no framework
+bash tests/run.sh                                    # 588 assertions, no framework
 shellcheck -S style -e SC1091 hooks/scripts/**/*.sh  # clean
 bash tools/check-docs.sh                             # README against the code
 ```

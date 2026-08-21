@@ -1014,6 +1014,38 @@ bash "$SCRIPTS/setup.sh" --marker='%time' >/dev/null
 ct_load_config
 is "setup: writes a marker template" "%time" "$CT_MARKER_TEMPLATE"
 
+# The parser trims whitespace off both ends of a value and then unwraps a
+# matching pair of quotes. A marker's own edges can be meaningful, so a value
+# that needs either of those preserved must be written quoted, or it comes
+# back changed. Ordinary values (no edge space, no leading quote) must still
+# write bare, so an existing config file is not churned on the next write.
+fresh
+bash "$SCRIPTS/setup.sh" --marker='%time ' >/dev/null
+ct_load_config
+is "config: a trailing space in a marker survives the round trip" '%time ' "$CT_MARKER_TEMPLATE"
+is "config: a marker needing it is written quoted" "1" \
+  "$(grep -c "^MARKER='%time '\$" "$CLAUDE_TIMESTAMP_CONFIG")"
+
+fresh
+bash "$SCRIPTS/setup.sh" --display=' %H:%M' >/dev/null
+ct_load_config
+is "config: a leading space in a format string survives the round trip" ' %H:%M' "$CT_DISPLAY_FORMAT"
+
+fresh
+bash "$SCRIPTS/setup.sh" --marker='"%time"' >/dev/null
+ct_load_config
+is "config: a marker containing quote characters survives the round trip" '"%time"' "$CT_MARKER_TEMPLATE"
+
+fresh
+bash "$SCRIPTS/setup.sh" --marker="'twas the night" >/dev/null
+ct_load_config
+is "config: a marker starting with a quote character survives the round trip" "'twas the night" "$CT_MARKER_TEMPLATE"
+
+fresh
+bash "$SCRIPTS/setup.sh" --color=cyan >/dev/null
+is "config: an unremarkable marker still writes unquoted" "1" \
+  "$(grep -c '^MARKER=\[' "$CLAUDE_TIMESTAMP_CONFIG")"
+
 fresh
 bash "$SCRIPTS/setup.sh" --time-color=cyan --elapsed-color=green --tool-color=gray >/dev/null
 ct_load_config
@@ -1800,6 +1832,14 @@ rmdir "$CLAUDE_TIMESTAMP_HISTORY.lock" 2>/dev/null || true
 fresh 'HISTORY_LIMIT=nonsense'
 is "a nonsense limit falls back" "200" "$CT_HISTORY_LIMIT"
 
+# HISTORY_LIMIT=0 reads as "keep none" by analogy with SLOW_AFTER and
+# IDLE_AFTER, both of which document 0 as disabling -- but the real off switch
+# is HISTORY=off, and 0 here used to be silently clamped up to 1. A hand-
+# edited config that says 0 must fall back to the default like any other
+# unusable value, not be quietly reinterpreted as 1.
+fresh 'HISTORY_LIMIT=0'
+is "a history limit of 0 falls back to the default" "200" "$CT_HISTORY_LIMIT"
+
 # Every rendered time honours a pinned zone. History was the exception, which
 # put the recorded date a day out from every timestamp the user ever saw, and
 # --stats renders exactly the date half of it.
@@ -2088,6 +2128,15 @@ is "--history-limit is accepted" "50"  "$CT_HISTORY_LIMIT"
 refutes "a non on/off history is refused" bash "$SCRIPTS/setup.sh" --history=sometimes
 refutes "a non-numeric limit is refused"  bash "$SCRIPTS/setup.sh" --history-limit=lots
 
+# 0 reads as "none" by analogy with SLOW_AFTER and IDLE_AFTER, and means one.
+refutes "history limit: 0 is refused" ct_is_history_limit "0"
+asserts "history limit: 1 is accepted" ct_is_history_limit "1"
+asserts "history limit: 200 is accepted" ct_is_history_limit "200"
+out="$( CLAUDE_TIMESTAMP_CONFIG="$WORK/hl.conf" \
+        bash "$SCRIPTS/setup.sh" --history-limit=0 2>&1 )" && rc=0 || rc=$?
+is "history limit: setup refuses 0" "2" "$rc"
+contains "history limit: and points at the real off switch" "--history=off" "$out"
+
 echo
 echo "project configuration"
 
@@ -2200,6 +2249,23 @@ marker_read_back="$(
   printf '%s' "$CT_MARKER_TEMPLATE"
 )"
 is "a project marker is read back by the loader" "%time" "$marker_read_back"
+
+# write_project_config has the same unquoted-value defect write_config has: a
+# marker's leading or trailing space is meaningful, and used to come back
+# shorter than it went in through this writer too.
+rm -rf "$PROJ/writable-markerspace"; mkdir -p "$PROJ/writable-markerspace"
+( cd "$PROJ/writable-markerspace" && unset CLAUDE_TIMESTAMP_CONFIG && HOME="$PROJ/home" \
+    bash "$SCRIPTS/setup.sh" --project --marker='%time ' >/dev/null 2>&1 )
+written_markerspace="$PROJ/writable-markerspace/.claude/claude-timestamp.conf"
+is "--project writes a trailing-space marker quoted" "1" \
+  "$(grep -c "^MARKER='%time '\$" "$written_markerspace")"
+markerspace_read_back="$(
+  unset CLAUDE_TIMESTAMP_CONFIG
+  HOME="$PROJ/home"
+  ct_load_config "$PROJ/writable-markerspace"
+  printf '%s' "$CT_MARKER_TEMPLATE"
+)"
+is "a project marker's trailing space survives the round trip" "%time " "$markerspace_read_back"
 
 rm -rf "$PROJ/writable-timecolor"; mkdir -p "$PROJ/writable-timecolor"
 ( cd "$PROJ/writable-timecolor" && unset CLAUDE_TIMESTAMP_CONFIG && HOME="$PROJ/home" \

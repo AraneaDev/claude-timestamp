@@ -179,6 +179,11 @@ ct_is_valid_color()  { case "${1:-}" in none|off|dim|gray|grey|red|green|yellow|
 ct_has_control()     { case "${1:-}" in *[[:cntrl:]]*) return 0 ;; *) return 1 ;; esac; }
 ct_is_valid_format() { ct_has_control "${1:-}" && return 1; case "${1:-}" in *%*|24h|short|12h|iso) return 0 ;; *) return 1 ;; esac; }
 ct_is_seconds()      { case "${1:-}" in ''|*[!0-9]*) return 1 ;; *) return 0 ;; esac; }
+
+# A retention count, which unlike SLOW_AFTER and IDLE_AFTER has no "0 disables"
+# reading: keeping zero sessions is what HISTORY=off means, and 0 here used to
+# be clamped up to 1, quietly doing the opposite of what it looked like.
+ct_is_history_limit() { ct_is_seconds "${1:-}" && [ "${1:-0}" -ge 1 ]; }
 ct_is_onoff()        { case "${1:-}" in on|off) return 0 ;; *) return 1 ;; esac; }
 ct_is_bool()         { case "${1:-}" in true|false) return 0 ;; *) return 1 ;; esac; }
 
@@ -240,7 +245,7 @@ ct_validate_config() {
   _ct_require SUBAGENTS      ct_is_onoff        on
   _ct_require TOOL_TIMING    ct_is_onoff        off
   _ct_require HISTORY        ct_is_onoff        on
-  _ct_require HISTORY_LIMIT  ct_is_seconds      200
+  _ct_require HISTORY_LIMIT  ct_is_history_limit 200
   _ct_require INJECT_CONTEXT ct_is_bool         true
 }
 
