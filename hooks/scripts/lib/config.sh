@@ -171,7 +171,13 @@ ct_load_config() {
 # and the setup script need the same answer to "is this a usable value", and
 # two copies of that question drift apart.
 ct_is_valid_color()  { case "${1:-}" in none|off|dim|gray|grey|red|green|yellow|blue|magenta|cyan) return 0 ;; *) return 1 ;; esac; }
-ct_is_valid_format() { case "${1:-}" in *%*|24h|short|12h|iso) return 0 ;; *) return 1 ;; esac; }
+# A control character is rejected everywhere a value can reach the config file,
+# because write_config interpolates values into KEY=value with no escaping: a
+# newline writes a second line the parser reads back as a real setting, and one
+# that lands after the key it came from wins. Rejecting at the validator keeps
+# the check in the single place the loader and setup.sh already share.
+ct_has_control()     { case "${1:-}" in *[[:cntrl:]]*) return 0 ;; *) return 1 ;; esac; }
+ct_is_valid_format() { ct_has_control "${1:-}" && return 1; case "${1:-}" in *%*|24h|short|12h|iso) return 0 ;; *) return 1 ;; esac; }
 ct_is_seconds()      { case "${1:-}" in ''|*[!0-9]*) return 1 ;; *) return 0 ;; esac; }
 ct_is_onoff()        { case "${1:-}" in on|off) return 0 ;; *) return 1 ;; esac; }
 ct_is_bool()         { case "${1:-}" in true|false) return 0 ;; *) return 1 ;; esac; }
@@ -580,6 +586,7 @@ ct_render_marker() {
 # renderer.
 ct_is_valid_marker() {
   local s="${1:-}"
+  ct_has_control "$s" && return 1
   local i=0 n depth ch rc
   n=${#s}; depth=0
   while [ "$i" -lt "$n" ]; do

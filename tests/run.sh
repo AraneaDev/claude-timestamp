@@ -1056,6 +1056,15 @@ asserts "setup: a bare --marker= is accepted, not rejected" \
 ct_load_config
 is "setup: a bare --marker= clears the template" "" "$CT_MARKER_TEMPLATE"
 
+# End to end: a newline embedded in the flag value must be refused rather than
+# written -- otherwise it lands as a second config line the loader reads back
+# as a real setting (see "marker: a newline is rejected" above).
+out="$( CLAUDE_TIMESTAMP_CONFIG="$WORK/inject.conf" \
+        bash "$SCRIPTS/setup.sh" --marker="$(printf 'x\nENABLED=off')" 2>&1 )" && rc=0 || rc=$?
+is "setup: refuses a marker containing a newline" "2" "$rc"
+is "setup: and writes nothing" "0" \
+   "$( [ -e "$WORK/inject.conf" ] && wc -l < "$WORK/inject.conf" | tr -d ' ' || echo 0 )"
+
 echo
 echo "tool timing"
 
@@ -1265,6 +1274,19 @@ refutes "invalid: unknown placeholder"  ct_is_valid_marker '%elapsd'
 refutes "invalid: a placeholder with a suffix" ct_is_valid_marker '%timex'
 refutes "invalid: unbalanced open brace"  ct_is_valid_marker '[%time{ %elapsed]'
 refutes "invalid: unbalanced close brace" ct_is_valid_marker '[%time} %elapsed]'
+
+# write_config interpolates a value into KEY=value with no escaping, so a
+# newline in a marker or format flag writes a second config line that the
+# parser reads back as a real setting -- and because it lands after the key
+# it came from, it wins. --marker=$'x\nENABLED=off' reproduced this: setup.sh
+# reported success and silently disabled the whole plugin. Rejecting a
+# control character here closes the flag path and any other path a value
+# could reach the config file through.
+refutes "marker: a newline is rejected"  ct_is_valid_marker "$(printf 'x\nENABLED=off')"
+refutes "marker: a carriage return too"  ct_is_valid_marker "$(printf 'x\ry')"
+refutes "format: a newline is rejected"  ct_is_valid_format "$(printf '%%H\nENABLED=off')"
+asserts "marker: ordinary text still passes" ct_is_valid_marker '[{%date }%time{ %elapsed}]'
+asserts "format: a strftime string still passes" ct_is_valid_format '%H:%M'
 
 # The suite itself runs under set -uo pipefail with no -e, and every marker
 # assertion above sits inside $(m ...), which suppresses -e for the callee's
