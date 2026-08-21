@@ -264,7 +264,7 @@ doctor() {
   echo "  display format  $CT_DISPLAY_FORMAT -> $(ct_now "$CT_DISPLAY_FORMAT")"
   echo "  context format  $CT_CONTEXT_FORMAT -> $(ct_now "$CT_CONTEXT_FORMAT") $(ct_zone)"
   echo "  color           $CT_COLOR$([ -n "${NO_COLOR:-}" ] && echo " (overridden: NO_COLOR is set)")"
-  echo "  entrypoint      ${CLAUDE_CODE_ENTRYPOINT:-<unset>}$(case "${CLAUDE_CODE_ENTRYPOINT-cli}" in cli) ;; *) [ -n "${FORCE_COLOR:-}" ] || echo " (colour suppressed: not a terminal session)" ;; esac)"
+  echo "  entrypoint      ${CLAUDE_CODE_ENTRYPOINT:-<unset>}$(case "${CLAUDE_CODE_ENTRYPOINT-cli}" in cli) ;; *) { [ -n "${NO_COLOR:-}" ] || [ -n "${FORCE_COLOR:-}" ]; } || echo " (colour suppressed: not a terminal session)" ;; esac)"
   echo "  elapsed         $CT_ELAPSED"
   echo "  slow after      $([ "$CT_SLOW_AFTER" -gt 0 ] 2>/dev/null && echo "${CT_SLOW_AFTER}s in $CT_SLOW_COLOR" || echo "off")"
   echo "  idle marker     $([ "$CT_IDLE_AFTER" -gt 0 ] 2>/dev/null && echo "after ${CT_IDLE_AFTER}s" || echo "off")"

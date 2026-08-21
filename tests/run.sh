@@ -409,6 +409,20 @@ asserts "paint part returns 0 with an empty base"  ct_paint_part cyan "x" ""
   && pass "unknown future entrypoint: paint part gets no colour" \
   || fail "unknown future entrypoint: paint part gets no colour" "13:22" "$_CT_PART"
 
+# Set-but-empty is not the same signal as unset: something touched the
+# variable and produced a non-cli result, so it must fall through to no
+# colour rather than being read as "never set" and defaulting to cli. This is
+# exactly what distinguishes the guard's single-dash expansion
+# (${CLAUDE_CODE_ENTRYPOINT-cli}) from :-, which would collapse the two cases.
+( CLAUDE_CODE_ENTRYPOINT=""
+  ct_color_seq dim; [ -z "$_CT_SEQ" ] ) \
+  && pass "entrypoint set to empty string: color seq gets no colour" \
+  || fail "entrypoint set to empty string: color seq gets no colour" "empty" "$_CT_SEQ"
+( CLAUDE_CODE_ENTRYPOINT=""
+  ct_paint_part dim "13:22" ""; [ "$_CT_PART" = "13:22" ] ) \
+  && pass "entrypoint set to empty string: paint part gets no colour" \
+  || fail "entrypoint set to empty string: paint part gets no colour" "13:22" "$_CT_PART"
+
 ( NO_COLOR=1 CLAUDE_CODE_ENTRYPOINT=cli
   ct_color_seq dim; [ -z "$_CT_SEQ" ] ) \
   && pass "NO_COLOR beats a cli entrypoint: color seq gets no colour" \

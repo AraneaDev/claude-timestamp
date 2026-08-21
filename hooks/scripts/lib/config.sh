@@ -316,6 +316,12 @@ ct_color_seq() {
     # that do not exist yet (claude-vscode, claude-desktop, sdk-*, bench,
     # remote, ...), gets plain text -- colour missing where it might have
     # worked is the safe failure, not escape codes on every message.
+    # A single dash, not :-: unset and set-but-empty are different signals and
+    # must not be collapsed. Unset is the backward-compatibility carve-out (an
+    # older Claude Code, or setup.sh run directly, never set this variable at
+    # all). A set-but-empty value means something deliberately assigned it and
+    # produced a non-cli result, so it falls through to "*" like any other
+    # non-cli value rather than being treated as unset.
     case "${CLAUDE_CODE_ENTRYPOINT-cli}" in
       cli) : ;;
       *) return 0 ;;
