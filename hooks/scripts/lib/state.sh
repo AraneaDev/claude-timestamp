@@ -115,6 +115,60 @@ ct_close_turn() {
   return 0
 }
 
+# Open a turn.
+#
+# Everything here is unconditional. The counters are read by the summary and by
+# the history, which are configured independently, so gating the write on
+# either one silently breaks the other -- which is exactly what HISTORY=on with
+# SUMMARY=off used to do: nothing was ever recorded, and --stats blamed HISTORY
+# for it.
+ct_turn_open() {
+  local sid="${1:-}" now="${2:-0}" base
+  base="$(ct_state_file "$sid")" || return 0
+  case "$now" in ''|*[!0-9]*) return 0 ;; esac
+  mkdir -p "$(ct_state_dir)" 2>/dev/null || return 0
+
+  printf '%s' "$now" > "$base"
+  rm -f "${base}.closed" 2>/dev/null || true
+  [ -r "${base}.start" ] || printf '%s' "$now" > "${base}.start"
+  printf '%s' "$(( $(ct_read_counter "${base}.turns") + 1 ))" > "${base}.turns"
+  return 0
+}
+
+# Close a turn, by session id rather than by path, so no caller has to know the
+# layout. Idempotent: a hook can cause the model to run again, so a turn seeing
+# two closes is a case to survive rather than one to assume away.
+ct_turn_close() {
+  local sid="${1:-}" ended="${2:-0}" base
+  base="$(ct_state_file "$sid")" || return 0
+  ct_close_turn "$base" "$ended"
+  return 0
+}
+
+# The session's totals, clamped.
+#
+# Waiting and away are disjoint intervals by construction, so their sum cannot
+# exceed the elapsed total. A clock that moved backwards can still produce a
+# figure that does, and a summary reporting more away time than session is
+# worse than one that is slightly short, so the away figure absorbs it.
+ct_session_totals() {
+  local sid="${1:-}" base now elapsed
+  _CT_START=0; _CT_TURNS=0; _CT_WAIT=0; _CT_IDLE=0
+  base="$(ct_state_file "$sid")" || return 0
+  _CT_START="$(ct_read_counter "${base}.start")"
+  _CT_TURNS="$(ct_read_counter "${base}.turns")"
+  _CT_WAIT="$(ct_read_counter "${base}.wait")"
+  _CT_IDLE="$(ct_read_counter "${base}.idle")"
+
+  [ "$_CT_START" -gt 0 ] || return 0
+  now="$(date +%s)"
+  elapsed=$(( now - _CT_START ))
+  [ "$elapsed" -lt 0 ] && elapsed=0
+  [ "$_CT_WAIT" -gt "$elapsed" ] && _CT_WAIT="$elapsed"
+  [ "$(( _CT_WAIT + _CT_IDLE ))" -gt "$elapsed" ] && _CT_IDLE=$(( elapsed - _CT_WAIT ))
+  return 0
+}
+
 # Remove every state file belonging to one session. Called at session end, so
 # the state directory does not accumulate a file set per session forever.
 ct_clear_state() {

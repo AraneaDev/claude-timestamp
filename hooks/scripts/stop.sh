@@ -42,11 +42,7 @@ ct_load_config "$cwd"
 
 # The master switch. Everything below writes state, and off means none of it.
 [ "$CT_ENABLED" = "on" ] || exit 0
-# Waiting is only ever read by the summary and the history it feeds, so with
-# the summary off there is nothing to accumulate it for.
-[ "$CT_SUMMARY" = "on" ] || exit 0
 
-state_file="$(ct_state_file "$session_id")" || exit 0
-ct_close_turn "$state_file" "$(date +%s)"
+ct_turn_close "$session_id" "$(date +%s)"
 
 exit 0

@@ -210,6 +210,7 @@ stats() {
       echo "History is switched off. Turn it on with --history=on."
     else
       echo "A session is recorded when it ends, so there will be one shortly."
+      echo "Only sessions with at least one prompt are recorded."
     fi
     return 0
   fi

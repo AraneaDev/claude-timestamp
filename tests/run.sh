@@ -790,11 +790,14 @@ if command -v jq >/dev/null 2>&1; then
   is "stop emits nothing" "" "$out"
   is_near "stop did its work while staying silent" 40 "$(ct_read_counter "$base.wait")" 2
 
-  # Switched off, the hook writes nothing at all.
+  # Switched off, the hook still records: the counter is shared with the
+  # history, and SUMMARY gates the report rather than the measurement. This
+  # assertion used to expect 0, which was the bug -- a session recorded with
+  # HISTORY=on and SUMMARY=off carried a waiting figure of zero.
   fresh 'SUMMARY=off'
   printf '%s' "$(( $(date +%s) - 40 ))" > "$base"
   printf '{"session_id":"acct","hook_event_name":"Stop"}' | bash "$SCRIPTS/stop.sh"
-  is "SUMMARY=off records no waiting" "0" "$(ct_read_counter "$base.wait")"
+  is_near "SUMMARY=off still records waiting" 40 "$(ct_read_counter "$base.wait")" 2
 
   fresh 'ENABLED=off'
   printf '%s' "$(( $(date +%s) - 40 ))" > "$base"
@@ -1582,6 +1585,31 @@ is "the newest rows are the ones kept" "6" "$(awk -F'\t' 'END{print $2}' "$CLAUD
 
 fresh 'HISTORY_LIMIT=nonsense'
 is "a nonsense limit falls back" "200" "$CT_HISTORY_LIMIT"
+
+# HISTORY and SUMMARY are separate settings, so switching the end-of-session
+# report off must not silently switch the running record off with it. The
+# counters they share are written unconditionally; only the reporting is gated.
+fresh 'SUMMARY=off' 'HISTORY=on'
+printf '{"session_id":"hist-nosummary","cwd":"%s"}' "$WORK" \
+  | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+printf '{"index":0,"session_id":"hist-nosummary","cwd":"%s","delta":"x"}' "$WORK" \
+  | bash "$SCRIPTS/message-display.sh" >/dev/null
+printf '{"session_id":"hist-nosummary","cwd":"%s"}' "$WORK" \
+  | bash "$SCRIPTS/stop.sh" >/dev/null
+printf '{"session_id":"hist-nosummary","cwd":"%s"}' "$WORK" \
+  | bash "$SCRIPTS/session-end.sh" >/dev/null
+is "history: recorded even with the summary off" "1" \
+   "$(wc -l < "$CLAUDE_TIMESTAMP_HISTORY" | tr -d ' ')"
+
+# And the summary itself still says nothing, because that is what SUMMARY=off
+# asks for. The two settings are independent in both directions.
+fresh 'SUMMARY=off' 'HISTORY=on'
+printf '{"session_id":"hist-quiet","cwd":"%s"}' "$WORK" \
+  | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+printf '{"session_id":"hist-quiet","cwd":"%s"}' "$WORK" \
+  | bash "$SCRIPTS/stop.sh" >/dev/null
+is "history: the summary stays silent with SUMMARY=off" "" \
+   "$(printf '{"session_id":"hist-quiet","cwd":"%s"}' "$WORK" | bash "$SCRIPTS/session-end.sh")"
 
 if command -v jq >/dev/null 2>&1; then
   echo

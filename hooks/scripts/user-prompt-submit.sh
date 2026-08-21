@@ -9,14 +9,15 @@
 # tokens.
 #
 # This hook also stamps the start of the turn, which message-display.sh reads
-# for the elapsed marker and stop.sh reads to close it; when CT_SUMMARY is on,
-# closes out a turn that was interrupted before Stop could fire; and clears
-# the per-turn tool log so ct_dominant_tool cannot blame a tool call from the
-# previous turn. All three happen even when context injection is off, because
-# injection is a separate setting: display-only users still want to see how
-# long a turn took and what made it slow. The away string below is the one
-# thing that does not: it exists only to tell the model, so it is gated on
-# INJECT_CONTEXT along with everything else that talks to it.
+# for the elapsed marker and stop.sh reads to close it; closes out a turn that
+# was interrupted before Stop could fire; and clears the per-turn tool log so
+# ct_dominant_tool cannot blame a tool call from the previous turn. All three
+# happen unconditionally and even when context injection is off: the counters
+# feed SUMMARY and HISTORY, which are configured independently, so display-only
+# users still want to see how long a turn took and what made it slow. The away
+# string below is the one thing that does not: it exists only to tell the
+# model, so it is gated on INJECT_CONTEXT along with everything else that talks
+# to it.
 #
 # Times come from `date`, never jq's `now|strftime`, which always renders UTC.
 set -euo pipefail
@@ -41,33 +42,16 @@ ct_load_config "$cwd"
 # to the model, and off means none of it.
 [ "$CT_ENABLED" = "on" ] || exit 0
 
-# The turn start is recorded unconditionally: the elapsed marker and the
-# end-of-session summary both read it, and they are configured independently,
-# so gating the write on either one would silently break the other.
 if state_file="$(ct_state_file "$session_id")"; then
-  mkdir -p "$(ct_state_dir)"
   now="$(date +%s)"
 
   # A turn still open when the next prompt arrives ended without a Stop, which
   # is what an interrupt looks like from here. It contributes the part of
   # itself that was observed: up to the last message drawn on screen. This has
-  # to happen before the new start is written, or the evidence is gone.
-  if [ "$CT_SUMMARY" = "on" ]; then
-    ct_close_turn "$state_file" "$(ct_read_counter "${state_file}.last")"
-  fi
+  # to happen before the new turn is opened, or the evidence is gone.
+  ct_turn_close "$session_id" "$(ct_read_counter "${state_file}.last")"
 
-  printf '%s' "$now" > "$state_file"
-  # The new turn is open, whatever the previous one left behind.
-  rm -f "${state_file}.closed" 2>/dev/null || true
-  # First prompt of the session marks its beginning.
-  [ -r "${state_file}.start" ] || printf '%s' "$now" > "${state_file}.start"
-
-  if [ "$CT_SUMMARY" = "on" ]; then
-    # A turn is a prompt, not an assistant message: a single prompt can produce
-    # several messages as tools run, and counting those reported one prompt as
-    # several turns.
-    printf '%s' "$(( $(ct_read_counter "${state_file}.turns") + 1 ))" > "${state_file}.turns"
-  fi
+  ct_turn_open "$session_id" "$now"
 
   # Cleared unconditionally rather than under TOOL_TIMING, so switching tool
   # timing on mid-session cannot inherit a log from before it was on.
