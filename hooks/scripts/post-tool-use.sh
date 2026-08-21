@@ -24,7 +24,9 @@
 # the executable bit surviving clones, zips, or Windows checkouts.
 set -euo pipefail
 
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/config.sh"
+CT_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib"
+source "$CT_LIB/config.sh"
+source "$CT_LIB/state.sh"
 ct_load_config
 
 # The master switch. Everything below writes state, and off means none of it.

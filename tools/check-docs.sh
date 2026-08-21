@@ -106,6 +106,8 @@ done < <(sed -n '/^ct_load_config() {/,/^}/{s/^  CT_\([A-Z_]*\)="\([^"]*\)".*/\1
 # means a validator that changes shape cannot quietly pass this check.
 # shellcheck source=/dev/null
 . hooks/scripts/lib/config.sh
+# shellcheck source=/dev/null
+. hooks/scripts/lib/state.sh
 values_ok=1
 while IFS="$(printf '\t')" read -r key validator value; do
   [ -n "$key" ] || continue

@@ -24,7 +24,9 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 0
 fi
 
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/config.sh"
+CT_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib"
+source "$CT_LIB/config.sh"
+source "$CT_LIB/state.sh"
 
 cwd="$(cat | jq -r '.cwd // empty' 2>/dev/null || true)"
 

@@ -61,7 +61,9 @@ IFS=$'\x1f' read -r index session_id agent_id cwd <<< "$(printf '%s' "$input" \
   | jq -r '[(.index // 0 | tostring), (.session_id // "-"), (.agent_id // ""), (.cwd // "")] | join("\u001f")')"
 [ "$index" = "0" ] || exit 0
 
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/config.sh"
+CT_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib"
+source "$CT_LIB/config.sh"
+source "$CT_LIB/state.sh"
 ct_load_config "$cwd"
 
 # The master switch. Everything below draws on screen, writes state, or talks

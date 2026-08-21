@@ -21,7 +21,9 @@ set -euo pipefail
 # prompt reconciles it from the last message drawn.
 command -v jq >/dev/null 2>&1 || exit 0
 
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/config.sh"
+CT_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib"
+source "$CT_LIB/config.sh"
+source "$CT_LIB/state.sh"
 
 input="$(cat)"
 # The payload carries the directory the conversation is about, which is what

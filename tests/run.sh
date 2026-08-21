@@ -105,6 +105,7 @@ export CLAUDE_TIMESTAMP_HISTORY="$WORK/history.tsv"
 export CLAUDE_TIMESTAMP_FACTS="$WORK/facts.json"
 
 source "$SCRIPTS/lib/config.sh"
+source "$SCRIPTS/lib/state.sh"
 
 echo
 echo "config parsing"

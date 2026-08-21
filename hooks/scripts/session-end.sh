@@ -17,7 +17,9 @@ set -euo pipefail
 
 command -v jq >/dev/null 2>&1 || exit 0
 
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/config.sh"
+CT_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib"
+source "$CT_LIB/config.sh"
+source "$CT_LIB/state.sh"
 
 input="$(cat)"
 IFS=$'\x1f' read -r session_id cwd <<< "$(printf '%s' "$input" \
