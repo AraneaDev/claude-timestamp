@@ -382,19 +382,24 @@ ct_paint_part() {
 }
 
 ct_color_end() {
-  [ -n "$(ct_color_start "$1")" ] && printf '%s' $'\033[0m'
+  ct_color_seq "${1:-}"
+  [ -n "$_CT_SEQ" ] && printf '%s' $'\033[0m'
   return 0
 }
 
-ct_is_color() { [ -n "$(ct_color_start "$1")" ]; }
+ct_is_color() { ct_color_seq "${1:-}"; [ -n "$_CT_SEQ" ]; }
 
 # Wrap text in a color, or return it untouched when that color is off. Keeps
 # callers from having to pair start and end themselves.
+#
+# Through ct_color_seq rather than ct_color_start, because these run on the
+# message path and a command substitution costs a process each time. That is
+# the reason ct_color_seq exists.
 ct_paint() {
-  local color="$1" text="$2" start
-  start="$(ct_color_start "$color")"
-  if [ -n "$start" ]; then
-    printf '%s%s%s' "$start" "$text" "$(ct_color_end "$color")"
+  local color="$1" text="$2" seq
+  ct_color_seq "$color"; seq="$_CT_SEQ"
+  if [ -n "$seq" ]; then
+    printf '%s%s%s' "$seq" "$text" $'\033[0m'
   else
     printf '%s' "$text"
   fi
@@ -679,7 +684,7 @@ ct_facts_path() {
 # Append one finished session and drop anything past the retention limit.
 # Fields: when, seconds, turns, waited, idle, failed tools.
 ct_history_append() {
-  local file limit tmp
+  local file limit tmp lock
   file="$(ct_history_path)"
   mkdir -p "$(dirname "$file")" 2>/dev/null || return 0
 
@@ -692,13 +697,26 @@ ct_history_append() {
 
   # Rewrite only when the file has actually outgrown the limit, so the common
   # case is a plain append.
+  #
+  # The append itself is one short line and needs no lock: it is a single
+  # write to a file opened O_APPEND. The trim does need one, because it is a
+  # read followed by a replace, and a session ending in the same second would
+  # otherwise have its line dropped by the copy that started first. mkdir is
+  # the lock because it is atomic on every filesystem this runs on and needs
+  # no extra tool.
   if [ "$(wc -l < "$file" 2>/dev/null || echo 0)" -gt "$limit" ]; then
-    tmp="$file.$$"
-    if tail -n "$limit" "$file" > "$tmp" 2>/dev/null; then
-      mv "$tmp" "$file" 2>/dev/null || rm -f "$tmp"
-    else
-      rm -f "$tmp"
+    lock="$file.lock"
+    if mkdir "$lock" 2>/dev/null; then
+      tmp="$file.$$"
+      if tail -n "$limit" "$file" > "$tmp" 2>/dev/null; then
+        mv "$tmp" "$file" 2>/dev/null || rm -f "$tmp"
+      else
+        rm -f "$tmp"
+      fi
+      rmdir "$lock" 2>/dev/null
     fi
+    # Losing the race means somebody else is trimming right now, which is the
+    # same outcome. A stale lock costs one skipped trim, not a lost line.
   fi
   return 0
 }

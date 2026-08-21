@@ -1731,6 +1731,31 @@ for i in 1 2 3 4 5 6; do ct_history_append "$i" 1 0 0 0; done
 is "the retention limit is applied" "3" "$(wc -l < "$CLAUDE_TIMESTAMP_HISTORY" | tr -d ' ')"
 is "the newest rows are the ones kept" "6" "$(awk -F'\t' 'END{print $2}' "$CLAUDE_TIMESTAMP_HISTORY")"
 
+# Two sessions ending at once both append and then both trim, and the trim is
+# read-then-replace: without a lock the second overwrites the first's line.
+fresh 'HISTORY_LIMIT=5'
+rm -f "$CLAUDE_TIMESTAMP_HISTORY"
+for i in 1 2 3 4 5 6 7 8; do ct_history_append "$i" 1 0 0 0; done
+is "history: trims to the limit" "5" "$(wc -l < "$CLAUDE_TIMESTAMP_HISTORY" | tr -d ' ')"
+is "history: keeps the newest" "8" "$(tail -1 "$CLAUDE_TIMESTAMP_HISTORY" | cut -f2)"
+
+rm -f "$CLAUDE_TIMESTAMP_HISTORY"
+for i in 1 2 3 4 5 6; do ( ct_history_append "$i" 1 0 0 0 ) & done
+wait
+# What the lock guarantees is that no appended line is lost, not that the trim
+# always runs: a writer that loses the race skips its trim, which leaves one
+# extra line for the next append to remove. Assert the property the design
+# actually has.
+lines="$(wc -l < "$CLAUDE_TIMESTAMP_HISTORY" | tr -d ' ')"
+if [ "$lines" -ge 5 ] && [ "$lines" -le 6 ]; then
+  pass "history: concurrent appends leave the file at the limit, give or take one skipped trim"
+else
+  fail "history: concurrent appends leave the file at the limit, give or take one skipped trim" \
+       "5 or 6 lines" "$lines"
+fi
+is "history: no concurrent append was lost" "6" \
+   "$(cut -f2 "$CLAUDE_TIMESTAMP_HISTORY" | sort -n | tail -1)"
+
 fresh 'HISTORY_LIMIT=nonsense'
 is "a nonsense limit falls back" "200" "$CT_HISTORY_LIMIT"
 

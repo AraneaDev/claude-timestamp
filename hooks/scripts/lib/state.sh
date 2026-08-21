@@ -184,10 +184,19 @@ ct_clear_flag() {
 # Read a counter from the session state, defaulting to 0 when absent or
 # corrupt, so a damaged state file degrades to "no history" rather than
 # breaking the marker.
+#
+# `read` rather than `cat`: this runs several times per stamped message, and a
+# builtin costs no process.
 ct_read_counter() {
-  local file="$1" value
+  local file="$1" value=""
   [ -r "$file" ] || { printf '0'; return 0; }
-  value="$(cat "$file" 2>/dev/null)"
+  # Not `read ... || value=""`: state files are written with `printf '%s'`,
+  # with no trailing newline, and `read` reports that as failure even though
+  # it has already assigned the value. Gating on the exit status would throw
+  # away a perfectly good read on the file shape this codebase actually
+  # writes. The empty-file case is still covered -- value keeps its `local`
+  # initial "" when there is nothing to read.
+  IFS= read -r value < "$file" 2>/dev/null
   case "$value" in ''|*[!0-9]*) printf '0' ;; *) printf '%s' "$value" ;; esac
 }
 

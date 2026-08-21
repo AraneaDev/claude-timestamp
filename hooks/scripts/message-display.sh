@@ -117,8 +117,8 @@ fi
 # renderer, which is therefore purely structural and never needs to know a
 # colour name. An absent part is passed as the empty string, which is how a
 # {...} group in the template learns that it should disappear.
-base_start="$(ct_color_start "$CT_COLOR")"
-base_end="$(ct_color_end "$CT_COLOR")"
+ct_color_seq "$CT_COLOR"; base_start="$_CT_SEQ"
+base_end=""; [ -n "$base_start" ] && base_end=$'\033[0m'
 
 # The duration wears SLOW_COLOR once a turn crosses SLOW_AFTER, whatever
 # ELAPSED_COLOR says. That override is the feature rather than the styling, so
