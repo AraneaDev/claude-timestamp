@@ -166,11 +166,11 @@ Add a line naming the project config when one is in play.
 Then ask what they want to change, with AskUserQuestion. One question,
 single-select, three options:
 
-- **How it looks** — the marker's layout, from the `markers` block. Drill into
+- **How it looks**, the marker's layout, from the `markers` block. Drill into
   the picker below.
-- **How much it says** — the presets from the `presets` block, which is the
+- **How much it says**, the presets from the `presets` block, which is the
   question this command used to ask directly.
-- **Timezone and clock** — `TZ`, `DISPLAY_FORMAT` and `CONTEXT_FORMAT`.
+- **Timezone and clock**, meaning `TZ`, `DISPLAY_FORMAT` and `CONTEXT_FORMAT`.
 
 The router exists because AskUserQuestion accepts at most four options, and a
 marker look and a behaviour preset are different axes: a preset is a whole
