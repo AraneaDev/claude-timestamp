@@ -37,23 +37,57 @@ MSG
   fi
 done
 
-# Staged shell scripts get the same two checks CI runs, on the staged content
-# rather than the working tree, so a partial `git add -p` cannot pass here and
-# fail there. Skipped entirely when shellcheck is absent: this is a guard rail,
-# not a control, and it must not block a contributor who has not installed it.
-staged="$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.sh$|^\.githooks/' || true)"
+# Staged shell scripts get the checks CI runs, on the staged content rather
+# than the working tree, so a partial `git add -p` cannot pass here and fail
+# there. The shellcheck half is skipped when shellcheck is absent: this is a
+# guard rail, not a control, and it must not block a contributor who has not
+# installed it.
+#
+# ACMR rather than ACM. Git reports a file that is renamed and edited in one
+# stage as R, so omitting it would let a rename carry a broken script straight
+# past this check. --name-only already resolves a rename to its new path.
+staged="$(git diff --cached --name-only --diff-filter=ACMR | grep -E '\.sh$|^\.githooks/' || true)"
 if [ -n "$staged" ]; then
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' EXIT
   rc=0
-  for f in $staged; do
+  # `read`, not `for f in $staged`: a filename carrying a space would split
+  # into tokens that are not files, and every failed lookup below would then
+  # be indistinguishable from a real one. A heredoc rather than a pipe so the
+  # loop stays in this shell and its `rc` survives.
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    # A symlink's staged blob is its target path, not a script, and `bash -n`
+    # on a bare path exits 0. Checking one would report success without ever
+    # reading what it points at, so say so instead of passing it silently.
+    case "$(git ls-files --cached -s -- "$f" | cut -d' ' -f1)" in
+      120000)
+        echo "  skipped $f: staged as a symlink, so its content is a path, not a script." >&2
+        continue
+        ;;
+    esac
     mkdir -p "$tmp/$(dirname "$f")"
-    git show ":$f" > "$tmp/$f" 2>/dev/null || continue
+    # Fail closed. A staged path git cannot read is a reason to stop, not a
+    # reason to skip the file and still report success.
+    if ! git show ":$f" > "$tmp/$f" 2>/dev/null; then
+      echo "  could not read staged content for $f" >&2
+      rc=1
+      continue
+    fi
     bash -n "$tmp/$f" || rc=1
     if command -v shellcheck >/dev/null 2>&1; then
-      shellcheck -S style -e SC1091 "$tmp/$f" || rc=1
+      # The same ratchets CI enables. A hook running a weaker shellcheck than
+      # CI would let a script pass here and fail there, which is the one
+      # outcome this guard exists to prevent.
+      shellcheck -S style -e SC1091 \
+        --enable=deprecate-which \
+        --enable=avoid-nullary-conditions \
+        --enable=quote-safe-variables \
+        "$tmp/$f" || rc=1
     fi
-  done
+  done <<EOF
+$staged
+EOF
   if [ "$rc" -ne 0 ]; then
     echo >&2
     echo "  Staged shell scripts did not pass bash -n / shellcheck." >&2
