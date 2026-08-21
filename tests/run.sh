@@ -288,6 +288,42 @@ is "no reset when there was no color" "" "$(ct_color_end none)"
 contains "reset follows a real color" "[0m" "$(ct_color_end dim)"
 is "NO_COLOR disables color" "" "$(NO_COLOR=1 ct_color_start dim)"
 
+ct_color_seq dim
+is "color seq: dim"            "$(printf '\033[2m')" "$_CT_SEQ"
+ct_color_seq cyan
+is "color seq: cyan"           "$(printf '\033[36m')" "$_CT_SEQ"
+ct_color_seq none
+is "color seq: none is empty"  "" "$_CT_SEQ"
+ct_color_seq banana
+is "color seq: unknown is empty" "" "$_CT_SEQ"
+ct_color_seq ""
+is "color seq: empty is empty" "" "$_CT_SEQ"
+
+# NO_COLOR wins over any named colour, the same way it does for ct_color_start.
+( NO_COLOR=1; ct_color_seq cyan; [ -z "$_CT_SEQ" ] ) \
+  && pass "color seq: NO_COLOR silences it" \
+  || fail "color seq: NO_COLOR silences it" "empty" "$_CT_SEQ"
+
+# ct_color_start must keep behaving exactly as before, now that it shares a table.
+is "color start still works"   "$(printf '\033[36m')" "$(ct_color_start cyan)"
+is "color start: none is empty" "" "$(ct_color_start none)"
+
+# Painting one part restores the base colour afterwards, so literal text that
+# follows is not left wearing the part's colour.
+ct_paint_part cyan "13:22" dim
+is "paint part: wraps and restores" \
+  "$(printf '\033[36m13:22\033[0m\033[2m')" "$_CT_PART"
+
+ct_paint_part none "13:22" dim
+is "paint part: no colour leaves text bare" "13:22" "$_CT_PART"
+
+ct_paint_part cyan "" dim
+is "paint part: an empty part stays empty" "" "$_CT_PART"
+
+ct_paint_part cyan "x" ""
+is "paint part: an empty base restores nothing" \
+  "$(printf '\033[36mx\033[0m')" "$_CT_PART"
+
 echo
 echo "hooks"
 

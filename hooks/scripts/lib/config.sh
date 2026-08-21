@@ -279,20 +279,50 @@ ct_zone() {
   if ct_tz_honoured; then TZ="$CT_TZ" date '+%Z'; else date '+%Z'; fi
 }
 
-ct_color_start() {
+# The escape sequence for a colour, assigned rather than printed so a caller on
+# the hot path pays no subshell. Sets _CT_SEQ, which is empty when the colour is
+# off, unknown, or disabled by NO_COLOR.
+ct_color_seq() {
+  _CT_SEQ=""
   # https://no-color.org -- any non-empty value disables color.
   [ -n "${NO_COLOR:-}" ] && return 0
-  case "$1" in
-    dim)       printf '%s' $'\033[2m' ;;
-    gray|grey) printf '%s' $'\033[90m' ;;
-    red)       printf '%s' $'\033[31m' ;;
-    green)     printf '%s' $'\033[32m' ;;
-    yellow)    printf '%s' $'\033[33m' ;;
-    blue)      printf '%s' $'\033[34m' ;;
-    magenta)   printf '%s' $'\033[35m' ;;
-    cyan)      printf '%s' $'\033[36m' ;;
-    *)         printf '' ;;
+  case "${1:-}" in
+    dim)       _CT_SEQ=$'\033[2m' ;;
+    gray|grey) _CT_SEQ=$'\033[90m' ;;
+    red)       _CT_SEQ=$'\033[31m' ;;
+    green)     _CT_SEQ=$'\033[32m' ;;
+    yellow)    _CT_SEQ=$'\033[33m' ;;
+    blue)      _CT_SEQ=$'\033[34m' ;;
+    magenta)   _CT_SEQ=$'\033[35m' ;;
+    cyan)      _CT_SEQ=$'\033[36m' ;;
   esac
+  return 0
+}
+
+ct_color_start() {
+  ct_color_seq "${1:-}"
+  printf '%s' "$_CT_SEQ"
+}
+
+# Paint one part of the marker and restore the base colour afterwards, so the
+# literal text around it keeps its own styling.
+#
+# An empty part stays empty rather than becoming a bare escape sequence. The
+# renderer decides whether a part is present by testing whether it is empty, and
+# a lone colour code would read as present and leave its separator behind.
+ct_paint_part() {
+  local color="${1:-}" text="${2:-}" base="${3:-}"
+  local seq base_seq
+  _CT_PART=""
+  [ -n "$text" ] || return 0
+  ct_color_seq "$color"; seq="$_CT_SEQ"
+  ct_color_seq "$base";  base_seq="$_CT_SEQ"
+  if [ -n "$seq" ]; then
+    _CT_PART="${seq}${text}"$'\033[0m'"${base_seq}"
+  else
+    _CT_PART="$text"
+  fi
+  return 0
 }
 
 ct_color_end() {
