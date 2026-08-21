@@ -1736,7 +1736,7 @@ fresh 'TZ=Asia/Tokyo' 'HISTORY=on'
 rm -f "$CLAUDE_TIMESTAMP_HISTORY"
 ct_history_append 10 1 5 0 0
 is "history: the row is stamped in the pinned zone" \
-   "$(TZ=Asia/Tokyo date '+%Y-%m-%d')" "$(cut -f1 "$CLAUDE_TIMESTAMP_HISTORY" | cut -dT -f1)"
+   "$(TZ=Asia/Tokyo date '+%Y-%m-%dT%H:%M')" "$(cut -f1 "$CLAUDE_TIMESTAMP_HISTORY" | cut -c1-16)"
 
 # HISTORY and SUMMARY are separate settings, so switching the end-of-session
 # report off must not silently switch the running record off with it. The
@@ -2202,6 +2202,28 @@ is "an unrelated --project write keeps an unknown key"      "1" "$(grep -c '^SOM
 is "an unrelated --project write still keeps the rest too"  "1" "$(grep -c '^COLOR=cyan$' "$written_unknown")"
 is "an unrelated --project write still writes the new one"  "1" "$(grep -c '^TZ=UTC$' "$written_unknown")"
 
+# A comment somebody wrote by hand must survive a rewrite, and a second
+# rewrite must not duplicate the three header lines this function generates
+# itself. Nothing above exercises the carry-over loop's comment handling: the
+# home-directory refusal tests return before that loop ever runs. A single
+# rewrite alone would also miss a duplication bug -- the header is only ever
+# written once per call, so it takes a second call to see it accumulate.
+rm -rf "$PROJ/writable-comment"; mkdir -p "$PROJ/writable-comment/.claude"
+printf '# a hand-written note\nCOLOR=cyan\n' \
+  > "$PROJ/writable-comment/.claude/claude-timestamp.conf"
+( cd "$PROJ/writable-comment" && unset CLAUDE_TIMESTAMP_CONFIG && HOME="$PROJ/home" \
+    bash "$SCRIPTS/setup.sh" --project --color=none >/dev/null 2>&1 )
+written_comment="$PROJ/writable-comment/.claude/claude-timestamp.conf"
+is "a hand-written comment survives a rewrite"    "1" "$(grep -c '^# a hand-written note$' "$written_comment")"
+is "the unnamed pinned key is kept alongside it"  "1" "$(grep -c '^COLOR=none$' "$written_comment")"
+
+( cd "$PROJ/writable-comment" && unset CLAUDE_TIMESTAMP_CONFIG && HOME="$PROJ/home" \
+    bash "$SCRIPTS/setup.sh" --project --tz=UTC >/dev/null 2>&1 )
+is "the generated header does not accumulate over a second rewrite" "1" \
+   "$(grep -c '^# claude-timestamp settings for this project$' "$written_comment")"
+is "the hand-written comment still appears exactly once"            "1" \
+   "$(grep -c '^# a hand-written note$' "$written_comment")"
+
 rm -rf "$PROJ/writable-historyflag"; mkdir -p "$PROJ/writable-historyflag"
 ( cd "$PROJ/writable-historyflag" && unset CLAUDE_TIMESTAMP_CONFIG && HOME="$PROJ/home" \
     bash "$SCRIPTS/setup.sh" --project --history=off >/dev/null 2>&1 )
@@ -2231,10 +2253,13 @@ historylimit_read_back="$(
 is "a project HISTORY_LIMIT is read back by the loader" "10" "$historylimit_read_back"
 
 # In a directory that has pinned nothing yet, --project on its own has no
-# settings to write and should say so rather than create an empty file.
+# settings to write and should say so rather than create an empty file. Exit
+# code 1 specifically -- 2 is the home-directory refusal's code, and a
+# regression that swapped them would otherwise pass a plain non-zero check.
 mkdir -p "$PROJ/empty"
-refutes "--project with nothing to write is refused" \
-  bash -c "cd '$PROJ/empty' && unset CLAUDE_TIMESTAMP_CONFIG && HOME='$PROJ/home' bash '$SCRIPTS/setup.sh' --project"
+( cd "$PROJ/empty" && unset CLAUDE_TIMESTAMP_CONFIG && HOME="$PROJ/home" \
+    bash "$SCRIPTS/setup.sh" --project >/dev/null 2>&1 )
+is "--project with nothing to write is refused" "1" "$?"
 if [ -e "$PROJ/empty/.claude/claude-timestamp.conf" ]; then
   fail "a refused write leaves no file behind" "no file" "a file was created"
 else

@@ -428,9 +428,19 @@ write_project_config() {
   # project layer. Writing it here would produce a file that calls itself a
   # project config, is never loaded as one, and has lost every comment in the
   # account config it replaced.
-  local here
+  #
+  # Compared two ways, and refused if either matches. Physically-resolved
+  # paths catch a symlinked home; the raw strings are a fail-safe for the
+  # asymmetric case where resolving $HOME fails (permissions, a dangling
+  # symlink) while resolving $PWD does not -- a resolved-only comparison would
+  # then compare a real path against a stale fallback and could miss a literal
+  # match it would otherwise have caught. Refusing a legitimate project write
+  # costs a re-run; missing home costs silently rewriting the account config,
+  # so the fail-safe direction is to refuse.
+  local here here_home
   here="$(cd "$PWD" 2>/dev/null && pwd -P)" || here="$PWD"
-  if [ -n "${HOME:-}" ] && [ "$here" = "$(cd "$HOME" 2>/dev/null && pwd -P || printf '%s' "$HOME")" ]; then
+  here_home="$(cd "${HOME:-}" 2>/dev/null && pwd -P)" || here_home="${HOME:-}"
+  if [ -n "${HOME:-}" ] && { [ "$here" = "$here_home" ] || [ "$PWD" = "$HOME" ]; }; then
     echo "--project writes .claude/claude-timestamp.conf in the current directory," >&2
     echo "and here that is your account configuration, not a project's. Run it from" >&2
     echo "a project directory, or drop --project to change your account settings." >&2
@@ -894,6 +904,11 @@ main() {
   if [ -n "$set_enabled" ]; then valid_onoff ENABLED "$set_enabled" || exit 2; CT_ENABLED="$set_enabled"; fi
 
   if [ "$project_scope" = "1" ]; then
+    # write_project_config's return already exits the script under set -e with
+    # the same code -- this changes no behaviour today. It is here so the
+    # intent is explicit at the call site: if a later edit ever wraps this
+    # call in a condition (an if, a &&, a while), errexit stops applying to it
+    # silently, and the refusal's exit code would be lost without this.
     write_project_config "$set_tz" "$set_display" "$set_context" "$set_color" \
       "$set_elapsed" "$set_inject" "$set_rollover" "$set_slow" "$set_slowcolor" \
       "$set_idle" "$set_summary" "$set_subagents" "$set_tooltiming" "$set_enabled" \
