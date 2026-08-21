@@ -150,21 +150,39 @@ lint_listed="$(awk '
 ' .github/workflows/ci.yml | grep -oE '[A-Za-z0-9_./*-]+\.sh|\.githooks/[a-z-]+' | sort -u)"
 lint_tracked="$(git ls-files '*.sh' .githooks | sort -u)"
 
+# A bash "case" pattern treats * as matching across "/", unlike real glob
+# expansion (which never crosses a directory boundary without globstar). A
+# naive `case "$f" in $pat)` would therefore call a script one directory
+# deeper than an already-globbed pattern "covered", when CI would never
+# actually lint it. Compare directory and basename separately instead: the
+# directory must be exactly equal, and only the basename (which can never
+# itself contain a "/") is allowed to carry a wildcard.
 lint_missing=""
 while read -r f; do
   [ -n "$f" ] || continue
+  fdir="${f%/*}"
+  [ "$fdir" = "$f" ] && fdir=""
+  fbase="${f##*/}"
   covered=0
   while read -r pat; do
     [ -n "$pat" ] || continue
-    # shellcheck disable=SC2254  # the glob in the CI list is meant to expand
-    case "$f" in $pat) covered=1; break ;; esac
-  done <<EOF
-$lint_listed
-EOF
+    pdir="${pat%/*}"
+    [ "$pdir" = "$pat" ] && pdir=""
+    pbase="${pat##*/}"
+    [ "$fdir" = "$pdir" ] || continue
+    case "$pbase" in
+      '*'*)
+        suffix="${pbase#\*}"
+        case "$fbase" in *"$suffix") covered=1 ;; esac
+        ;;
+      *)
+        [ "$fbase" = "$pbase" ] && covered=1
+        ;;
+    esac
+    [ "$covered" -eq 1 ] && break
+  done < <(printf '%s\n' "$lint_listed")
   [ "$covered" -eq 1 ] || lint_missing="$lint_missing $f"
-done <<EOF
-$lint_tracked
-EOF
+done < <(printf '%s\n' "$lint_tracked")
 
 if [ -n "$lint_missing" ]; then
   note "not covered by CI's shellcheck list:$lint_missing"
