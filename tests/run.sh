@@ -1756,6 +1756,47 @@ fi
 is "history: no concurrent append was lost" "6" \
    "$(cut -f2 "$CLAUDE_TIMESTAMP_HISTORY" | sort -n | tail -1)"
 
+# A lock left behind by a process that died between mkdir and rmdir must not
+# silently defeat HISTORY_LIMIT for the rest of the installation's life.
+# Nothing holds this lock longer than a tail takes, so a lock old enough to
+# be debris rather than a live competitor gets reclaimed and the trim
+# resumes. A fixed date in the past rather than a relative one: GNU touch
+# spells that -d '2 minutes ago' and BSD touch spells it -v-2M, but -t works
+# on both.
+fresh 'HISTORY_LIMIT=5'
+rm -f "$CLAUDE_TIMESTAMP_HISTORY"
+for i in 1 2 3 4; do ct_history_append "$i" 1 0 0 0; done
+mkdir "$CLAUDE_TIMESTAMP_HISTORY.lock"
+touch -t 200001010000 "$CLAUDE_TIMESTAMP_HISTORY.lock"
+ct_history_append 5 1 0 0 0
+ct_history_append 6 1 0 0 0
+is "history: a stale lock is reclaimed and trimming resumes" "5" \
+   "$(wc -l < "$CLAUDE_TIMESTAMP_HISTORY" | tr -d ' ')"
+is "history: the newest row survives past a reclaimed lock" "6" \
+   "$(tail -1 "$CLAUDE_TIMESTAMP_HISTORY" | cut -f2)"
+if [ -d "$CLAUDE_TIMESTAMP_HISTORY.lock" ]; then
+  fail "history: a reclaimed lock is removed, not left behind again" "gone" "still present"
+else
+  pass "history: a reclaimed lock is removed, not left behind again"
+fi
+
+# A lock that is not stale is a live competitor, not debris: it must be left
+# alone, and the trim it is guarding must be skipped rather than forced.
+fresh 'HISTORY_LIMIT=5'
+rm -f "$CLAUDE_TIMESTAMP_HISTORY"
+rmdir "$CLAUDE_TIMESTAMP_HISTORY.lock" 2>/dev/null || true
+for i in 1 2 3 4 5; do ct_history_append "$i" 1 0 0 0; done
+mkdir "$CLAUDE_TIMESTAMP_HISTORY.lock"
+ct_history_append 6 1 0 0 0
+is "history: a live lock's trim is skipped, not forced" "6" \
+   "$(wc -l < "$CLAUDE_TIMESTAMP_HISTORY" | tr -d ' ')"
+if [ -d "$CLAUDE_TIMESTAMP_HISTORY.lock" ]; then
+  pass "history: a live lock is left in place"
+else
+  fail "history: a live lock is left in place" "still present" "gone"
+fi
+rmdir "$CLAUDE_TIMESTAMP_HISTORY.lock" 2>/dev/null || true
+
 fresh 'HISTORY_LIMIT=nonsense'
 is "a nonsense limit falls back" "200" "$CT_HISTORY_LIMIT"
 

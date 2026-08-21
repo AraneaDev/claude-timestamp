@@ -706,7 +706,26 @@ ct_history_append() {
   # no extra tool.
   if [ "$(wc -l < "$file" 2>/dev/null || echo 0)" -gt "$limit" ]; then
     lock="$file.lock"
-    if mkdir "$lock" 2>/dev/null; then
+    if ! mkdir "$lock" 2>/dev/null; then
+      # Losing the race to a live competitor is fine: it is trimming right
+      # now, so skipping is the same outcome.
+      #
+      # A lock left behind by a process that died between the mkdir and the
+      # rmdir is not the same outcome at all. Nothing ever clears it, so every
+      # later append finds the file over its limit, fails to acquire, and skips
+      # -- HISTORY_LIMIT silently stops working for the life of the
+      # installation and the file grows without bound. Nothing should hold this
+      # lock for longer than a `tail` takes, so one older than a minute is
+      # debris rather than a competitor. Clearing it costs a retry; leaving it
+      # costs the setting.
+      if [ -n "$(find "$lock" -maxdepth 0 -mmin +1 2>/dev/null)" ]; then
+        rmdir "$lock" 2>/dev/null || true
+        mkdir "$lock" 2>/dev/null || lock=""
+      else
+        lock=""
+      fi
+    fi
+    if [ -n "$lock" ]; then
       tmp="$file.$$"
       if tail -n "$limit" "$file" > "$tmp" 2>/dev/null; then
         mv "$tmp" "$file" 2>/dev/null || rm -f "$tmp"
@@ -715,8 +734,6 @@ ct_history_append() {
       fi
       rmdir "$lock" 2>/dev/null
     fi
-    # Losing the race means somebody else is trimming right now, which is the
-    # same outcome. A stale lock costs one skipped trim, not a lost line.
   fi
   return 0
 }
