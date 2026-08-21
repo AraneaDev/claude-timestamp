@@ -864,6 +864,132 @@ if command -v jq >/dev/null 2>&1; then
 fi
 
 echo
+echo "marker templates"
+
+# The renderer is a pure function of its arguments: template, then the four
+# parts already painted. An absent part is the empty string.
+m() { ct_render_marker "$1" "$2" "$3" "$4" "$5"; printf '%s' "$CT_MARKER"; }
+
+DEFTPL='[{%date }%time{ %elapsed}{ · %tool}]'
+
+is "marker: everything present" "[Aug 21 13:22:13 +2m14s · Bash 1m58s]" \
+  "$(m "$DEFTPL" 13:22:13 +2m14s 'Bash 1m58s' 'Aug 21')"
+is "marker: no date, no tool"   "[13:22:13 +2m14s]" \
+  "$(m "$DEFTPL" 13:22:13 +2m14s '' '')"
+is "marker: clock only"         "[13:22:13]" \
+  "$(m "$DEFTPL" 13:22:13 '' '' '')"
+is "marker: date but nothing else" "[Aug 21 13:22:13]" \
+  "$(m "$DEFTPL" 13:22:13 '' '' 'Aug 21')"
+
+# A group carries its own decoration, which is the whole reason groups exist.
+is "marker: group keeps its decoration" "13:22:13 (+2m14s)" \
+  "$(m '%time{ (%elapsed)}' 13:22:13 +2m14s '' '')"
+is "marker: group vanishes whole"       "13:22:13" \
+  "$(m '%time{ (%elapsed)}' 13:22:13 '' '' '')"
+
+# A group with two placeholders is kept when only some are empty.
+is "marker: partly filled group is kept" "13:22:13 · Bash 1m58s" \
+  "$(m '%time{ %elapsed · %tool}' 13:22:13 '' 'Bash 1m58s' '')"
+
+# Outside a group an empty part eats one run of spaces, on either side.
+is "marker: empty part eats the space before it" "[13:22:13]" \
+  "$(m '[%time %elapsed]' 13:22:13 '' '' '')"
+is "marker: empty part eats the space after it"  "[13:22:13]" \
+  "$(m '[%elapsed %time]' 13:22:13 '' '' '')"
+is "marker: only one run is eaten"               "13:22:13" \
+  "$(m '%time  %elapsed' 13:22:13 '' '' '')"
+is "marker: a filled part eats nothing"          "[13:22:13 +2m14s]" \
+  "$(m '[%time %elapsed]' 13:22:13 +2m14s '' '')"
+
+# Braces with no placeholder inside are literal, so no escaping is needed.
+is "marker: braces without a placeholder are literal" "{literal}13:22:13" \
+  "$(m '{literal}%time' 13:22:13 '' '' '')"
+
+# A bare percent needs no escaping either.
+is "marker: a bare percent is literal" "13:22:13 100%" \
+  "$(m '%time 100%' 13:22:13 '' '' '')"
+
+# Substituted text is never re-scanned. DISPLAY_FORMAT accepts a raw strftime
+# string, so a rendered value really can contain a percent sign, and a
+# replace-in-place renderer would substitute it a second time.
+is "marker: a substituted value is not re-scanned" "[%tool]" \
+  "$(m '[%time]' '%tool' '' 'Bash 1m58s' '')"
+
+# Non-ASCII passes through untouched.
+is "marker: unicode literals survive" "⟨13:22:13⟩" \
+  "$(m '⟨%time⟩' 13:22:13 '' '' '')"
+
+# A template with no placeholder at all is just literal text.
+is "marker: a template with no parts is literal" "hello" \
+  "$(m 'hello' 13:22:13 +2m14s '' '')"
+
+# Validation.
+asserts "valid: the default template"   ct_is_valid_marker "$DEFTPL"
+asserts "valid: a bare percent"         ct_is_valid_marker '%time 100%'
+asserts "valid: a trailing percent"     ct_is_valid_marker '%time %'
+asserts "valid: nested groups"          ct_is_valid_marker '%time{ {%elapsed}}'
+asserts "valid: no placeholders at all" ct_is_valid_marker 'hello'
+refutes "invalid: unknown placeholder"  ct_is_valid_marker '%elapsd'
+refutes "invalid: a placeholder with a suffix" ct_is_valid_marker '%timex'
+refutes "invalid: unbalanced open brace"  ct_is_valid_marker '[%time{ %elapsed]'
+refutes "invalid: unbalanced close brace" ct_is_valid_marker '[%time} %elapsed]'
+
+# Every template below is rendered and validated under a timeout, so a missing
+# index increment fails the suite instead of hanging it. The inputs are the
+# shapes most likely to trip a hand-written scanner: empty, a lone delimiter,
+# unterminated constructs, and deep nesting.
+if command -v timeout >/dev/null 2>&1; then
+  for tpl in '' '%' '{' '}' '{}' '%%' '{{{{' '}}}}' '%time%time' '{%time' \
+             '%{time}' '{ }' '%z' '%timetime' '[%time' '{%time{%elapsed{%tool}}}' ; do
+    if timeout 5 bash -c '
+        . "$1/hooks/scripts/lib/config.sh"
+        ct_is_valid_marker "$2" || true
+        ct_render_marker "$2" T E O D || true
+      ' _ "$ROOT" "$tpl" >/dev/null 2>&1; then
+      pass "marker: terminates on [$tpl]"
+    else
+      fail "marker: terminates on [$tpl]" "an exit" "timed out or crashed"
+    fi
+  done
+else
+  echo "  skip timeout not installed, termination cases not run"
+fi
+
+# Random templates over the alphabet that matters. The seed is fixed so a
+# failure is reproducible; this is a property check, not a lottery.
+if command -v timeout >/dev/null 2>&1; then
+  RANDOM=20260821
+  fuzz_bad=0; fuzz_n=0
+  while [ "$fuzz_n" -lt 200 ]; do
+    fuzz_n=$(( fuzz_n + 1 ))
+    tpl=""; len=$(( RANDOM % 12 + 1 ))
+    while [ "${#tpl}" -lt "$len" ]; do
+      case $(( RANDOM % 10 )) in
+        0) tpl="$tpl%" ;;     1) tpl="$tpl{" ;;      2) tpl="$tpl}" ;;
+        3) tpl="$tpl%time" ;; 4) tpl="$tpl%elapsed";; 5) tpl="$tpl " ;;
+        6) tpl="$tpl[" ;;     7) tpl="$tpl]" ;;      8) tpl="$tpl%tool" ;;
+        *) tpl="${tpl}x" ;;
+      esac
+    done
+    if ct_is_valid_marker "$tpl"; then
+      # Accepted, so the renderer must handle it: terminate, and leave no
+      # placeholder text behind, since every part was given a value.
+      if ! timeout 5 bash -c '
+            . "$1/hooks/scripts/lib/config.sh"
+            ct_render_marker "$2" T E O D
+            case "$CT_MARKER" in *%time*|*%elapsed*|*%tool*|*%date*) exit 1 ;; esac
+          ' _ "$ROOT" "$tpl" >/dev/null 2>&1; then
+        fuzz_bad=$(( fuzz_bad + 1 ))
+        printf '         accepted but not rendered: [%s]\n' "$tpl"
+      fi
+    fi
+  done
+  is "marker: every accepted template renders" "0" "$fuzz_bad"
+else
+  echo "  skip timeout not installed, fuzz not run"
+fi
+
+echo
 echo "state pruning"
 
 fresh

@@ -344,6 +344,214 @@ ct_paint() {
   fi
 }
 
+# --- marker templates -------------------------------------------------------
+#
+# MARKER is a layout: literal text, four placeholders, and groups. A group is
+# {...} containing at least one placeholder, and it renders as nothing when
+# every placeholder inside it is empty. Groups exist because no automatic rule
+# works: dropping the text before an empty part handles "[%time %elapsed]" and
+# breaks "%time (%elapsed)", leaving a stray bracket, and dropping the text on
+# both sides breaks the first instead. The template cannot tell decoration from
+# structure, so the author says which is which.
+#
+# Everything here is a pure function of its arguments. No config, no clock, no
+# filesystem, and no forks: this runs on every stamped message, and the wizard
+# and doctor draw their previews with the same code, which is what keeps a
+# preview from drifting away from the real marker.
+
+# Read the placeholder starting at index $2 of $1, which is a '%'.
+#
+# Sets _CT_W to the name and _CT_WLEN to the characters consumed including the
+# '%'. Returns 0 for a known placeholder, 1 for an unknown word, and 2 for a
+# bare '%' that begins no word at all. The caller renders 1 and 2 as literal
+# text; only the validator treats 1 as an error.
+#
+# The whole run of letters must match, so %timex is unknown rather than %time
+# followed by an x. A placeholder that silently absorbed the text after it would
+# be the harder bug to find.
+_ct_word() {
+  local s="$1"
+  local i="$2" n j w
+  n=${#s}
+  j=$(( i + 1 ))
+  while [ "$j" -lt "$n" ]; do
+    case "${s:j:1}" in
+      [[:alpha:]]) j=$(( j + 1 )) ;;
+      *) break ;;
+    esac
+  done
+  w="${s:i+1:j-i-1}"
+  case "$w" in
+    time|elapsed|tool|date) _CT_W="$w"; _CT_WLEN=$(( j - i )); return 0 ;;
+    '') return 2 ;;
+    *) return 1 ;;
+  esac
+}
+
+# The value of a placeholder, from the four parts the caller passed in.
+_ct_part() {
+  case "$1" in
+    time)    _CT_V="$_CT_P_TIME" ;;
+    elapsed) _CT_V="$_CT_P_ELAPSED" ;;
+    tool)    _CT_V="$_CT_P_TOOL" ;;
+    date)    _CT_V="$_CT_P_DATE" ;;
+    *)       _CT_V="" ;;
+  esac
+  return 0
+}
+
+# Render a span containing no braces, into _CT_SPAN.
+#
+# An empty placeholder consumes one run of spaces: the run before it, or the run
+# after it when there is nothing before. One run either way, never both, so
+# "%time  %elapsed" collapses to the clock alone rather than to a trailing
+# space.
+_ct_span() {
+  local s="$1"
+  local i=0 n out ch pending val swallow rc
+  n=${#s}; out=""; pending=""; swallow=0
+  while [ "$i" -lt "$n" ]; do
+    ch="${s:i:1}"
+    if [ "$ch" = "%" ]; then
+      _ct_word "$s" "$i"; rc=$?
+      if [ "$rc" -eq 0 ]; then
+        _ct_part "$_CT_W"; val="$_CT_V"
+        if [ -n "$val" ]; then
+          out="$out$pending$val"; pending=""; swallow=0
+        elif [ -n "$pending" ]; then
+          pending=""
+        else
+          swallow=1
+        fi
+        i=$(( i + _CT_WLEN ))
+        continue
+      fi
+      # Unknown word or bare percent: literal text.
+      swallow=0; out="$out$pending$ch"; pending=""; i=$(( i + 1 ))
+    elif [ "$ch" = " " ]; then
+      if [ "$swallow" -eq 1 ]; then i=$(( i + 1 )); continue; fi
+      pending="$pending$ch"; i=$(( i + 1 ))
+    else
+      swallow=0; out="$out$pending$ch"; pending=""; i=$(( i + 1 ))
+    fi
+  done
+  _CT_SPAN="$out$pending"
+  return 0
+}
+
+# Whether a span contains at least one placeholder.
+_ct_has_ph() {
+  local s="$1"
+  local i=0 n
+  n=${#s}
+  while [ "$i" -lt "$n" ]; do
+    if [ "${s:i:1}" = "%" ] && _ct_word "$s" "$i"; then return 0; fi
+    i=$(( i + 1 ))
+  done
+  return 1
+}
+
+# Whether a span holds at least one placeholder and every one of them is empty.
+_ct_all_empty() {
+  local s="$1"
+  local i=0 n found
+  n=${#s}; found=0
+  while [ "$i" -lt "$n" ]; do
+    if [ "${s:i:1}" = "%" ] && _ct_word "$s" "$i"; then
+      found=1
+      _ct_part "$_CT_W"
+      [ -n "$_CT_V" ] && return 1
+      i=$(( i + _CT_WLEN ))
+    else
+      i=$(( i + 1 ))
+    fi
+  done
+  [ "$found" -eq 1 ]
+}
+
+# Render TEMPLATE with the four parts, into CT_MARKER.
+#
+# The parts arrive already painted, so this function knows nothing about colour;
+# an absent part is the empty string, which is how a group learns it should
+# vanish. It assigns rather than printing, because message-display.sh writes
+# JSON to stdout and a helper that printed would corrupt the hook's output.
+#
+# CT_MARKER is this library's public interface -- nothing in this file reads
+# it yet, since the caller that will (task 4) does not exist.
+# shellcheck disable=SC2034
+ct_render_marker() {
+  local tpl="${1:-}"
+  local out i n depth j grp k
+  _CT_P_TIME="${2:-}"; _CT_P_ELAPSED="${3:-}"
+  _CT_P_TOOL="${4:-}"; _CT_P_DATE="${5:-}"
+  CT_MARKER=""
+  out=""; i=0; n=${#tpl}
+  while [ "$i" -lt "$n" ]; do
+    if [ "${tpl:i:1}" = "{" ]; then
+      depth=1; j=$(( i + 1 ))
+      while [ "$j" -lt "$n" ] && [ "$depth" -gt 0 ]; do
+        case "${tpl:j:1}" in
+          '{') depth=$(( depth + 1 )) ;;
+          '}') depth=$(( depth - 1 )) ;;
+        esac
+        j=$(( j + 1 ))
+      done
+      # An unbalanced brace cannot reach here: ct_is_valid_marker rejects the
+      # template and the loader falls back to the default. Treated as literal
+      # rather than dropped, so a bug upstream degrades to visible text.
+      if [ "$depth" -ne 0 ]; then
+        _ct_span "${tpl:i}"; out="$out$_CT_SPAN"; i="$n"; continue
+      fi
+      grp="${tpl:i+1:j-i-2}"
+      if _ct_all_empty "$grp"; then
+        :
+      elif _ct_has_ph "$grp"; then
+        _ct_span "$grp"; out="$out$_CT_SPAN"
+      else
+        out="$out{$grp}"
+      fi
+      i="$j"
+    else
+      k="$i"
+      while [ "$k" -lt "$n" ] && [ "${tpl:k:1}" != "{" ]; do k=$(( k + 1 )); done
+      _ct_span "${tpl:i:k-i}"; out="$out$_CT_SPAN"
+      i="$k"
+    fi
+  done
+  CT_MARKER="$out"
+  return 0
+}
+
+# Whether a template is renderable: no unknown placeholder, no unbalanced brace.
+#
+# A '%' followed by letters must spell one of the four names. A typo is rejected
+# rather than rendered literally, because a user who writes %elapsd wants to
+# know it did nothing, not to read it back on every message. A '%' followed by
+# anything else is literal, so "100%" needs no escaping.
+ct_is_valid_marker() {
+  local s="${1:-}"
+  local i=0 n depth ch rc
+  n=${#s}; depth=0
+  while [ "$i" -lt "$n" ]; do
+    ch="${s:i:1}"
+    case "$ch" in
+      '{') depth=$(( depth + 1 )); i=$(( i + 1 )) ;;
+      '}')
+        depth=$(( depth - 1 ))
+        [ "$depth" -lt 0 ] && return 1
+        i=$(( i + 1 ))
+        ;;
+      '%')
+        _ct_word "$s" "$i"; rc=$?
+        [ "$rc" -eq 1 ] && return 1
+        if [ "$rc" -eq 0 ]; then i=$(( i + _CT_WLEN )); else i=$(( i + 1 )); fi
+        ;;
+      *) i=$(( i + 1 )) ;;
+    esac
+  done
+  [ "$depth" -eq 0 ]
+}
+
 # Elapsed-time state. One file per session, holding the epoch second the last
 # prompt was submitted.
 ct_state_dir() { printf '%s' "${TMPDIR:-/tmp}/claude-timestamp"; }
