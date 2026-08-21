@@ -83,12 +83,13 @@ time_part="$(ct_now "$CT_DISPLAY_FORMAT")"
 # that the day changed, which quietly breaks using these markers to reference
 # earlier parts of a conversation. Show the date once, on the first message
 # after the rollover.
+date_part=""
 if [ "$CT_DATE_ROLLOVER" = "on" ] && [ -n "$state_file" ]; then
   today="$(ct_now '%Y-%m-%d')"
   date_file="${state_file}.date"
   if [ -r "$date_file" ]; then
     previous="$(cat "$date_file")"
-    [ -n "$previous" ] && [ "$previous" != "$today" ] && time_part="$(ct_now '%b %d') $time_part"
+    [ -n "$previous" ] && [ "$previous" != "$today" ] && date_part="$(ct_now '%b %d')"
   fi
   mkdir -p "$(ct_state_dir)"
   printf '%s' "$today" > "$date_file"
@@ -109,32 +110,39 @@ if [ "$CT_ELAPSED" = "on" ] && [ -n "$elapsed_secs" ]; then
   elapsed="$(ct_format_elapsed "$elapsed_secs")"
 fi
 
-# Build the marker. The elapsed portion gets its own colour once a turn crosses
-# SLOW_AFTER, so a slow turn is something you notice rather than something you
-# have to read. Painting only that portion means restoring the base colour
-# afterwards, hence the explicit start/end rather than ct_paint here.
+# Build the marker from MARKER. Each part is painted before it reaches the
+# renderer, which is therefore purely structural and never needs to know a
+# colour name. An absent part is passed as the empty string, which is how a
+# {...} group in the template learns that it should disappear.
 base_start="$(ct_color_start "$CT_COLOR")"
 base_end="$(ct_color_end "$CT_COLOR")"
 
-inner="$time_part"
-if [ -n "$elapsed" ]; then
-  if [ "$CT_SLOW_AFTER" -gt 0 ] 2>/dev/null && [ -n "$elapsed_secs" ] \
-     && [ "$elapsed_secs" -ge "$CT_SLOW_AFTER" ]; then
-    inner="$inner $(ct_paint "$CT_SLOW_COLOR" "$elapsed")$base_start"
-    # Why it was slow, when that can be answered. Only tool timing collects
-    # the data, so this follows TOOL_TIMING rather than adding a key of its
-    # own: a marker that names the culprit is what tool timing is for.
-    if [ "$CT_TOOL_TIMING" = "on" ] && [ -n "$state_file" ]; then
-      if culprit="$(ct_dominant_tool "${state_file}.turntools" "$elapsed_secs")"; then
-        inner="$inner · $culprit"
-      fi
+# The duration wears SLOW_COLOR once a turn crosses SLOW_AFTER, whatever
+# ELAPSED_COLOR says. That override is the feature rather than the styling, so
+# the more specific setting wins.
+elapsed_color="$CT_ELAPSED_COLOR"
+tool_part=""
+if [ -n "$elapsed" ] && [ "$CT_SLOW_AFTER" -gt 0 ] 2>/dev/null && [ -n "$elapsed_secs" ] \
+   && [ "$elapsed_secs" -ge "$CT_SLOW_AFTER" ]; then
+  elapsed_color="$CT_SLOW_COLOR"
+  # Why it was slow, when that can be answered. Only tool timing collects the
+  # data, so this follows TOOL_TIMING rather than adding a key of its own.
+  if [ "$CT_TOOL_TIMING" = "on" ] && [ -n "$state_file" ]; then
+    if culprit="$(ct_dominant_tool "${state_file}.turntools" "$elapsed_secs")"; then
+      tool_part="$culprit"
     fi
-  else
-    inner="$inner $elapsed"
   fi
 fi
 
-marker="${base_start}[${inner}]${base_end}"
+ct_paint_part "$CT_TIME_COLOR" "$time_part"    "$CT_COLOR"; painted_time="$_CT_PART"
+ct_paint_part "$elapsed_color" "$elapsed"      "$CT_COLOR"; painted_elapsed="$_CT_PART"
+ct_paint_part "$CT_TOOL_COLOR" "$tool_part"    "$CT_COLOR"; painted_tool="$_CT_PART"
+ct_paint_part "$CT_TIME_COLOR" "$date_part"    "$CT_COLOR"; painted_date="$_CT_PART"
+
+ct_render_marker "$CT_MARKER_TEMPLATE" \
+  "$painted_time" "$painted_elapsed" "$painted_tool" "$painted_date"
+
+marker="${base_start}${CT_MARKER}${base_end}"
 
 # A gap since the previous message means you stepped away. Marked on its own
 # line above the message, because MessageDisplay can only replace a delta --

@@ -1149,6 +1149,54 @@ else
 fi
 
 echo
+echo "marker rendering end to end"
+
+# The regression that matters: a default configuration must render exactly what
+# the hand-assembled marker rendered, escape sequences included. Anything else
+# changes what every existing user sees on upgrade, for a feature they did not
+# ask for.
+#
+# Asserted through ct_render_marker with the same parts and colours
+# message-display.sh passes it, rather than through the hook, so the assertion
+# is about the rendering rather than about the clock.
+fresh 'COLOR=dim' 'SLOW_COLOR=yellow'
+ct_paint_part "$CT_TIME_COLOR"    "13:22:13"     "$CT_COLOR"; p_time="$_CT_PART"
+ct_paint_part "$CT_SLOW_COLOR"    "+3m20s"       "$CT_COLOR"; p_slow="$_CT_PART"
+ct_paint_part "$CT_TOOL_COLOR"    "Bash 3m10s"   "$CT_COLOR"; p_tool="$_CT_PART"
+ct_render_marker "$CT_MARKER_TEMPLATE" "$p_time" "$p_slow" "$p_tool" ""
+ct_color_seq "$CT_COLOR"; base="$_CT_SEQ"
+is "marker: a default config renders exactly what it used to" \
+  "${base}[13:22:13 $(printf '\033[33m')+3m20s$(printf '\033[0m')${base} · Bash 3m10s]$(printf '\033[0m')" \
+  "${base}${CT_MARKER}$(printf '\033[0m')"
+
+# Per-part colour, which is the feature.
+fresh 'COLOR=dim' 'TIME_COLOR=gray' 'ELAPSED_COLOR=cyan'
+ct_paint_part "$CT_TIME_COLOR"    "13:22:13" "$CT_COLOR"; p_time="$_CT_PART"
+ct_paint_part "$CT_ELAPSED_COLOR" "+2m14s"   "$CT_COLOR"; p_el="$_CT_PART"
+ct_render_marker "$CT_MARKER_TEMPLATE" "$p_time" "$p_el" "" ""
+contains "marker: time takes its own colour"     "$(printf '\033[90m')13:22:13" "$CT_MARKER"
+contains "marker: duration takes its own colour" "$(printf '\033[36m')+2m14s"   "$CT_MARKER"
+
+# A custom template reaches the screen.
+fresh 'COLOR=none' 'MARKER=%time' 'ELAPSED=off' 'IDLE_AFTER=0' 'DATE_ROLLOVER=off' 'TZ=UTC' 'DISPLAY_FORMAT=short'
+before="$(TZ=UTC date '+%H:%M') x"
+out="$(printf '{"session_id":"tpl","index":0,"delta":"x"}' \
+  | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')"
+after="$(TZ=UTC date '+%H:%M') x"
+if [ "$out" = "$before" ] || [ "$out" = "$after" ]; then
+  pass "marker: a bracketless template reaches the screen"
+else
+  fail "marker: a bracketless template reaches the screen" "$before" "$out"
+fi
+
+# An empty part leaves no trace through the hook, not merely in the renderer.
+fresh 'COLOR=none' 'MARKER=[%time %elapsed]' 'ELAPSED=off' 'IDLE_AFTER=0' 'DATE_ROLLOVER=off' 'TZ=UTC' 'DISPLAY_FORMAT=short'
+out="$(printf '{"session_id":"tpl2","index":0,"delta":"x"}' \
+  | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')"
+lacks "marker: an absent duration leaves no gap" "  " "$out"
+lacks "marker: and no dangling space before the bracket" " ]" "$out"
+
+echo
 echo "state pruning"
 
 fresh
