@@ -85,7 +85,9 @@ ct_state_ready() {
   #
   # /tmp is swept periodically on many systems, so the directory can vanish
   # under a live session. Nothing here is cached for that reason: this runs in
-  # full on every call, and the steady state costs exactly one process.
+  # full on every call, and the steady state costs exactly one process. A sweep
+  # landing mid-call makes this return 1 rather than rebuilding, which costs
+  # one message its timings; the next call finds nothing there and creates it.
   if [ ! -d "$dir" ]; then
     mkdir -p "${dir%/*}" 2>/dev/null || true
     mkdir -m 700 "$dir" 2>/dev/null && return 0
@@ -115,7 +117,14 @@ ct_state_ready() {
   perms="${line%% *}"
   case "$perms" in
     drwx------*) ;;
-    *) chmod 700 "$dir" 2>/dev/null || return 1 ;;
+    # The leading `d` is load-bearing, not decoration. `ls -ld` is the one
+    # thing here that does NOT follow a symlink, so a `l` in this position
+    # means the entry was swapped for a symlink after the [ -L ] guard above
+    # ran -- and `chmod` DOES follow, so the arm below would tighten whatever
+    # the attacker pointed at instead of our own directory. Refuse rather than
+    # repair anything whose type we did not just confirm.
+    d*) chmod 700 "$dir" 2>/dev/null || return 1 ;;
+    *) return 1 ;;
   esac
 
   [ -w "$dir" ] || return 1

@@ -354,9 +354,28 @@ rm -rf "$victim"
 fresh
 ct_state_ready || true
 rm -rf "$(ct_state_dir)"
-asserts "state dir: a vanished directory is rebuilt, not remembered" ct_state_ready
-is "state dir: and it really is back" "1" \
+# Note the split: the exit status alone cannot detect remembering, because a
+# cached verdict returns 0 too. The directory test on the next line is the one
+# that catches it.
+asserts "state dir: a vanished directory is still accepted" ct_state_ready
+is "state dir: and it really is back on disk, not just remembered" "1" \
    "$([ -d "$(ct_state_dir)" ] && echo 1 || echo 0)"
+
+# The window the [ -L ] guard cannot close: an entry swapped for a symlink
+# after the guard ran but before the mode is read. `ls` is shimmed because
+# winning that race for real is timing-dependent, and what needs proving is
+# what the code does with the line it gets back, not that the race is winnable.
+# Without the `d*)` arm this chmods the symlink's target and returns 0.
+fresh
+chmod 755 "$(ct_state_dir)"
+# shellcheck disable=SC2317  # invoked indirectly, from inside ct_state_ready
+ls() { printf 'lrwxrwxrwx 1 %s %s 12 Jan 1 00:00 x -> y\n' "$(id -un)" "$(id -gn)"; }
+refutes "state dir: a swapped-in symlink is refused at the mode check" ct_state_ready
+unset -f ls
+# The refusal has to happen INSTEAD of the repair, not after it. Pre-fix, the
+# catch-all arm chmod'd first and only then carried on, so the mode moved.
+is "state dir: and the refusal ran instead of the chmod, not after it" "755" \
+   "$(stat -c%a "$(ct_state_dir)" 2>/dev/null || stat -f%Lp "$(ct_state_dir)")"
 
 # The legacy shared directory is untrusted ground now: another user may own it
 # and may have put things in it. The sweep must reach only old regular files
