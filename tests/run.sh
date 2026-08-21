@@ -301,6 +301,33 @@ if command -v jq >/dev/null 2>&1; then
   out="$(printf '{"session_id":"test-session","index":3,"delta":"more text"}' | bash "$SCRIPTS/message-display.sh")"
   is "message-display emits nothing for later batches" "" "$out"
 
+  # Whitespace around the colon is legal JSON, and the guard that decides
+  # whether to look closer must not be fooled by it.
+  out="$(printf '{"session_id":"test-session", "index" : 0 , "delta":"spaced"}' | bash "$SCRIPTS/message-display.sh")"
+  contains "message-display accepts whitespace around the index" "spaced" \
+    "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.displayContent')"
+
+  # An index that is last in the object is followed by a brace, not a comma.
+  out="$(printf '{"session_id":"test-session","delta":"trailing","index":0}' | bash "$SCRIPTS/message-display.sh")"
+  contains "message-display accepts the index as the last key" "trailing" \
+    "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.displayContent')"
+
+  # A delta whose own text contains the pattern is not a first batch. The
+  # guard is a filter, not a parser: it may say "look closer", never "stamp".
+  #
+  # In the payload those quotes arrive escaped, as \"index\":0, which does not
+  # match the guard either -- so this case is rejected before any parse rather
+  # than by it. Both routes end in the same place, and the assertion is about
+  # the outcome, not which of the two got there. Do not "fix" it by unescaping
+  # the delta: that would stop being valid JSON.
+  out="$(printf '{"session_id":"test-session","index":7,"delta":"the payload said \\"index\\":0, apparently"}' \
+    | bash "$SCRIPTS/message-display.sh")"
+  is "message-display is not fooled by a delta that looks like an index" "" "$out"
+
+  # A double-digit index must not match on its leading zero-free digits.
+  out="$(printf '{"session_id":"test-session","index":10,"delta":"x"}' | bash "$SCRIPTS/message-display.sh")"
+  is "message-display emits nothing for a two-digit index" "" "$out"
+
   out="$(printf '{"session_id":"test-session","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh")"
   contains "user-prompt-submit injects context" "Message sent at local time" "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext')"
   if [ -r "$(ct_state_dir)/test-session" ]; then
