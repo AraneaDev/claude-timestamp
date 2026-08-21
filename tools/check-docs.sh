@@ -257,23 +257,34 @@ else
 fi
 
 echo "paths named in comments"
-# .githooks/pre-push once told contributors to point core.hooksPath at a
-# "tools" subdirectory that had never existed. A path written into a comment
-# is documentation, and it goes stale exactly as silently as the README.
-# (Deliberately not spelling that path out here as a real-looking one: this
-# check would then find it and never stop calling it a gap.)
+# A git hook in this repo names a directory under tools/ that has never
+# existed, and tells contributors to point core.hooksPath at it. A path
+# written into a comment is documentation, and it goes stale exactly as
+# silently as the README.
+#
+# That path is deliberately not spelled out here as a real-looking one: this
+# check would find it in its own comment and never stop calling it a gap.
+#
+# One pattern, held in a variable and used twice. A second copy is a second
+# thing to keep in step, and a contributor adding a directory to the
+# alternation would update the copy they happened to find and leave the other
+# scanning for the old set -- pattern drift, which is the failure this whole
+# section exists to catch.
+cp_re='(^|[^A-Za-z0-9_/.-])(hooks/scripts|tools|tests|assets|commands|docs|\.githooks|\.github|\.claude-plugin)/[A-Za-z0-9_./-]+'
 cp_missing=""
 while read -r path; do
   [ -n "$path" ] || continue
   [ -e "$path" ] || cp_missing="$cp_missing $path"
 done < <(
-  { grep -rhoE '(^|[^A-Za-z0-9_/.-])(hooks/scripts|tools|tests|assets|commands|docs|\.githooks|\.github|\.claude-plugin)/[A-Za-z0-9_./-]+' \
+  { grep -rhoE "$cp_re" \
          --include='*.sh' --include='*.md' --include='*.yml' \
          hooks tools tests commands .github .claude-plugin README.md CONTRIBUTING.md 2>/dev/null
-    # Git hook scripts carry no extension, so --include above would silently
-    # skip them; grep them by name instead of by glob.
-    grep -hoE '(^|[^A-Za-z0-9_/.-])(hooks/scripts|tools|tests|assets|commands|docs|\.githooks|\.github|\.claude-plugin)/[A-Za-z0-9_./-]+' \
-         .githooks/pre-push .githooks/pre-commit 2>/dev/null
+    # Git hook scripts carry no extension, and --include excludes an
+    # extensionless file even when it is named explicitly on the command line,
+    # not only during -r traversal. Without this second call the check cannot
+    # see the very file whose stale path it was written to catch, and would
+    # report a clean bill that means nothing.
+    grep -hoE "$cp_re" .githooks/pre-push .githooks/pre-commit 2>/dev/null
   } | sed 's/^[^A-Za-z0-9_/.-]*//' | sed 's/[.,:;)]*$//' | sort -u
 )
 
