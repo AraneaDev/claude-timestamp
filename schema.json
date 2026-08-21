@@ -209,6 +209,34 @@
       "describes": "tell Claude the local time each prompt was sent"
     }
   },
+  "preview_context": {
+    "time": "13:22:13",
+    "elapsed": "+2m14s",
+    "tool": "Bash 1m58s",
+    "date": ""
+  },
+  "markers": {
+    "classic": {
+      "set": "[{%date }%time{ %elapsed}{ · %tool}]",
+      "renders": "[13:22:13 +2m14s · Bash 1m58s]",
+      "describes": "the time, the duration, and what made it slow"
+    },
+    "quiet": {
+      "set": "%time",
+      "renders": "13:22:13",
+      "describes": "just the clock, no brackets"
+    },
+    "trailing": {
+      "set": "%time{ %elapsed}",
+      "renders": "13:22:13 +2m14s",
+      "describes": "no brackets, the duration when there is one"
+    },
+    "arrow": {
+      "set": "{%date }%time{ → %elapsed}",
+      "renders": "13:22:13 → +2m14s",
+      "describes": "an arrow instead of brackets"
+    }
+  },
   "presets": {
     "quieter": {
       "describes": "just the time, nothing else",

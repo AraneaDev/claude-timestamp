@@ -1148,6 +1148,33 @@ else
   echo "  skip timeout not installed, fuzz not run"
 fi
 
+# Every named look in schema.json must render to the string stored beside it.
+#
+# /timestamps may not run anything, so it shows these stored strings as
+# previews. Without this test they would be prose that drifts; with it they are
+# strings CI has proven the renderer produces, which is what keeps the promise
+# that a preview cannot differ from what you will actually see.
+if command -v jq >/dev/null 2>&1; then
+  pv_time="$(jq -r '.preview_context.time' "$ROOT/schema.json")"
+  pv_elapsed="$(jq -r '.preview_context.elapsed' "$ROOT/schema.json")"
+  pv_tool="$(jq -r '.preview_context.tool' "$ROOT/schema.json")"
+  pv_date="$(jq -r '.preview_context.date' "$ROOT/schema.json")"
+
+  marker_names="$(jq -r '.markers | keys[]' "$ROOT/schema.json")"
+  is "markers: the block is not empty" "0" "$([ -n "$marker_names" ] && echo 0 || echo 1)"
+
+  while read -r name; do
+    [ -n "$name" ] || continue
+    tpl="$(jq -r --arg n "$name" '.markers[$n].set' "$ROOT/schema.json")"
+    want="$(jq -r --arg n "$name" '.markers[$n].renders' "$ROOT/schema.json")"
+    asserts "markers: $name is a valid template" ct_is_valid_marker "$tpl"
+    ct_render_marker "$tpl" "$pv_time" "$pv_elapsed" "$pv_tool" "$pv_date"
+    is "markers: $name renders what schema.json claims" "$want" "$CT_MARKER"
+  done <<EOF
+$marker_names
+EOF
+fi
+
 echo
 echo "marker rendering end to end"
 
