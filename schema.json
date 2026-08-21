@@ -52,6 +52,63 @@
       ],
       "describes": "colour of the marker; NO_COLOR disables colour regardless"
     },
+    "MARKER": {
+      "default": "[{%date }%time{ %elapsed}{ · %tool}]",
+      "validator": "ct_is_valid_marker",
+      "type": "template",
+      "describes": "the marker's layout; %time %elapsed %tool %date are the parts, a {...} group disappears when every part inside it is empty, and groups do not nest"
+    },
+    "TIME_COLOR": {
+      "default": "",
+      "validator": "ct_is_valid_part_color",
+      "values": [
+        "",
+        "none",
+        "dim",
+        "gray",
+        "red",
+        "green",
+        "yellow",
+        "blue",
+        "magenta",
+        "cyan"
+      ],
+      "describes": "colour of %time; empty inherits COLOR"
+    },
+    "ELAPSED_COLOR": {
+      "default": "",
+      "validator": "ct_is_valid_part_color",
+      "values": [
+        "",
+        "none",
+        "dim",
+        "gray",
+        "red",
+        "green",
+        "yellow",
+        "blue",
+        "magenta",
+        "cyan"
+      ],
+      "describes": "colour of %elapsed; SLOW_COLOR still wins once a turn crosses SLOW_AFTER"
+    },
+    "TOOL_COLOR": {
+      "default": "",
+      "validator": "ct_is_valid_part_color",
+      "values": [
+        "",
+        "none",
+        "dim",
+        "gray",
+        "red",
+        "green",
+        "yellow",
+        "blue",
+        "magenta",
+        "cyan"
+      ],
+      "describes": "colour of %tool; empty inherits COLOR"
+    },
     "ELAPSED": {
       "default": "on",
       "validator": "ct_is_onoff",

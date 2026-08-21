@@ -97,6 +97,10 @@ _ct_read_config_file() {
       DISPLAY_FORMAT) CT_DISPLAY_FORMAT="$value" ;;
       CONTEXT_FORMAT) CT_CONTEXT_FORMAT="$value" ;;
       COLOR)          CT_COLOR="$value" ;;
+      MARKER)         CT_MARKER_TEMPLATE="$value" ;;
+      TIME_COLOR)     CT_TIME_COLOR="$value" ;;
+      ELAPSED_COLOR)  CT_ELAPSED_COLOR="$value" ;;
+      TOOL_COLOR)     CT_TOOL_COLOR="$value" ;;
       ELAPSED)        CT_ELAPSED="$value" ;;
       DATE_ROLLOVER)  CT_DATE_ROLLOVER="$value" ;;
       SLOW_AFTER)     CT_SLOW_AFTER="$value" ;;
@@ -121,6 +125,10 @@ ct_load_config() {
   CT_DISPLAY_FORMAT="24h"     # preset name or raw strftime
   CT_CONTEXT_FORMAT="24h"
   CT_COLOR="dim"
+  CT_MARKER_TEMPLATE='[{%date }%time{ %elapsed}{ · %tool}]'
+  CT_TIME_COLOR=""            # empty = inherit COLOR
+  CT_ELAPSED_COLOR=""
+  CT_TOOL_COLOR=""
   CT_ELAPSED="on"
   CT_SLOW_AFTER="60"          # seconds; 0 disables
   CT_SLOW_COLOR="yellow"
@@ -168,6 +176,10 @@ ct_is_seconds()      { case "${1:-}" in ''|*[!0-9]*) return 1 ;; *) return 0 ;; 
 ct_is_onoff()        { case "${1:-}" in on|off) return 0 ;; *) return 1 ;; esac; }
 ct_is_bool()         { case "${1:-}" in true|false) return 0 ;; *) return 1 ;; esac; }
 
+# A part colour may be empty, which means inherit COLOR. Every other value is a
+# colour name, so this is ct_is_valid_color plus the empty string.
+ct_is_valid_part_color() { [ -z "${1:-}" ] && return 0; ct_is_valid_color "${1:-}"; }
+
 # A pinned zone is checked for shape here and for whether this platform can
 # honour it separately, because those are different failures with different
 # advice attached.
@@ -183,11 +195,11 @@ ct_is_valid_tz() {
 # and record why. Values come from a file a person edited, so a typo should say
 # so rather than quietly doing nothing.
 _ct_require() {
-  local name="$1" check="$2" default="$3" var="CT_$1" value
+  local check="$2" default="$3" shown="${4:-$1}" var="CT_$1" value
   value="${!var}"
   "$check" "$value" && return 0
   printf -v "$var" '%s' "$default"
-  CT_CONFIG_PROBLEMS="${CT_CONFIG_PROBLEMS}${CT_CONFIG_PROBLEMS:+$'\n'}  $name=$value is not valid, using $default"
+  CT_CONFIG_PROBLEMS="${CT_CONFIG_PROBLEMS}${CT_CONFIG_PROBLEMS:+$'\n'}  $shown=$value is not valid, using $default"
 }
 
 # Check everything the config file can set. Reports through CT_CONFIG_PROBLEMS
@@ -200,6 +212,10 @@ ct_validate_config() {
   _ct_require DISPLAY_FORMAT ct_is_valid_format 24h
   _ct_require CONTEXT_FORMAT ct_is_valid_format 24h
   _ct_require COLOR          ct_is_valid_color  dim
+  _ct_require MARKER_TEMPLATE ct_is_valid_marker '[{%date }%time{ %elapsed}{ · %tool}]' MARKER
+  _ct_require TIME_COLOR      ct_is_valid_part_color  ""
+  _ct_require ELAPSED_COLOR   ct_is_valid_part_color  ""
+  _ct_require TOOL_COLOR      ct_is_valid_part_color  ""
   _ct_require SLOW_COLOR     ct_is_valid_color  yellow
   _ct_require SLOW_AFTER     ct_is_seconds      60
   _ct_require IDLE_AFTER     ct_is_seconds      3600

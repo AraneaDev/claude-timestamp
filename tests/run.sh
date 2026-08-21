@@ -155,6 +155,23 @@ is "a path under home is shortened" "~/.claude/x.conf" "$(HOME=/home/someone ct_
 is "a path outside home is left alone" "/etc/x.conf" "$(HOME=/home/someone ct_tilde /etc/x.conf)"
 is "a path merely prefixed by home is left alone" "/home/someone-else/x" "$(HOME=/home/someone ct_tilde /home/someone-else/x)"
 
+fresh 'MARKER=%time' 'TIME_COLOR=cyan' 'ELAPSED_COLOR=green' 'TOOL_COLOR=gray'
+is "config: marker template"  "%time" "$CT_MARKER_TEMPLATE"
+is "config: time colour"      "cyan"  "$CT_TIME_COLOR"
+is "config: elapsed colour"   "green" "$CT_ELAPSED_COLOR"
+is "config: tool colour"      "gray"  "$CT_TOOL_COLOR"
+
+fresh
+is "config: marker defaults to the current layout" \
+  '[{%date }%time{ %elapsed}{ · %tool}]' "$CT_MARKER_TEMPLATE"
+is "config: part colours default to inherit" "" "$CT_TIME_COLOR$CT_ELAPSED_COLOR$CT_TOOL_COLOR"
+
+# The renderer writes CT_MARKER. If the config key loaded into the same
+# variable, the first render would destroy the template.
+fresh 'MARKER=%time'
+ct_render_marker "$CT_MARKER_TEMPLATE" 13:22:13 '' '' ''
+is "config: rendering does not clobber the template" "%time" "$CT_MARKER_TEMPLATE"
+
 echo
 echo "format presets"
 
@@ -1150,6 +1167,20 @@ if command -v jq >/dev/null 2>&1; then
   fresh 'COLOR=cyan'
   asserts "doctor passes on a good config" bash "$SCRIPTS/setup.sh" --doctor
 fi
+
+fresh 'MARKER=%elapsd'
+is "validate: a bad marker falls back" '[{%date }%time{ %elapsed}{ · %tool}]' "$CT_MARKER_TEMPLATE"
+contains "validate: and says so" "MARKER=%elapsd is not valid" "$CT_CONFIG_PROBLEMS"
+
+fresh 'MARKER=[%time{ %elapsed]'
+is "validate: an unbalanced brace falls back" '[{%date }%time{ %elapsed}{ · %tool}]' "$CT_MARKER_TEMPLATE"
+
+fresh 'TIME_COLOR=banana'
+is "validate: a bad part colour falls back to inherit" "" "$CT_TIME_COLOR"
+contains "validate: and names it" "TIME_COLOR=banana is not valid" "$CT_CONFIG_PROBLEMS"
+
+fresh 'TIME_COLOR=none'
+is "validate: none is a usable part colour" "none" "$CT_TIME_COLOR"
 
 echo
 echo "settings apply without a restart"

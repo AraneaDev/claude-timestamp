@@ -49,6 +49,10 @@ fi
 
 # Defaults must match what ct_load_config actually sets. Only keys the loader
 # understands are compared, so its internal CT_* scratch variables are skipped.
+# The sed is scoped to ct_load_config's own body rather than the whole file:
+# other functions assign CT_* variables of their own (the marker renderer
+# assigns CT_MARKER, for instance), and an unscoped scan would read those as
+# if they were defaults for a same-named schema key.
 # A space separates key and value rather than a tab: BSD sed does not expand
 # \t in a replacement, and every default here is a single token with no
 # spaces, so a space is unambiguous (CT_TZ="" yields an empty want, which is
@@ -63,7 +67,7 @@ while read -r key want; do
     schema_defaults_ok=0
     status=1
   fi
-done < <(sed -n 's/^  CT_\([A-Z_]*\)="\([^"]*\)".*/\1 \2/p' hooks/scripts/lib/config.sh)
+done < <(sed -n '/^ct_load_config() {/,/^}/{s/^  CT_\([A-Z_]*\)="\([^"]*\)".*/\1 \2/p}' hooks/scripts/lib/config.sh)
 [ "$schema_defaults_ok" -eq 1 ] && note "every default matches the loader"
 
 # Every enumerated value must actually pass the validator named for that key.

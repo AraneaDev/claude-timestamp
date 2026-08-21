@@ -6,7 +6,7 @@
 
 [![Release](https://img.shields.io/github/v/release/AraneaDev/claude-timestamp)](https://github.com/AraneaDev/claude-timestamp/releases)
 [![CI](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml/badge.svg)](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-407%20passing-2b8a3e)](tests/run.sh)
+[![Tests](https://img.shields.io/badge/tests-420%20passing-2b8a3e)](tests/run.sh)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-364fc7)](#platform-notes)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
@@ -157,6 +157,10 @@ cannot run anything.
 | `DISPLAY_FORMAT` | `24h` | `24h`, `short`, `12h`, `iso`, or any strftime string |
 | `CONTEXT_FORMAT` | `24h` | Same values, for the time Claude is told |
 | `COLOR` | `dim` | `none`, `dim`, `gray`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan` |
+| `MARKER` | `[{%date }%time{ %elapsed}{ · %tool}]` | The marker's layout. `%time`, `%elapsed`, `%tool` and `%date` are the parts, a `{...}` group disappears when every part inside it is empty, and groups do not nest |
+| `TIME_COLOR` | inherit | Colour of `%time`; empty follows `COLOR` |
+| `ELAPSED_COLOR` | inherit | Colour of `%elapsed`; `SLOW_COLOR` still wins on a slow turn |
+| `TOOL_COLOR` | inherit | Colour of `%tool`; empty follows `COLOR` |
 | `ELAPSED` | `on` | Show how long the turn took |
 | `INJECT_CONTEXT` | `true` | Tell Claude the local time each prompt was sent |
 | `SLOW_AFTER` | `60` | Colour the duration past this many seconds, `0` disables |
@@ -292,7 +296,7 @@ no database.
 ## Development
 
 ```bash
-bash tests/run.sh                                    # 407 assertions, no framework
+bash tests/run.sh                                    # 420 assertions, no framework
 shellcheck -S style -e SC1091 hooks/scripts/**/*.sh  # clean
 bash tools/check-docs.sh                             # README against the code
 ```
