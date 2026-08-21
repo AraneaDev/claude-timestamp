@@ -44,7 +44,7 @@ ct_load_config "$cwd"
 # file's absence carries that case. Recording it anyway means a reader gets one
 # shape rather than having to infer a negative from a missing file.
 ct_write_facts() {
-  local file tmp root version writable=false
+  local file tmp root version writable=false probe
   file="$(ct_facts_path)"
   mkdir -p "$(dirname "$file")" 2>/dev/null || return 0
 
@@ -54,9 +54,13 @@ ct_write_facts() {
   version="$(tr -d '[:space:]' 2>/dev/null < "$root/version.txt")" || version=""
   [ -n "$version" ] || version="unknown"
 
-  if mkdir -p "$(ct_state_dir)" 2>/dev/null && : > "$(ct_state_dir)/.probe" 2>/dev/null; then
+  # A fixed filename in a shared directory can be pre-planted as a symlink, and
+  # `: >` follows it. The pid makes the name unguessable to anyone who is not
+  # already able to watch this process.
+  probe="$(ct_state_dir)/.probe.$$"
+  if ct_state_ready && : > "$probe" 2>/dev/null; then
     writable=true
-    rm -f "$(ct_state_dir)/.probe" 2>/dev/null
+    rm -f "$probe" 2>/dev/null
   fi
 
   # Temp file and rename, so a session starting while another reads this never

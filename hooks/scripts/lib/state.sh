@@ -17,9 +17,42 @@
 # is the day something fails at load time in a hook nobody is watching. Do not
 # "simplify" a consumer to source this file on its own.
 
-# Elapsed-time state. One file per session, holding the epoch second the last
-# prompt was submitted.
-ct_state_dir() { printf '%s' "${TMPDIR:-/tmp}/claude-timestamp"; }
+# Where per-session state lives.
+#
+# Per-user, because ${TMPDIR:-/tmp} is shared ground on a multi-user machine
+# and this directory used to be one fixed name in it. Whoever created it first
+# owned it: for the next user it was either unwritable, silently disabling
+# elapsed time and the summary, or -- if created world-writable -- a place to
+# pre-plant a symlink under a filename the plugin would then open for writing.
+ct_state_dir() {
+  printf '%s/claude-timestamp-%s' "${TMPDIR:-/tmp}" "$(id -u 2>/dev/null || printf 'x')"
+}
+
+# Make sure the state directory exists and belongs to us.
+#
+# Returns 1 rather than repairing anything: a directory of this name owned by
+# somebody else is a situation to decline, not to take over. Callers treat a
+# failure the way they already treat an unwritable directory, which is to do
+# less rather than to fail.
+ct_state_ready() {
+  local dir owner
+  dir="$(ct_state_dir)"
+  if [ ! -d "$dir" ]; then
+    # -p only applies -m to the deepest directory, which is fine here: the
+    # deepest directory is the only one this ever creates, since $TMPDIR
+    # itself is expected to already exist.
+    # shellcheck disable=SC2174
+    mkdir -m 700 -p "$dir" 2>/dev/null || return 1
+    return 0
+  fi
+  # shellcheck disable=SC2012  # ls -ld is the portable way to read an owner
+  # name and mode string in one call; find -printf is a GNU extension.
+  owner="$(ls -ld "$dir" 2>/dev/null | awk '{print $3}')"
+  [ -n "$owner" ] || return 1
+  [ "$owner" = "$(id -un 2>/dev/null)" ] || return 1
+  [ -w "$dir" ] || return 1
+  return 0
+}
 
 # Session ids come from the hook payload, so they are reduced to a safe
 # character set before being used as a filename -- an id containing ../ must
@@ -126,7 +159,7 @@ ct_turn_open() {
   local sid="${1:-}" now="${2:-0}" base
   base="$(ct_state_file "$sid")" || return 0
   case "$now" in ''|*[!0-9]*) return 0 ;; esac
-  mkdir -p "$(ct_state_dir)" 2>/dev/null || return 0
+  ct_state_ready || return 0
 
   printf '%s' "$now" > "$base"
   rm -f "${base}.closed" 2>/dev/null || true
@@ -179,7 +212,7 @@ ct_record_away() {
   gap=$(( now - closed ))
   [ "$gap" -ge "$CT_IDLE_AFTER" ] || return 0
 
-  mkdir -p "$(ct_state_dir)" 2>/dev/null || return 0
+  ct_state_ready || return 0
   printf '%s' "$(( $(ct_read_counter "${base}.idle") + gap ))" > "${base}.idle"
   printf '%s' "$gap" > "${base}.away"
   return 0
@@ -203,7 +236,7 @@ ct_note_message() {
   local sid="${1:-}" now="${2:-0}" base
   base="$(ct_state_file "$sid")" || return 0
   case "$now" in ''|*[!0-9]*) return 0 ;; esac
-  mkdir -p "$(ct_state_dir)" 2>/dev/null || return 0
+  ct_state_ready || return 0
   printf '%s' "$now" > "${base}.last"
   return 0
 }
@@ -242,9 +275,18 @@ ct_clear_state() {
 }
 
 # Drop state files from sessions that ended days ago. Called at session start.
+#
+# The legacy shared directory is swept too, for one release: state written
+# before the per-user move is orphaned rather than migrated, because a session
+# already running keeps its own path until it restarts. Remove this once no
+# supported version writes there.
 ct_prune_state() {
-  local dir
+  local dir legacy
   dir="$(ct_state_dir)"
   [ -d "$dir" ] && find "$dir" -type f -mtime +7 -delete 2>/dev/null
+  legacy="${TMPDIR:-/tmp}/claude-timestamp"
+  if [ -d "$legacy" ] && [ ! -L "$legacy" ]; then
+    find "$legacy" -maxdepth 1 -type f -mtime +7 -delete 2>/dev/null
+  fi
   return 0
 }

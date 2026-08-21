@@ -67,7 +67,7 @@ case "$tool_name" in ''|*[![:alnum:]_-]*) tool_name="unknown" ;; esac
 outcome=ok
 [ "$event" = "PostToolUseFailure" ] && outcome=fail
 
-mkdir -p "$(ct_state_dir)"
+ct_state_ready || exit 0
 printf '%s %s %s\n' "$tool_name" "$seconds" "$outcome" >> "$log"
 
 # The session-wide log answers "what made this session slow"; this one

@@ -78,7 +78,7 @@ strip_ansi() {
 # had nothing to do with what it asserted.
 fresh() {
   rm -rf "$(ct_state_dir)"
-  mkdir -p "$(ct_state_dir)"
+  ct_state_ready
   rm -f "$CLAUDE_TIMESTAMP_HISTORY"
   if [ "$#" -gt 0 ]; then
     printf '%s\n' "$@" > "$CLAUDE_TIMESTAMP_CONFIG"
@@ -296,6 +296,21 @@ is "session id becomes a path under the state dir" "$(ct_state_dir)/abc-123" "$(
 is "traversal characters are stripped from the session id" "$(ct_state_dir)/etcpasswd" "$(ct_state_file "../../etc/passwd")"
 refutes "empty session id is refused" ct_state_file ""
 refutes "session id of only separators is refused" ct_state_file "///"
+
+# The state directory is shared ground on any machine without a per-user
+# TMPDIR. A directory somebody else owns is refused rather than written into,
+# and no filename in it is predictable enough to be pre-planted as a symlink.
+is "state dir: is per-user" "1" \
+   "$(case "$(ct_state_dir)" in *"claude-timestamp-$(id -u)") echo 1 ;; *) echo 0 ;; esac)"
+
+fresh
+rm -rf "$(ct_state_dir)"
+asserts "state dir: a fresh directory is accepted" ct_state_ready
+# shellcheck disable=SC2012  # ls -ld is the portable way to read a mode
+# string; find -printf is a GNU extension.
+is "state dir: created 0700" "700" \
+   "$(ls -ld "$(ct_state_dir)" | awk '{print substr($1,2,9)}' \
+      | sed 's/rwx/7/;s/---/0/g' | tr -d '-')"
 
 echo
 echo "color"
