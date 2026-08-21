@@ -10,8 +10,12 @@
 #
 # Sourcing this file has no side effects beyond defining functions.
 #
-# Requires config.sh to be sourced first: ct_format_duration and the CT_*
-# settings are used by the reporting helpers here.
+# Source it after config.sh, always. Nothing here needs config.sh yet: every
+# function below runs standalone today. But ct_record_away arrives shortly and
+# reads CT_IDLE_AFTER, and an order that is only correct some of the time is
+# worse than one that is always correct, because the day it stops being correct
+# is the day something fails at load time in a hook nobody is watching. Do not
+# "simplify" a consumer to source this file on its own.
 
 # Elapsed-time state. One file per session, holding the epoch second the last
 # prompt was submitted.
