@@ -219,7 +219,10 @@ ct_is_valid_part_color() { [ -z "${1:-}" ] && return 0; ct_is_valid_color "${1:-
 # advice attached.
 #
 # TZ is the third setting whose value is free text rather than an enum or a
-# number, so it reaches write_config the same way MARKER and the formats do.
+# number, so both writers put it through conf_value exactly as they do MARKER
+# and the two formats. That symmetry is the point: write_config used to be the
+# one writer that interpolated TZ raw, which meant the account-level file and a
+# project file disagreed about whether the same value needed quoting.
 # setup.sh's own valid_tz happens to block a control-character payload today,
 # but only as a side effect of checking the name against the zoneinfo
 # directory -- and that check is skipped entirely when $ZONEINFO is not a

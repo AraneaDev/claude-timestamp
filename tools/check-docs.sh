@@ -320,6 +320,25 @@ else
   gate state-glob 0 "ct_clear_state no longer removes \"\$base\".*"
 fi
 
+echo "config values are written the same way by both writers"
+# write_config and write_project_config produce the same file format, so a
+# value that one of them quotes and the other interpolates raw is a round-trip
+# bug waiting for the first setting whose value has an edge space. TZ was
+# exactly that for a while: every other free-text key went through conf_value
+# and TZ did not. There is no runtime test for this, because valid_tz blocks
+# every TZ value that would show the difference -- so the invariant lives here,
+# where it can actually fail.
+cv_missing=""
+for key in TZ MARKER DISPLAY_FORMAT CONTEXT_FORMAT; do
+  # shellcheck disable=SC2016  # a literal grep pattern, not a subshell
+  grep -q "^$key=\$(conf_value " hooks/scripts/setup.sh || cv_missing="$cv_missing $key"
+done
+if [ -n "$cv_missing" ]; then
+  gate conf-value-symmetry 0 "free-text keys interpolated without conf_value:$cv_missing"
+else
+  gate conf-value-symmetry 1 "every free-text config value is written through conf_value"
+fi
+
 echo "prose style"
 ps_detail=""
 for f in README.md CONTRIBUTING.md; do

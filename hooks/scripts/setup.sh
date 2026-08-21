@@ -397,7 +397,7 @@ write_config() {
 ENABLED=$CT_ENABLED
 
 # IANA timezone name, or empty for the machine's local time.
-TZ=$CT_TZ
+TZ=$(conf_value "$CT_TZ")
 
 # 24h | short | 12h | iso, or any strftime string (anything with a % in it).
 DISPLAY_FORMAT=$(conf_value "$CT_DISPLAY_FORMAT")
