@@ -2477,11 +2477,47 @@ is "enabled=off: session start stays quiet" "" "$out"
 # The tool-timing hook fires per tool call rather than per message, so it
 # gets its own ENABLED=off check. TOOL_TIMING=on and a real duration so,
 # absent the guard, it would actually write.
+#
+# Since the glob gate exists, this session's own call would be skipped by the
+# gate alone (no session here has a staged sentinel), which would pass this
+# assertion for the wrong reason -- the gate, not the ENABLED check the
+# comment above claims to exercise. A different session's sentinel is staged
+# by hand, the way a concurrent session with timing on would leave one, so
+# the gate lets this call through to the per-session flag read, which falls
+# back to ct_load_config (this session never staged its own flags) and is
+# where ENABLED=off actually has to stop it.
 fresh 'ENABLED=off' 'TOOL_TIMING=on'
 tool_log="$(ct_tool_log "off-5")"
+ct_stage_flag "other" "timing-on" "1"
 printf '{"session_id":"off-5","tool_use_id":"t1","tool_name":"Bash","duration_ms":5000,"hook_event_name":"PostToolUse"}' \
   | bash "$SCRIPTS/post-tool-use.sh" >/dev/null
 refutes "enabled=off: post-tool-use writes no log" test -s "$tool_log"
+
+# Switching the plugin off mid-session must actually stop it. The tool hook
+# reads a cached decision, so the prompt hook has to be able to write "off" --
+# and it could not, when the staging sat behind the master switch.
+fresh 'ENABLED=on' 'TOOL_TIMING=on'
+sid="offmid"; base="$(ct_state_file "$sid")"
+printf '{"session_id":"%s","cwd":"%s"}' "$sid" "$WORK" | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+printf 'ENABLED=off\nTOOL_TIMING=on\n' > "$CLAUDE_TIMESTAMP_CONFIG"
+printf '{"session_id":"%s","cwd":"%s"}' "$sid" "$WORK" | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+is "tool timing: the master switch reaches the staged flag" "off" \
+   "$(ct_read_flag "$sid" "enabled")"
+printf '{"session_id":"%s","tool_name":"Bash","hook_event_name":"PostToolUse","duration_ms":3000}' "$sid" \
+  | bash "$SCRIPTS/post-tool-use.sh" >/dev/null
+is "tool timing: nothing is recorded once switched off" "" \
+   "$(cat "$base.tools" 2>/dev/null)"
+
+# And the sentinel must be cleared, or one switched-off session keeps every
+# other session on the machine paying the parse it exists to avoid.
+refutes "tool timing: the sentinel is cleared when it is switched off" \
+        test -e "$base.timing-on"
+
+# The opposite transition: the sentinel appears when a session wants timing.
+fresh 'ENABLED=on' 'TOOL_TIMING=on'
+printf '{"session_id":"onmid","cwd":"%s"}' "$WORK" | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+asserts "tool timing: the sentinel appears when a session wants it" \
+        test -e "$(ct_state_file onmid).timing-on"
 
 fresh 'ENABLED=on'
 out="$(printf '{"index":0,"session_id":"on-1","delta":"hello"}' | bash "$SCRIPTS/message-display.sh")"

@@ -51,11 +51,15 @@ done
 # A session whose first prompt predates this fix has a turn file but never
 # staged an .enabled sibling, so it cannot appear in the glob above -- it has
 # no way to say what it wants. Rather than let the gate answer "no session
-# wants timing" on its behalf, its calls fall through to the same jq parse
-# and config resolution every call used to pay, until its next prompt catches
-# it up and stages a real answer. Checked with a second glob rather than
-# folded into the loop above so the common case -- every session already
-# staged -- still costs nothing but filesystem stats, no forks either way.
+# wants timing" on its behalf, its calls fall through to the same jq parse and
+# config resolution every call used to pay, until its next prompt catches it up
+# and stages a real answer.
+#
+# This scan's cost grows with the number of sessions in state (measured: ~5ms
+# at 1, ~9ms at 100, ~18ms at 300, bounded by the 7-day prune) -- kept anyway.
+# A missed tool-call measurement is an accuracy loss in the exact number this
+# feature exists to produce; a few extra milliseconds of hook overhead on an
+# already-cheap path is not something this plugin is optimising away.
 if [ "$_ct_timing_wanted" -eq 0 ]; then
   for _ct_f in "$_CT_STATE_DIR"/*; do
     case "$_ct_f" in
