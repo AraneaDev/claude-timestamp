@@ -423,6 +423,19 @@ CONF
 # merged with whatever the file already pinned.
 write_project_config() {
   local file dir key value existing out="" marker_named named line ekey known
+  # $PWD/.claude/claude-timestamp.conf is the account config when $PWD is the
+  # home directory, and ct_find_project_config refuses to read that file as a
+  # project layer. Writing it here would produce a file that calls itself a
+  # project config, is never loaded as one, and has lost every comment in the
+  # account config it replaced.
+  local here
+  here="$(cd "$PWD" 2>/dev/null && pwd -P)" || here="$PWD"
+  if [ -n "${HOME:-}" ] && [ "$here" = "$(cd "$HOME" 2>/dev/null && pwd -P || printf '%s' "$HOME")" ]; then
+    echo "--project writes .claude/claude-timestamp.conf in the current directory," >&2
+    echo "and here that is your account configuration, not a project's. Run it from" >&2
+    echo "a project directory, or drop --project to change your account settings." >&2
+    return 2
+  fi
   file="$PWD/$CT_CONFIG_NAME"
   dir="$(dirname "$file")"
   mkdir -p "$dir"
@@ -484,9 +497,21 @@ write_project_config() {
   if [ -n "$existing" ]; then
     while IFS= read -r line; do
       case "$line" in
-        ''|'#'*) continue ;;
-        *=*)     ekey="${line%%=*}" ;;
-        *)       continue ;;
+        '') continue ;;
+        '#'*)
+          # A comment somebody wrote by hand is theirs, not ours to drop.
+          # Skipped only when it is one of the three this function writes.
+          case "$line" in
+            '# claude-timestamp settings for this project'|\
+            '# Layered over your own configuration, which still supplies everything'|\
+            '# not listed here. Run /timestamps to change it.') continue ;;
+          esac
+          out="${out}${line}
+"
+          continue
+          ;;
+        *=*) ekey="${line%%=*}" ;;
+        *)   continue ;;
       esac
       case "$ekey" in
         *[![:upper:][:digit:]_]*|'') continue ;;
@@ -873,7 +898,7 @@ main() {
       "$set_elapsed" "$set_inject" "$set_rollover" "$set_slow" "$set_slowcolor" \
       "$set_idle" "$set_summary" "$set_subagents" "$set_tooltiming" "$set_enabled" \
       "$set_marker" "$set_timecolor" "$set_elapsedcolor" "$set_toolcolor" \
-      "$set_history" "$set_historylimit" "$marker_named"
+      "$set_history" "$set_historylimit" "$marker_named" || exit $?
   else
     write_config
   fi

@@ -684,7 +684,7 @@ ct_history_append() {
   mkdir -p "$(dirname "$file")" 2>/dev/null || return 0
 
   printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
-    "$(date '+%Y-%m-%dT%H:%M:%S')" "${1:-0}" "${2:-0}" "${3:-0}" "${4:-0}" "${5:-0}" >> "$file" 2>/dev/null || return 0
+    "$(ct_now iso)" "${1:-0}" "${2:-0}" "${3:-0}" "${4:-0}" "${5:-0}" >> "$file" 2>/dev/null || return 0
 
   limit="${CT_HISTORY_LIMIT:-200}"
   case "$limit" in ''|*[!0-9]*) limit=200 ;; esac

@@ -1729,6 +1729,15 @@ is "the newest rows are the ones kept" "6" "$(awk -F'\t' 'END{print $2}' "$CLAUD
 fresh 'HISTORY_LIMIT=nonsense'
 is "a nonsense limit falls back" "200" "$CT_HISTORY_LIMIT"
 
+# Every rendered time honours a pinned zone. History was the exception, which
+# put the recorded date a day out from every timestamp the user ever saw, and
+# --stats renders exactly the date half of it.
+fresh 'TZ=Asia/Tokyo' 'HISTORY=on'
+rm -f "$CLAUDE_TIMESTAMP_HISTORY"
+ct_history_append 10 1 5 0 0
+is "history: the row is stamped in the pinned zone" \
+   "$(TZ=Asia/Tokyo date '+%Y-%m-%d')" "$(cut -f1 "$CLAUDE_TIMESTAMP_HISTORY" | cut -dT -f1)"
+
 # HISTORY and SUMMARY are separate settings, so switching the end-of-session
 # report off must not silently switch the running record off with it. The
 # counters they share are written unconditionally; only the reporting is gated.
@@ -2231,6 +2240,33 @@ if [ -e "$PROJ/empty/.claude/claude-timestamp.conf" ]; then
 else
   pass "a refused write leaves no file behind"
 fi
+
+# --project writes $PWD/.claude/claude-timestamp.conf. From the home directory
+# that is the account config, which ct_find_project_config explicitly refuses
+# to treat as a project layer, so the two halves of the feature disagree about
+# what the file is.
+PH="$WORK/projhome"
+rm -rf "$PH"; mkdir -p "$PH/.claude"
+printf '# a hand-written note\nCOLOR=cyan\n' > "$PH/.claude/claude-timestamp.conf"
+out="$( cd "$PH" && unset CLAUDE_TIMESTAMP_CONFIG
+        HOME="$PH" bash "$SCRIPTS/setup.sh" --project --color=none 2>&1 )" && rc=0 || rc=$?
+is "project: refused from the home directory" "2" "$rc"
+contains "project: and says why" "your account" "$out"
+contains "project: the file is untouched" "a hand-written note" \
+         "$(cat "$PH/.claude/claude-timestamp.conf")"
+
+# The refusal must compare resolved paths, not textual ones -- a symlinked
+# home is the common case where $PWD and $HOME name the same directory
+# without spelling it the same way.
+PHREAL="$WORK/projhome-real"
+PHLINK="$WORK/projhome-link"
+rm -rf "$PHREAL" "$PHLINK"; mkdir -p "$PHREAL/.claude"
+ln -s "$PHREAL" "$PHLINK"
+printf '# a hand-written note\nCOLOR=cyan\n' > "$PHREAL/.claude/claude-timestamp.conf"
+out="$( cd "$PHLINK" && unset CLAUDE_TIMESTAMP_CONFIG
+        HOME="$PHREAL" bash "$SCRIPTS/setup.sh" --project --color=none 2>&1 )" && rc=0 || rc=$?
+is "project: refused from a symlinked home too" "2" "$rc"
+contains "project: symlinked home says why" "your account" "$out"
 
 out="$( cd "$PROJ/writable" && unset CLAUDE_TIMESTAMP_CONFIG && HOME="$PROJ/home" \
         bash "$SCRIPTS/setup.sh" --doctor 2>&1 )"
