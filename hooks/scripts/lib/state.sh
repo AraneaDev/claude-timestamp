@@ -46,44 +46,72 @@ ct_state_dir() { ct_state_dir_var; printf '%s' "$_CT_STATE_DIR"; }
 # over. Callers treat a failure the way they already treat an unwritable
 # directory, which is to do less rather than to fail.
 ct_state_ready() {
-  local dir line owner perms
-  dir="$(ct_state_dir)"
+  local dir line perms
 
-  # Create the leaf without -p, and treat failure as the signal to look rather
-  # than as an error to swallow.
+  # Resolve without a subshell: ct_state_dir() prints, and a print costs a fork
+  # at every call site. The _var form assigns, which is the pattern
+  # ct_paint_part and ct_color_seq already established for the hot paths.
+  ct_state_dir_var
+  dir="$_CT_STATE_DIR"
+
+  # Refuse a symlink outright, before any test that would follow one.
   #
-  # A check-then-create is a race, and not a theoretical one: `mkdir -p`
-  # succeeds on a directory that already exists no matter who owns it, so a
-  # function that tested `[ ! -d ]` first and then created would return success
-  # having never inspected a directory an attacker planted in the window
-  # between the two. /tmp is swept periodically on many systems, so that window
-  # reopens over a machine's lifetime rather than existing once at install.
+  # This line is load-bearing and easy to delete by accident, so: `[ -d ]`,
+  # `[ -O ]` and `chmod` all FOLLOW symlinks. `ls -ld` does not. Without this
+  # check, an attacker who plants a symlink at this path pointing at a
+  # directory we DO own passes an ownership test that follows it, and then the
+  # mode branch below chmods their chosen target rather than our state
+  # directory. Measured, on a build that lacked this line: a victim directory
+  # went from mode 755 to 700 at the attacker's choosing.
   #
-  # Without -p, an existing directory makes mkdir fail, and mkdir itself is
-  # atomic, so exactly one racer creates it and every other caller falls
-  # through to the inspection below. The parent is created separately: there is
-  # no security question about $TMPDIR itself, only about the leaf we own.
-  mkdir -p "${dir%/*}" 2>/dev/null || true
-  if mkdir -m 700 "$dir" 2>/dev/null; then
-    return 0
+  # Refusing every symlink is also stricter than checking who owns it. A
+  # symlink here that we own ourselves is still a path we did not create and
+  # cannot vouch for, and declining costs the user nothing but a session
+  # without timings.
+  if [ -L "$dir" ]; then
+    return 1
   fi
 
-  # It exists, or it could not be created. Either way, inspect what is there.
-  [ -d "$dir" ] || return 1
-  # shellcheck disable=SC2012  # one ls -ld answers both owner and mode; find -printf is GNU-only
-  line="$(ls -ld "$dir" 2>/dev/null)" || return 1
-  [ -n "$line" ] || return 1
+  # Two paths, and the split is what keeps this both safe and cheap.
+  #
+  # The hazard is a directory of this name that somebody else planted. `mkdir
+  # -p` is no defence, because it succeeds on an existing directory no matter
+  # who owns it -- so a function that tested `[ ! -d ]` and then created would
+  # return success having never looked at what was there. The defence is that
+  # EVERY path which finds an existing directory inspects it, and the only path
+  # that creates one uses plain `mkdir -m 700`, which is atomic and fails if
+  # anyone won the race. Neither branch can reach `return 0` on a directory it
+  # has not either created privately itself or inspected below.
+  #
+  # /tmp is swept periodically on many systems, so the directory can vanish
+  # under a live session. Nothing here is cached for that reason: this runs in
+  # full on every call, and the steady state costs exactly one process.
+  if [ ! -d "$dir" ]; then
+    mkdir -p "${dir%/*}" 2>/dev/null || true
+    mkdir -m 700 "$dir" 2>/dev/null && return 0
+    # Lost the race, or could not create it. Fall through and inspect.
+    [ -d "$dir" ] || return 1
+    # Whoever won the race may have won it with a symlink.
+    if [ -L "$dir" ]; then
+      return 1
+    fi
+  fi
 
-  owner="$(printf '%s' "$line" | awk '{print $3}')"
-  [ -n "$owner" ] || return 1
-  [ "$owner" = "$(id -un 2>/dev/null)" ] || return 1
+  # `[ -O ]` is a bash builtin comparing the EFFECTIVE UID numerically. It
+  # costs no process, and it is stricter than matching `ls`'s owner column
+  # against `id -un`: ls truncates a long owner name on some systems, and two
+  # account names can map to one uid. It is only safe here because the symlink
+  # rejection above has already run.
+  [ -O "$dir" ] || return 1
 
   # Ownership alone was never the guarantee. A directory we own but that anyone
   # can write to lets any local user create a symlink inside it, which is the
   # original attack with one extra step. Tighten rather than decline: the
   # directory is ours, so repairing it is both safe and what the user wants.
-  # The mode comes from the `ls -ld` already run, so this costs no extra
-  # process in the common case where it is already right.
+  # This is the one process the steady state pays, and it is not cached --
+  # a mode can be loosened after we last looked, including by our own hand.
+  # shellcheck disable=SC2012  # ls -ld reads the mode; find -printf is GNU-only
+  line="$(ls -ld "$dir" 2>/dev/null)" || return 1
   perms="${line%% *}"
   case "$perms" in
     drwx------*) ;;

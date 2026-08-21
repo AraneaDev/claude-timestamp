@@ -322,6 +322,42 @@ asserts "state dir: a permissive mode is repaired, not refused" ct_state_ready
 is "state dir: and it ends up private" "drwx------" \
    "$(ls -ld "$(ct_state_dir)" | cut -c1-10)"
 
+# A symlink at the state directory path is refused outright, whoever owns it.
+#
+# This is the whole reason ownership is settled with `[ -L ]` before `[ -O ]`:
+# -d, -O and chmod all FOLLOW a symlink, and ls -ld does not. A build that
+# checked ownership with a bare `[ -O ]` accepted an attacker-planted symlink
+# and then chmod'd the attacker's chosen target -- measured, a victim directory
+# went 755 -> 700. Refusing every symlink also covers the case the ownership
+# comparison always let through: one we planted ourselves.
+fresh
+victim="$(ct_state_dir).victim"
+rm -rf "$victim" "$(ct_state_dir)"
+mkdir -p "$victim"
+chmod 755 "$victim"
+ln -s "$victim" "$(ct_state_dir)"
+refutes "state dir: a symlink is refused even when we own it" ct_state_ready
+is "state dir: and the symlink's target is left alone" "755" \
+   "$(stat -c%a "$victim" 2>/dev/null || stat -f%Lp "$victim")"
+rm -f "$(ct_state_dir)"
+rm -rf "$victim"
+
+# The directory can vanish under a live session: /tmp is swept on many systems.
+# Nothing about the verdict may be remembered, or the process keeps reporting a
+# directory that is no longer there.
+#
+# These two pass against the code as it stands and are not regression
+# detectors. They are here because the obvious way to make ct_state_ready
+# cheaper is to cache its verdict, and that was tried: it takes 31 other cases
+# down with it, for this reason. The pair states the constraint at the point
+# where someone would otherwise have to rediscover it.
+fresh
+ct_state_ready || true
+rm -rf "$(ct_state_dir)"
+asserts "state dir: a vanished directory is rebuilt, not remembered" ct_state_ready
+is "state dir: and it really is back" "1" \
+   "$([ -d "$(ct_state_dir)" ] && echo 1 || echo 0)"
+
 # The legacy shared directory is untrusted ground now: another user may own it
 # and may have put things in it. The sweep must reach only old regular files
 # sitting directly inside it.
