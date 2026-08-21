@@ -1761,6 +1761,17 @@ if command -v jq >/dev/null 2>&1; then
   is_near "away: measured from the turn close, not the last message" \
           3700 "$(ct_read_counter "$base.idle")" 2
 
+  # Drawing a message must not touch the idle total any more. This is the
+  # assertion that actually fails against the old code: message-display.sh used
+  # to accumulate `.idle` itself, from a boundary that swallowed the reply's own
+  # latency. The measurement now belongs to the prompt hook, and the display
+  # hook only draws what was staged for it.
+  idle_before="$(ct_read_counter "$base.idle")"
+  printf '{"index":0,"session_id":"%s","cwd":"%s","delta":"reply"}' "$sid" "$WORK" \
+    | bash "$SCRIPTS/message-display.sh" >/dev/null
+  is "away: drawing a message does not change the idle total" \
+     "$idle_before" "$(ct_read_counter "$base.idle")"
+
   printf '{"session_id":"%s","cwd":"%s"}' "$sid" "$WORK" | bash "$SCRIPTS/stop.sh" >/dev/null
   ct_session_totals "$sid"
   elapsed=$(( $(date +%s) - _CT_START ))
