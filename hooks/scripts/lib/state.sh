@@ -134,6 +134,34 @@ ct_dominant_tool() {
     }' "$log"
 }
 
+# Stage a decision the tool hooks need but cannot make for themselves.
+#
+# PostToolUse decides whether to do anything before it parses its payload, so
+# it has no cwd to resolve a project config from, and paying for a jq process
+# per tool call to look one up would cost more than the feature. The prompt
+# hook does have the payload's cwd, and runs once per turn, so it resolves the
+# answer there and leaves it where the tool hook can read it with a builtin.
+#
+# Not the facts file: that is per-machine, so two sessions in different
+# projects would overwrite each other's answer.
+ct_stage_flag() {
+  local sid="${1:-}" name="${2:-}" value="${3:-}" base
+  [ -n "$name" ] || return 0
+  base="$(ct_state_file "$sid")" || return 0
+  ct_state_ready || return 0
+  printf '%s' "$value" > "${base}.${name}"
+  return 0
+}
+
+ct_read_flag() {
+  local sid="${1:-}" name="${2:-}" base
+  [ -n "$name" ] || return 0
+  base="$(ct_state_file "$sid")" || return 0
+  [ -r "${base}.${name}" ] || return 0
+  cat "${base}.${name}" 2>/dev/null
+  return 0
+}
+
 # Read a counter from the session state, defaulting to 0 when absent or
 # corrupt, so a damaged state file degrades to "no history" rather than
 # breaking the marker.

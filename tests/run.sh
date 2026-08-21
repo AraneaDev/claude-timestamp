@@ -2074,6 +2074,25 @@ if command -v jq >/dev/null 2>&1; then
   printf 'DISPLAY_FORMAT=iso\nCOLOR=none\nELAPSED=off\nIDLE_AFTER=0\nDATE_ROLLOVER=off\n' \
     > "$PROJ/with space/.claude/claude-timestamp.conf"
   contains "a cwd containing spaces is handled" "T" "$(hook_in "$PROJ/with space" "")"
+
+  # The tool hook decides whether to act before parsing its payload, so it has
+  # no cwd of its own to resolve a project config from and used $PWD instead.
+  # The marker hook uses the payload's cwd. When they disagree, the marker
+  # believes attribution is available and the writer never fills the log.
+  PT="$WORK/tooltiming"
+  rm -rf "$PT"; mkdir -p "$PT/home/.claude" "$PT/repo/.claude"
+  printf 'TOOL_TIMING=off\n' > "$PT/home/.claude/claude-timestamp.conf"
+  printf 'TOOL_TIMING=on\n'  > "$PT/repo/.claude/claude-timestamp.conf"
+
+  out="$( unset CLAUDE_TIMESTAMP_CONFIG
+          HOME="$PT/home"; export HOME
+          cd "$PT/home" || exit 1
+          printf '{"session_id":"tt","cwd":"%s/repo"}' "$PT" \
+            | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+          printf '{"session_id":"tt","tool_name":"Bash","hook_event_name":"PostToolUse","duration_ms":1500}' \
+            | bash "$SCRIPTS/post-tool-use.sh" >/dev/null
+          cat "$(ct_state_file tt).tools" 2>/dev/null )"
+  contains "tool timing: follows the payload's project, not the process's cwd" "Bash 1.500 ok" "$out"
 fi
 
 echo

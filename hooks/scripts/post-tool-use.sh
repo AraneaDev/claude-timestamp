@@ -27,18 +27,31 @@ set -euo pipefail
 CT_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib"
 source "$CT_LIB/config.sh"
 source "$CT_LIB/state.sh"
-ct_load_config
 
-# The master switch. Everything below writes state, and off means none of it.
-[ "$CT_ENABLED" = "on" ] || exit 0
-[ "$CT_TOOL_TIMING" = "on" ] || exit 0
-# Checked last, so the common case -- tool timing off -- costs a bash builtin
-# rather than a jq process fork on every tool call.
+# No jq: nothing can be read out of the payload, including the session id this
+# hook needs to find its own state. Checked first because everything below
+# depends on it.
 command -v jq >/dev/null 2>&1 || exit 0
 
 input="$(cat)"
 IFS=$'\x1f' read -r session_id tool_name event ms <<< "$(printf '%s' "$input" \
   | jq -r '[(.session_id // "-"), (.tool_name // ""), (.hook_event_name // ""), (.duration_ms // "" | tostring)] | join("\u001f")')"
+
+# The prompt hook resolved both settings against the payload's cwd and left
+# them here, so this hook honours the same project config the marker does
+# without resolving one itself. A session whose first prompt predates this
+# version has no staged answer; fall back to the process's own view, which is
+# what this hook used to do unconditionally.
+ct_enabled="$(ct_read_flag "$session_id" "enabled")"
+ct_timing="$(ct_read_flag "$session_id" "tooltiming")"
+if [ -z "$ct_enabled" ] || [ -z "$ct_timing" ]; then
+  ct_load_config
+  ct_enabled="${ct_enabled:-$CT_ENABLED}"
+  ct_timing="${ct_timing:-$CT_TOOL_TIMING}"
+fi
+
+[ "$ct_enabled" = "on" ] || exit 0
+[ "$ct_timing" = "on" ] || exit 0
 
 # Absent, or not composed entirely of digits: there is no usable duration, so
 # the call goes unrecorded rather than logged with a made-up number. A

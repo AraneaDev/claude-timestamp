@@ -53,6 +53,11 @@ if state_file="$(ct_state_file "$session_id")"; then
   ct_record_away "$session_id" "$now"
   ct_turn_open "$session_id" "$now"
 
+  # Resolved here because this hook has the payload's cwd and runs once per
+  # turn. The tool hook has the session id but no cwd, and fires per call.
+  ct_stage_flag "$session_id" "tooltiming" "$CT_TOOL_TIMING"
+  ct_stage_flag "$session_id" "enabled"    "$CT_ENABLED"
+
   # Cleared unconditionally rather than under TOOL_TIMING, so switching tool
   # timing on mid-session cannot inherit a log from before it was on.
   if turn_log="$(ct_turn_tool_log "$session_id")"; then
