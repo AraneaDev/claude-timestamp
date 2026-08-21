@@ -1782,6 +1782,51 @@ if command -v jq >/dev/null 2>&1; then
          "at most $elapsed" "$(( _CT_WAIT + _CT_IDLE ))"
   fi
 
+  # A staged gap must not outlive the boundary it belongs to. A turn that closes
+  # after a real break but renders no message -- a tool-only turn, or one
+  # interrupted before any text streamed -- leaves its figure staged. The next
+  # boundary must clear it, or a later and entirely unrelated message draws a
+  # divider for a break that never happened, and the model is told the same.
+  fresh 'IDLE_AFTER=3600' 'SUMMARY=on'
+  sid="stale"
+  base="$(ct_state_file "$sid")"
+  now="$(date +%s)"
+  printf '%s' "$(( now - 7200 ))" > "$base.closed"
+  ct_record_away "$sid" "$now"
+  is "away: a qualifying gap is staged" "7200" "$(ct_read_counter "$base.away")"
+
+  printf '%s' "$(( now - 10 ))" > "$base.closed"
+  ct_record_away "$sid" "$now"
+  is "away: a non-qualifying boundary clears the stale figure" \
+     "0" "$(ct_read_counter "$base.away")"
+
+  # ct_session_totals clamps rather than trusting the counters, because a clock
+  # that moved backwards can leave a figure larger than the session it belongs
+  # to. The tiling assertion above cannot catch a clamp regression: it reads the
+  # values *after* the clamp has already applied. This exercises the clamp
+  # itself, which is the thing that assertion was standing in for.
+  fresh
+  sid="clamp"
+  base="$(ct_state_file "$sid")"
+  now="$(date +%s)"
+  printf '%s' "$(( now - 100 ))" > "$base.start"
+  printf '900' > "$base.wait"
+  printf '900' > "$base.idle"
+  ct_session_totals "$sid"
+  is_near "clamp: waiting alone cannot exceed the session" 100 "$_CT_WAIT" 2
+  is      "clamp: away never goes negative"                "0" "$_CT_IDLE"
+
+  fresh
+  sid="clamp2"
+  base="$(ct_state_file "$sid")"
+  now="$(date +%s)"
+  printf '%s' "$(( now - 100 ))" > "$base.start"
+  printf '60'  > "$base.wait"
+  printf '900' > "$base.idle"
+  ct_session_totals "$sid"
+  is      "clamp: waiting under the total is left alone" "60" "$_CT_WAIT"
+  is_near "clamp: away absorbs the overflow"             40 "$_CT_IDLE" 2
+
   fresh 'TOOL_TIMING=on'
   printf '{"session_id":"f","tool_use_id":"t1","tool_name":"Bash","duration_ms":1000,"hook_event_name":"PostToolUseFailure"}' \
     | bash "$SCRIPTS/post-tool-use.sh"

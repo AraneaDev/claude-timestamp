@@ -159,6 +159,18 @@ ct_turn_close() {
 ct_record_away() {
   local sid="${1:-}" now="${2:-0}" base closed gap
   base="$(ct_state_file "$sid")" || return 0
+
+  # Clear first, unconditionally, so that every path through this function
+  # positively decides what `.away` holds. Leaving the early returns silent
+  # would let a staged figure outlive the boundary it belongs to: a turn that
+  # closes after a real break but then renders no message -- a tool-only turn,
+  # or one interrupted before any text streamed -- leaves its gap staged, and
+  # the next boundary, if it does not itself qualify, would leave that stale
+  # figure in place for whichever message renders next. That message would draw
+  # a divider for a break that never happened, and the model would be told the
+  # same thing.
+  rm -f "${base}.away" 2>/dev/null || true
+
   case "$now" in ''|*[!0-9]*) return 0 ;; esac
   [ "${CT_IDLE_AFTER:-0}" -gt 0 ] 2>/dev/null || return 0
 
