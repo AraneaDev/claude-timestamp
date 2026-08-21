@@ -112,6 +112,7 @@ echo "config parsing"
 fresh
 ct_load_config
 is "defaults: display format" "24h" "$CT_DISPLAY_FORMAT"
+# shellcheck disable=SC2153  # CT_COLOR is the library's variable, not a typo for NO_COLOR
 is "defaults: color" "dim" "$CT_COLOR"
 is "defaults: timezone is machine local" "" "$CT_TZ"
 is "defaults: elapsed on" "on" "$CT_ELAPSED"
@@ -317,9 +318,11 @@ ct_color_seq ""
 is "color seq: empty is empty" "" "$_CT_SEQ"
 
 # NO_COLOR wins over any named colour, the same way it does for ct_color_start.
-( NO_COLOR=1; ct_color_seq cyan; [ -z "$_CT_SEQ" ] ) \
-  && pass "color seq: NO_COLOR silences it" \
-  || fail "color seq: NO_COLOR silences it" "empty" "$_CT_SEQ"
+if ( NO_COLOR=1; ct_color_seq cyan; [ -z "$_CT_SEQ" ] ); then
+  pass "color seq: NO_COLOR silences it"
+else
+  fail "color seq: NO_COLOR silences it" "empty" "non-empty"
+fi
 
 # ct_color_start must keep behaving exactly as before, now that it shares a table.
 is "color start still works"   "$(printf '\033[36m')" "$(ct_color_start cyan)"
@@ -350,9 +353,11 @@ asserts "paint part returns 0 with text"           ct_paint_part cyan "x" dim
 asserts "paint part returns 0 with empty text"     ct_paint_part cyan "" dim
 asserts "paint part returns 0 with an empty base"  ct_paint_part cyan "x" ""
 
-( NO_COLOR=1; ct_color_seq cyan ) \
-  && pass "color seq returns 0 under NO_COLOR" \
-  || fail "color seq returns 0 under NO_COLOR" "exit 0" "non-zero exit"
+if ( NO_COLOR=1; ct_color_seq cyan ); then
+  pass "color seq returns 0 under NO_COLOR"
+else
+  fail "color seq returns 0 under NO_COLOR" "exit 0" "non-zero exit"
+fi
 
 # CLAUDE_CODE_ENTRYPOINT is set by Claude Code and inherited by every hook, as
 # any child process would inherit it. A client that does not render ANSI (the
@@ -364,91 +369,129 @@ asserts "paint part returns 0 with an empty base"  ct_paint_part cyan "x" ""
 # rest of the suite -- exactly the hazard NO_COLOR's tests already guard
 # against above.
 
-( unset CLAUDE_CODE_ENTRYPOINT
-  ct_color_seq dim; [ -n "$_CT_SEQ" ] ) \
-  && pass "entrypoint unset: color seq gets colour" \
-  || fail "entrypoint unset: color seq gets colour" "non-empty" "empty"
-( unset CLAUDE_CODE_ENTRYPOINT
-  ct_paint_part dim "13:22" ""; [ "$_CT_PART" != "13:22" ] ) \
-  && pass "entrypoint unset: paint part gets colour" \
-  || fail "entrypoint unset: paint part gets colour" "coloured" "$_CT_PART"
+if ( unset CLAUDE_CODE_ENTRYPOINT
+     ct_color_seq dim; [ -n "$_CT_SEQ" ] ); then
+  pass "entrypoint unset: color seq gets colour"
+else
+  fail "entrypoint unset: color seq gets colour" "non-empty" "empty"
+fi
+if ( unset CLAUDE_CODE_ENTRYPOINT
+     ct_paint_part dim "13:22" ""; [ "$_CT_PART" != "13:22" ] ); then
+  pass "entrypoint unset: paint part gets colour"
+else
+  fail "entrypoint unset: paint part gets colour" "coloured" "plain"
+fi
 
-( CLAUDE_CODE_ENTRYPOINT=cli
-  ct_color_seq dim; [ -n "$_CT_SEQ" ] ) \
-  && pass "entrypoint cli: color seq gets colour" \
-  || fail "entrypoint cli: color seq gets colour" "non-empty" "empty"
-( CLAUDE_CODE_ENTRYPOINT=cli
-  ct_paint_part dim "13:22" ""; [ "$_CT_PART" != "13:22" ] ) \
-  && pass "entrypoint cli: paint part gets colour" \
-  || fail "entrypoint cli: paint part gets colour" "coloured" "$_CT_PART"
+if ( CLAUDE_CODE_ENTRYPOINT=cli
+     ct_color_seq dim; [ -n "$_CT_SEQ" ] ); then
+  pass "entrypoint cli: color seq gets colour"
+else
+  fail "entrypoint cli: color seq gets colour" "non-empty" "empty"
+fi
+if ( CLAUDE_CODE_ENTRYPOINT=cli
+     ct_paint_part dim "13:22" ""; [ "$_CT_PART" != "13:22" ] ); then
+  pass "entrypoint cli: paint part gets colour"
+else
+  fail "entrypoint cli: paint part gets colour" "coloured" "plain"
+fi
 
-( CLAUDE_CODE_ENTRYPOINT=claude-vscode
-  ct_color_seq dim; [ -z "$_CT_SEQ" ] ) \
-  && pass "entrypoint claude-vscode: color seq gets no colour" \
-  || fail "entrypoint claude-vscode: color seq gets no colour" "empty" "$_CT_SEQ"
-( CLAUDE_CODE_ENTRYPOINT=claude-vscode
-  ct_paint_part dim "13:22" ""; [ "$_CT_PART" = "13:22" ] ) \
-  && pass "entrypoint claude-vscode: paint part gets no colour" \
-  || fail "entrypoint claude-vscode: paint part gets no colour" "13:22" "$_CT_PART"
+if ( CLAUDE_CODE_ENTRYPOINT=claude-vscode
+     ct_color_seq dim; [ -z "$_CT_SEQ" ] ); then
+  pass "entrypoint claude-vscode: color seq gets no colour"
+else
+  fail "entrypoint claude-vscode: color seq gets no colour" "empty" "non-empty"
+fi
+if ( CLAUDE_CODE_ENTRYPOINT=claude-vscode
+     ct_paint_part dim "13:22" ""; [ "$_CT_PART" = "13:22" ] ); then
+  pass "entrypoint claude-vscode: paint part gets no colour"
+else
+  fail "entrypoint claude-vscode: paint part gets no colour" "13:22" "coloured"
+fi
 
-( CLAUDE_CODE_ENTRYPOINT=sdk-cli
-  ct_color_seq dim; [ -z "$_CT_SEQ" ] ) \
-  && pass "entrypoint sdk-cli: color seq gets no colour" \
-  || fail "entrypoint sdk-cli: color seq gets no colour" "empty" "$_CT_SEQ"
-( CLAUDE_CODE_ENTRYPOINT=sdk-cli
-  ct_paint_part dim "13:22" ""; [ "$_CT_PART" = "13:22" ] ) \
-  && pass "entrypoint sdk-cli: paint part gets no colour" \
-  || fail "entrypoint sdk-cli: paint part gets no colour" "13:22" "$_CT_PART"
+if ( CLAUDE_CODE_ENTRYPOINT=sdk-cli
+     ct_color_seq dim; [ -z "$_CT_SEQ" ] ); then
+  pass "entrypoint sdk-cli: color seq gets no colour"
+else
+  fail "entrypoint sdk-cli: color seq gets no colour" "empty" "non-empty"
+fi
+if ( CLAUDE_CODE_ENTRYPOINT=sdk-cli
+     ct_paint_part dim "13:22" ""; [ "$_CT_PART" = "13:22" ] ); then
+  pass "entrypoint sdk-cli: paint part gets no colour"
+else
+  fail "entrypoint sdk-cli: paint part gets no colour" "13:22" "coloured"
+fi
 
-( CLAUDE_CODE_ENTRYPOINT=something-invented-later
-  ct_color_seq dim; [ -z "$_CT_SEQ" ] ) \
-  && pass "unknown future entrypoint: color seq gets no colour" \
-  || fail "unknown future entrypoint: color seq gets no colour" "empty" "$_CT_SEQ"
-( CLAUDE_CODE_ENTRYPOINT=something-invented-later
-  ct_paint_part dim "13:22" ""; [ "$_CT_PART" = "13:22" ] ) \
-  && pass "unknown future entrypoint: paint part gets no colour" \
-  || fail "unknown future entrypoint: paint part gets no colour" "13:22" "$_CT_PART"
+if ( CLAUDE_CODE_ENTRYPOINT=something-invented-later
+     ct_color_seq dim; [ -z "$_CT_SEQ" ] ); then
+  pass "unknown future entrypoint: color seq gets no colour"
+else
+  fail "unknown future entrypoint: color seq gets no colour" "empty" "non-empty"
+fi
+if ( CLAUDE_CODE_ENTRYPOINT=something-invented-later
+     ct_paint_part dim "13:22" ""; [ "$_CT_PART" = "13:22" ] ); then
+  pass "unknown future entrypoint: paint part gets no colour"
+else
+  fail "unknown future entrypoint: paint part gets no colour" "13:22" "coloured"
+fi
 
 # Set-but-empty is not the same signal as unset: something touched the
 # variable and produced a non-cli result, so it must fall through to no
 # colour rather than being read as "never set" and defaulting to cli. This is
 # exactly what distinguishes the guard's single-dash expansion
 # (${CLAUDE_CODE_ENTRYPOINT-cli}) from :-, which would collapse the two cases.
-( CLAUDE_CODE_ENTRYPOINT=""
-  ct_color_seq dim; [ -z "$_CT_SEQ" ] ) \
-  && pass "entrypoint set to empty string: color seq gets no colour" \
-  || fail "entrypoint set to empty string: color seq gets no colour" "empty" "$_CT_SEQ"
-( CLAUDE_CODE_ENTRYPOINT=""
-  ct_paint_part dim "13:22" ""; [ "$_CT_PART" = "13:22" ] ) \
-  && pass "entrypoint set to empty string: paint part gets no colour" \
-  || fail "entrypoint set to empty string: paint part gets no colour" "13:22" "$_CT_PART"
+if ( CLAUDE_CODE_ENTRYPOINT=""
+     ct_color_seq dim; [ -z "$_CT_SEQ" ] ); then
+  pass "entrypoint set to empty string: color seq gets no colour"
+else
+  fail "entrypoint set to empty string: color seq gets no colour" "empty" "non-empty"
+fi
+if ( CLAUDE_CODE_ENTRYPOINT=""
+     ct_paint_part dim "13:22" ""; [ "$_CT_PART" = "13:22" ] ); then
+  pass "entrypoint set to empty string: paint part gets no colour"
+else
+  fail "entrypoint set to empty string: paint part gets no colour" "13:22" "coloured"
+fi
 
-( NO_COLOR=1 CLAUDE_CODE_ENTRYPOINT=cli
-  ct_color_seq dim; [ -z "$_CT_SEQ" ] ) \
-  && pass "NO_COLOR beats a cli entrypoint: color seq gets no colour" \
-  || fail "NO_COLOR beats a cli entrypoint: color seq gets no colour" "empty" "$_CT_SEQ"
-( NO_COLOR=1 CLAUDE_CODE_ENTRYPOINT=cli
-  ct_paint_part dim "13:22" ""; [ "$_CT_PART" = "13:22" ] ) \
-  && pass "NO_COLOR beats a cli entrypoint: paint part gets no colour" \
-  || fail "NO_COLOR beats a cli entrypoint: paint part gets no colour" "13:22" "$_CT_PART"
+if ( NO_COLOR=1 CLAUDE_CODE_ENTRYPOINT=cli
+     ct_color_seq dim; [ -z "$_CT_SEQ" ] ); then
+  pass "NO_COLOR beats a cli entrypoint: color seq gets no colour"
+else
+  fail "NO_COLOR beats a cli entrypoint: color seq gets no colour" "empty" "non-empty"
+fi
+if ( NO_COLOR=1 CLAUDE_CODE_ENTRYPOINT=cli
+     ct_paint_part dim "13:22" ""; [ "$_CT_PART" = "13:22" ] ); then
+  pass "NO_COLOR beats a cli entrypoint: paint part gets no colour"
+else
+  fail "NO_COLOR beats a cli entrypoint: paint part gets no colour" "13:22" "coloured"
+fi
 
-( FORCE_COLOR=1 CLAUDE_CODE_ENTRYPOINT=claude-vscode
-  ct_color_seq dim; [ -n "$_CT_SEQ" ] ) \
-  && pass "FORCE_COLOR beats a non-cli entrypoint: color seq gets colour" \
-  || fail "FORCE_COLOR beats a non-cli entrypoint: color seq gets colour" "non-empty" "empty"
-( FORCE_COLOR=1 CLAUDE_CODE_ENTRYPOINT=claude-vscode
-  ct_paint_part dim "13:22" ""; [ "$_CT_PART" != "13:22" ] ) \
-  && pass "FORCE_COLOR beats a non-cli entrypoint: paint part gets colour" \
-  || fail "FORCE_COLOR beats a non-cli entrypoint: paint part gets colour" "coloured" "$_CT_PART"
+if ( FORCE_COLOR=1 CLAUDE_CODE_ENTRYPOINT=claude-vscode
+     ct_color_seq dim; [ -n "$_CT_SEQ" ] ); then
+  pass "FORCE_COLOR beats a non-cli entrypoint: color seq gets colour"
+else
+  fail "FORCE_COLOR beats a non-cli entrypoint: color seq gets colour" "non-empty" "empty"
+fi
+# shellcheck disable=SC2034  # read by ct_paint_part inside the subshell, not here
+if ( FORCE_COLOR=1 CLAUDE_CODE_ENTRYPOINT=claude-vscode
+     ct_paint_part dim "13:22" ""; [ "$_CT_PART" != "13:22" ] ); then
+  pass "FORCE_COLOR beats a non-cli entrypoint: paint part gets colour"
+else
+  fail "FORCE_COLOR beats a non-cli entrypoint: paint part gets colour" "coloured" "plain"
+fi
 
-( NO_COLOR=1 FORCE_COLOR=1
-  ct_color_seq dim; [ -z "$_CT_SEQ" ] ) \
-  && pass "NO_COLOR beats FORCE_COLOR: color seq gets no colour" \
-  || fail "NO_COLOR beats FORCE_COLOR: color seq gets no colour" "empty" "$_CT_SEQ"
-( NO_COLOR=1 FORCE_COLOR=1
-  ct_paint_part dim "13:22" ""; [ "$_CT_PART" = "13:22" ] ) \
-  && pass "NO_COLOR beats FORCE_COLOR: paint part gets no colour" \
-  || fail "NO_COLOR beats FORCE_COLOR: paint part gets no colour" "13:22" "$_CT_PART"
+if ( NO_COLOR=1 FORCE_COLOR=1
+     ct_color_seq dim; [ -z "$_CT_SEQ" ] ); then
+  pass "NO_COLOR beats FORCE_COLOR: color seq gets no colour"
+else
+  fail "NO_COLOR beats FORCE_COLOR: color seq gets no colour" "empty" "non-empty"
+fi
+# shellcheck disable=SC2034  # read by ct_paint_part inside the subshell, not here
+if ( NO_COLOR=1 FORCE_COLOR=1
+     ct_paint_part dim "13:22" ""; [ "$_CT_PART" = "13:22" ] ); then
+  pass "NO_COLOR beats FORCE_COLOR: paint part gets no colour"
+else
+  fail "NO_COLOR beats FORCE_COLOR: paint part gets no colour" "13:22" "coloured"
+fi
 
 echo
 echo "hooks"
@@ -1187,6 +1230,7 @@ is "marker: validate prints nothing to stderr" "" "$err2"
 if command -v timeout >/dev/null 2>&1; then
   for tpl in '' '%' '{' '}' '{}' '%%' '{{{{' '}}}}' '%time%time' '{%time' \
              '%{time}' '{ }' '%z' '%timetime' '[%time' '{%time{%elapsed{%tool}}}' ; do
+    # shellcheck disable=SC2016  # $1 and $2 belong to the inner shell, by design
     if timeout 5 bash -c '
         . "$1/hooks/scripts/lib/config.sh"
         ct_is_valid_marker "$2" || true
@@ -1213,13 +1257,14 @@ if command -v timeout >/dev/null 2>&1; then
       case $(( RANDOM % 10 )) in
         0) tpl="$tpl%" ;;     1) tpl="$tpl{" ;;      2) tpl="$tpl}" ;;
         3) tpl="$tpl%time" ;; 4) tpl="$tpl%elapsed";; 5) tpl="$tpl " ;;
-        6) tpl="$tpl[" ;;     7) tpl="$tpl]" ;;      8) tpl="$tpl%tool" ;;
+        6) tpl="${tpl}[" ;;   7) tpl="$tpl]" ;;      8) tpl="$tpl%tool" ;;
         *) tpl="${tpl}x" ;;
       esac
     done
     if ct_is_valid_marker "$tpl"; then
       # Accepted, so the renderer must handle it: terminate, and leave no
       # placeholder text behind, since every part was given a value.
+      # shellcheck disable=SC2016  # $1 and $2 belong to the inner shell, by design
       if ! timeout 5 bash -c '
             . "$1/hooks/scripts/lib/config.sh"
             ct_render_marker "$2" T E O D
