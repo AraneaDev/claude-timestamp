@@ -189,7 +189,16 @@ ct_is_valid_part_color() { [ -z "${1:-}" ] && return 0; ct_is_valid_color "${1:-
 # A pinned zone is checked for shape here and for whether this platform can
 # honour it separately, because those are different failures with different
 # advice attached.
+#
+# TZ is the third setting whose value is free text rather than an enum or a
+# number, so it reaches write_config the same way MARKER and the formats do.
+# setup.sh's own valid_tz happens to block a control-character payload today,
+# but only as a side effect of checking the name against the zoneinfo
+# directory -- and that check is skipped entirely when $ZONEINFO is not a
+# directory, where valid_tz's trailing `if` then falls off the end and
+# returns success. Put the guard here so it holds regardless of that.
 ct_is_valid_tz() {
+  ct_has_control "${1:-}" && return 1
   case "${1:-}" in
     '') return 0 ;;
     /*|*/../*|*/..) return 1 ;;

@@ -568,12 +568,17 @@ detect_tz() {
   if [ -n "${TZ:-}" ]; then printf '%s' "$TZ"; return; fi
   if [ -r /etc/timezone ]; then tr -d '[:space:]' < /etc/timezone; return; fi
   if [ -L /etc/localtime ]; then
-    # No -f: BSD readlink lacks it before macOS 12.3, and an assignment whose
-    # command substitution fails exits this script under set -e, part-way
-    # through the wizard's first question with nothing explaining why.
-    # /etc/localtime points straight at the zone file on both platforms, so the
-    # plain read is enough.
-    local target; target="$(readlink /etc/localtime 2>/dev/null)" || target=""
+    # Try -f first, fall back to a plain read. -f resolves a chain of symlinks
+    # and any relative component to a canonical path; a plain readlink returns
+    # only the immediate target. On Linux, /etc/localtime is sometimes a chain,
+    # and dropping -f outright would silently stop detecting the zone there.
+    # BSD readlink before macOS 12.3 has no -f at all, so it needs the plain
+    # read. Trying both is two lines and strictly better than either alone:
+    # each failure degrades to an empty result, which is the same "could not
+    # detect" the wizard already handles.
+    local target
+    target="$(readlink -f /etc/localtime 2>/dev/null)" || target=""
+    [ -n "$target" ] || target="$(readlink /etc/localtime 2>/dev/null)" || target=""
     case "$target" in "$ZONEINFO"/*) printf '%s' "${target#"$ZONEINFO"/}"; return ;; esac
   fi
   printf ''

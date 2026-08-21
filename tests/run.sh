@@ -1538,6 +1538,15 @@ is "an empty timezone is fine"      "0" "$(ct_is_valid_tz ''          && echo 0 
 is "an absolute timezone path is not" "1" "$(ct_is_valid_tz /etc/passwd && echo 0 || echo 1)"
 is "a traversing timezone is not"   "1" "$(ct_is_valid_tz a/../b      && echo 0 || echo 1)"
 
+# TZ is a third free-text setting that reaches write_config the same way
+# MARKER and the formats do, so it needs the same control-character guard
+# rather than relying on setup.sh's zoneinfo-existence check, which is
+# skipped (and so provides no protection at all) when $ZONEINFO is not a
+# directory.
+refutes "a control character in a timezone is rejected" \
+  ct_is_valid_tz "$(printf 'Europe/Amsterdam\nENABLED=off')"
+asserts "an ordinary timezone name still passes" ct_is_valid_tz 'Europe/Amsterdam'
+
 fresh 'COLOR=cyan' 'SLOW_AFTER=30'
 is "a good config reports no problems" "" "$CT_CONFIG_PROBLEMS"
 
