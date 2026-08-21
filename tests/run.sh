@@ -354,6 +354,88 @@ asserts "paint part returns 0 with an empty base"  ct_paint_part cyan "x" ""
   && pass "color seq returns 0 under NO_COLOR" \
   || fail "color seq returns 0 under NO_COLOR" "exit 0" "non-zero exit"
 
+# CLAUDE_CODE_ENTRYPOINT is set by Claude Code and inherited by every hook, as
+# any child process would inherit it. A client that does not render ANSI (the
+# VS Code extension is CLAUDE_CODE_ENTRYPOINT=claude-vscode) must get plain
+# text, or the marker shows as literal "[2m...[0m" on screen. Only "cli" and
+# unset earn colour; every other value, including ones invented after this was
+# written, gets plain text. Each case below sets the variables in a subshell
+# so they cannot leak into later tests and silently disable colour for the
+# rest of the suite -- exactly the hazard NO_COLOR's tests already guard
+# against above.
+
+( unset CLAUDE_CODE_ENTRYPOINT
+  ct_color_seq dim; [ -n "$_CT_SEQ" ] ) \
+  && pass "entrypoint unset: color seq gets colour" \
+  || fail "entrypoint unset: color seq gets colour" "non-empty" "empty"
+( unset CLAUDE_CODE_ENTRYPOINT
+  ct_paint_part dim "13:22" ""; [ "$_CT_PART" != "13:22" ] ) \
+  && pass "entrypoint unset: paint part gets colour" \
+  || fail "entrypoint unset: paint part gets colour" "coloured" "$_CT_PART"
+
+( CLAUDE_CODE_ENTRYPOINT=cli
+  ct_color_seq dim; [ -n "$_CT_SEQ" ] ) \
+  && pass "entrypoint cli: color seq gets colour" \
+  || fail "entrypoint cli: color seq gets colour" "non-empty" "empty"
+( CLAUDE_CODE_ENTRYPOINT=cli
+  ct_paint_part dim "13:22" ""; [ "$_CT_PART" != "13:22" ] ) \
+  && pass "entrypoint cli: paint part gets colour" \
+  || fail "entrypoint cli: paint part gets colour" "coloured" "$_CT_PART"
+
+( CLAUDE_CODE_ENTRYPOINT=claude-vscode
+  ct_color_seq dim; [ -z "$_CT_SEQ" ] ) \
+  && pass "entrypoint claude-vscode: color seq gets no colour" \
+  || fail "entrypoint claude-vscode: color seq gets no colour" "empty" "$_CT_SEQ"
+( CLAUDE_CODE_ENTRYPOINT=claude-vscode
+  ct_paint_part dim "13:22" ""; [ "$_CT_PART" = "13:22" ] ) \
+  && pass "entrypoint claude-vscode: paint part gets no colour" \
+  || fail "entrypoint claude-vscode: paint part gets no colour" "13:22" "$_CT_PART"
+
+( CLAUDE_CODE_ENTRYPOINT=sdk-cli
+  ct_color_seq dim; [ -z "$_CT_SEQ" ] ) \
+  && pass "entrypoint sdk-cli: color seq gets no colour" \
+  || fail "entrypoint sdk-cli: color seq gets no colour" "empty" "$_CT_SEQ"
+( CLAUDE_CODE_ENTRYPOINT=sdk-cli
+  ct_paint_part dim "13:22" ""; [ "$_CT_PART" = "13:22" ] ) \
+  && pass "entrypoint sdk-cli: paint part gets no colour" \
+  || fail "entrypoint sdk-cli: paint part gets no colour" "13:22" "$_CT_PART"
+
+( CLAUDE_CODE_ENTRYPOINT=something-invented-later
+  ct_color_seq dim; [ -z "$_CT_SEQ" ] ) \
+  && pass "unknown future entrypoint: color seq gets no colour" \
+  || fail "unknown future entrypoint: color seq gets no colour" "empty" "$_CT_SEQ"
+( CLAUDE_CODE_ENTRYPOINT=something-invented-later
+  ct_paint_part dim "13:22" ""; [ "$_CT_PART" = "13:22" ] ) \
+  && pass "unknown future entrypoint: paint part gets no colour" \
+  || fail "unknown future entrypoint: paint part gets no colour" "13:22" "$_CT_PART"
+
+( NO_COLOR=1 CLAUDE_CODE_ENTRYPOINT=cli
+  ct_color_seq dim; [ -z "$_CT_SEQ" ] ) \
+  && pass "NO_COLOR beats a cli entrypoint: color seq gets no colour" \
+  || fail "NO_COLOR beats a cli entrypoint: color seq gets no colour" "empty" "$_CT_SEQ"
+( NO_COLOR=1 CLAUDE_CODE_ENTRYPOINT=cli
+  ct_paint_part dim "13:22" ""; [ "$_CT_PART" = "13:22" ] ) \
+  && pass "NO_COLOR beats a cli entrypoint: paint part gets no colour" \
+  || fail "NO_COLOR beats a cli entrypoint: paint part gets no colour" "13:22" "$_CT_PART"
+
+( FORCE_COLOR=1 CLAUDE_CODE_ENTRYPOINT=claude-vscode
+  ct_color_seq dim; [ -n "$_CT_SEQ" ] ) \
+  && pass "FORCE_COLOR beats a non-cli entrypoint: color seq gets colour" \
+  || fail "FORCE_COLOR beats a non-cli entrypoint: color seq gets colour" "non-empty" "empty"
+( FORCE_COLOR=1 CLAUDE_CODE_ENTRYPOINT=claude-vscode
+  ct_paint_part dim "13:22" ""; [ "$_CT_PART" != "13:22" ] ) \
+  && pass "FORCE_COLOR beats a non-cli entrypoint: paint part gets colour" \
+  || fail "FORCE_COLOR beats a non-cli entrypoint: paint part gets colour" "coloured" "$_CT_PART"
+
+( NO_COLOR=1 FORCE_COLOR=1
+  ct_color_seq dim; [ -z "$_CT_SEQ" ] ) \
+  && pass "NO_COLOR beats FORCE_COLOR: color seq gets no colour" \
+  || fail "NO_COLOR beats FORCE_COLOR: color seq gets no colour" "empty" "$_CT_SEQ"
+( NO_COLOR=1 FORCE_COLOR=1
+  ct_paint_part dim "13:22" ""; [ "$_CT_PART" = "13:22" ] ) \
+  && pass "NO_COLOR beats FORCE_COLOR: paint part gets no colour" \
+  || fail "NO_COLOR beats FORCE_COLOR: paint part gets no colour" "13:22" "$_CT_PART"
+
 echo
 echo "hooks"
 

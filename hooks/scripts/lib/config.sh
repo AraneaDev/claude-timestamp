@@ -300,8 +300,27 @@ ct_zone() {
 # off, unknown, or disabled by NO_COLOR.
 ct_color_seq() {
   _CT_SEQ=""
-  # https://no-color.org -- any non-empty value disables color.
+  # https://no-color.org -- any non-empty value disables color. Checked before
+  # FORCE_COLOR, which is deliberately the opposite of the common convention
+  # (chalk and similar give FORCE_COLOR priority): the README promises NO_COLOR
+  # disables colour regardless of everything else, and demoting it here would
+  # quietly break that documented guarantee.
   [ -n "${NO_COLOR:-}" ] && return 0
+  if [ -z "${FORCE_COLOR:-}" ]; then
+    # Escape codes only help where something interprets them. Claude Code sets
+    # CLAUDE_CODE_ENTRYPOINT and a hook inherits it as any child process would;
+    # "cli" is a real terminal, so it is the only value that earns colour
+    # here. Unset also earns colour: an older Claude Code that predates this
+    # variable, or setup.sh run directly as `bash setup.sh`, must not lose
+    # colour on upgrade or in the wizard. Every other value, including ones
+    # that do not exist yet (claude-vscode, claude-desktop, sdk-*, bench,
+    # remote, ...), gets plain text -- colour missing where it might have
+    # worked is the safe failure, not escape codes on every message.
+    case "${CLAUDE_CODE_ENTRYPOINT-cli}" in
+      cli) : ;;
+      *) return 0 ;;
+    esac
+  fi
   case "${1:-}" in
     dim)       _CT_SEQ=$'\033[2m' ;;
     gray|grey) _CT_SEQ=$'\033[90m' ;;
