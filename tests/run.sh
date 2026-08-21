@@ -867,6 +867,20 @@ if command -v jq >/dev/null 2>&1; then
 
   CLAUDE_TIMESTAMP_CONFIG="$WORK/does-not-exist.conf" out="$(printf '{"session_id":"s"}' | bash "$SCRIPTS/session-start.sh")"
   contains "session-start points a new user at /timestamps" "/timestamps" "$out"
+
+  # SessionStart has three things it might say, and a hook returns one object.
+  # A project config with a bad key while the user has no config of their own
+  # triggers two of them at once.
+  SS="$WORK/sessionstart"
+  rm -rf "$SS"; mkdir -p "$SS/proj/.claude"
+  printf 'COLOR=banana\nSLOW_AFTER=soon\n' > "$SS/proj/.claude/claude-timestamp.conf"
+  out="$( unset CLAUDE_TIMESTAMP_CONFIG
+          HOME="$SS"
+          export HOME
+          printf '{"cwd":"%s/proj"}' "$SS" | bash "$SCRIPTS/session-start.sh" )"
+  is "session start: emits exactly one JSON object" "1" "$(printf '%s' "$out" | jq -s 'length')"
+  contains "session start: the object mentions the bad colour" "COLOR=banana" "$out"
+  contains "session start: and the first-run pointer"          "/timestamps"  "$out"
 else
   echo "  skip jq not installed, hook tests not run"
 fi

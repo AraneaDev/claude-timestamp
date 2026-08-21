@@ -82,22 +82,33 @@ ct_write_facts
 # without them, /timestamps would have no way to switch the plugin back on.
 [ "$CT_ENABLED" = "on" ] || exit 0
 
+# Everything below is a thing worth saying once, at the only moment that is not
+# in the middle of a conversation. They are collected rather than printed as
+# they are found, because a hook returns one object: three jq calls each
+# printing a complete one produced a stream, and a consumer parsing a single
+# object rejects the lot -- losing every message exactly when there was most to
+# say.
+notes=""
+add_note() { notes="${notes}${notes:+$'\n\n'}$1"; }
+
 # A typo in the config file would otherwise do nothing visible: the value is
-# replaced by its default and the plugin carries on. Say it once, at the only
-# moment that is not in the middle of a conversation.
+# replaced by its default and the plugin carries on.
 if [ -n "${CT_CONFIG_PROBLEMS:-}" ]; then
-  jq -n --arg problems "$CT_CONFIG_PROBLEMS" \
-    '{systemMessage: ("claude-timestamp: some settings could not be used.\n" + $problems + "\nRun /timestamps to fix them.")}'
+  add_note "claude-timestamp: some settings could not be used.
+${CT_CONFIG_PROBLEMS}
+Run /timestamps to fix them."
 fi
 
 if ct_tz_unhonoured; then
-  jq -n --arg tz "$CT_TZ" '{systemMessage: ("claude-timestamp: this system has no timezone database, so " + $tz + " cannot be applied. Showing local time instead. Run /timestamps and choose \"local\" to silence this.")}'
+  add_note "claude-timestamp: this system has no timezone database, so ${CT_TZ} cannot be applied. Showing local time instead. Run /timestamps and choose \"local\" to silence this."
 fi
 
 # First run: there is no README in this repo by design, so the config command
 # has to introduce itself or nobody will ever know it exists.
 if [ ! -r "$(ct_config_path)" ]; then
-  jq -n '{systemMessage: "claude-timestamp is running with default settings. Run /timestamps to pick a timezone, clock format, and color."}'
+  add_note "claude-timestamp is running with default settings. Run /timestamps to pick a timezone, clock format, and color."
 fi
+
+[ -n "$notes" ] && jq -n --arg msg "$notes" '{systemMessage: $msg}'
 
 exit 0
