@@ -823,6 +823,25 @@ else
 fi
 
 echo
+echo "stale PreToolUse binding"
+
+# ad31d05 removed the PreToolUse binding and pre-tool-use.sh together, because
+# post-tool-use.sh now reads duration_ms from the payload instead. A session
+# already running when that update lands still holds the old binding, though
+# -- hooks are bound once at session start -- and keeps trying to exec this
+# path on every tool call until the user restarts. The shim exists purely to
+# give that stale binding something harmless to run. This test is what stops
+# someone deleting the shim before every supported version has stopped
+# binding PreToolUse; retire the test along with the shim, together.
+asserts "the PreToolUse compatibility shim still exists" test -e "$SCRIPTS/pre-tool-use.sh"
+shim_out="$(printf '{"session_id":"s","tool_use_id":"t1","tool_name":"Bash","hook_event_name":"PreToolUse","tool_input":{"command":"ls -la"}}' \
+  | bash "$SCRIPTS/pre-tool-use.sh" 2>"$WORK/shim.err")"
+shim_rc=$?
+is "the shim exits 0 on a realistic PreToolUse payload" "0" "$shim_rc"
+is "the shim prints nothing on stdout"                  "" "$shim_out"
+is "the shim prints nothing on stderr"                  "" "$(cat "$WORK/shim.err")"
+
+echo
 echo "setup"
 
 fresh 'COLOR=dim' 'TZ=UTC'
@@ -900,6 +919,18 @@ refutes "setup: refuses an invalid template" \
   bash "$SCRIPTS/setup.sh" --marker='%elapsd'
 ct_load_config
 is "setup: and leaves the old one alone" "%time" "$CT_MARKER_TEMPLATE"
+
+# Unlike a bare --time-color=, a bare --marker= is not rejected: an empty
+# template is already a legal, meaningful value (ct_is_valid_marker accepts
+# it, and message-display.sh emits no prefix at all for one), so the CLI
+# honours it instead of erroring -- the same way --tz=local sets an empty TZ.
+# It must still not be the silent no-op the finding described: CT_MARKER_TEMPLATE
+# actually changes and the write still reports success.
+fresh 'MARKER=%time'
+asserts "setup: a bare --marker= is accepted, not rejected" \
+  bash "$SCRIPTS/setup.sh" --marker=
+ct_load_config
+is "setup: a bare --marker= clears the template" "" "$CT_MARKER_TEMPLATE"
 
 echo
 echo "tool timing"
@@ -1738,6 +1769,66 @@ written_history="$PROJ/writable-history/.claude/claude-timestamp.conf"
 is "an unrelated --project write keeps a pinned HISTORY"       "1" "$(grep -c '^HISTORY=off$' "$written_history")"
 is "an unrelated --project write keeps a pinned HISTORY_LIMIT" "1" "$(grep -c '^HISTORY_LIMIT=10$' "$written_history")"
 is "an unrelated --project write keeps the rest too"           "1" "$(grep -c '^COLOR=cyan$' "$written_history")"
+
+# write_project_config's extraction of an already-pinned value cannot tell
+# "key absent" from "key present but empty" -- both come back "" from the
+# sed -n "s/^KEY=//p" it uses -- so a key deliberately pinned to empty (TZ=,
+# meaning machine local time; a part colour set to inherit) used to be
+# dropped by the next unrelated write. TZ=local is exactly that: an empty
+# TZ= line, not a missing one.
+rm -rf "$PROJ/writable-tzlocal"; mkdir -p "$PROJ/writable-tzlocal"
+( cd "$PROJ/writable-tzlocal" && unset CLAUDE_TIMESTAMP_CONFIG && HOME="$PROJ/home" \
+    bash "$SCRIPTS/setup.sh" --project --tz=local >/dev/null 2>&1 )
+written_tzlocal="$PROJ/writable-tzlocal/.claude/claude-timestamp.conf"
+is "--project --tz=local pins an empty TZ" "1" "$(grep -c '^TZ=$' "$written_tzlocal")"
+( cd "$PROJ/writable-tzlocal" && unset CLAUDE_TIMESTAMP_CONFIG && HOME="$PROJ/home" \
+    bash "$SCRIPTS/setup.sh" --project --color=none >/dev/null 2>&1 )
+is "an unrelated --project write keeps a pinned TZ=local" "1" "$(grep -c '^TZ=$' "$written_tzlocal")"
+is "and still writes the unrelated setting"               "1" "$(grep -c '^COLOR=none$' "$written_tzlocal")"
+
+rm -rf "$PROJ/writable-tcinherit"; mkdir -p "$PROJ/writable-tcinherit"
+( cd "$PROJ/writable-tcinherit" && unset CLAUDE_TIMESTAMP_CONFIG && HOME="$PROJ/home" \
+    bash "$SCRIPTS/setup.sh" --project --time-color=cyan >/dev/null 2>&1 )
+( cd "$PROJ/writable-tcinherit" && unset CLAUDE_TIMESTAMP_CONFIG && HOME="$PROJ/home" \
+    bash "$SCRIPTS/setup.sh" --project --time-color=inherit >/dev/null 2>&1 )
+written_tcinherit="$PROJ/writable-tcinherit/.claude/claude-timestamp.conf"
+is "--project --time-color=inherit pins an empty TIME_COLOR" "1" "$(grep -c '^TIME_COLOR=$' "$written_tcinherit")"
+( cd "$PROJ/writable-tcinherit" && unset CLAUDE_TIMESTAMP_CONFIG && HOME="$PROJ/home" \
+    bash "$SCRIPTS/setup.sh" --project --subagents=off >/dev/null 2>&1 )
+is "an unrelated --project write keeps a pinned inherited TIME_COLOR" "1" \
+  "$(grep -c '^TIME_COLOR=$' "$written_tcinherit")"
+is "and still writes the unrelated setting"                          "1" \
+  "$(grep -c '^SUBAGENTS=off$' "$written_tcinherit")"
+
+# MARKER has no alias word for "empty" the way TZ has "local" and the part
+# colours have "inherit" -- the empty string itself is the legal value -- so
+# write_project_config needs the caller to say "named" separately (see
+# marker_named) rather than reading it off the value. Otherwise --project
+# --marker= would report success and leave a previously pinned template
+# untouched, the same silent no-op Finding B closed outside --project.
+rm -rf "$PROJ/writable-markerempty"; mkdir -p "$PROJ/writable-markerempty"
+( cd "$PROJ/writable-markerempty" && unset CLAUDE_TIMESTAMP_CONFIG && HOME="$PROJ/home" \
+    bash "$SCRIPTS/setup.sh" --project --marker='%time' >/dev/null 2>&1 )
+( cd "$PROJ/writable-markerempty" && unset CLAUDE_TIMESTAMP_CONFIG && HOME="$PROJ/home" \
+    bash "$SCRIPTS/setup.sh" --project --marker= >/dev/null 2>&1 )
+written_markerempty="$PROJ/writable-markerempty/.claude/claude-timestamp.conf"
+is "--project --marker= overwrites a pinned template with empty" "1" \
+  "$(grep -c '^MARKER=$' "$written_markerempty")"
+
+# An unknown key -- one a newer version of the plugin wrote -- must survive
+# an unrelated --project write from this (older) setup.sh, per the promise
+# in lib/config.sh that a config a newer version writes stays readable by an
+# older one. Planted directly: this version's setup.sh has no flag that
+# would write such a key itself.
+rm -rf "$PROJ/writable-unknown"; mkdir -p "$PROJ/writable-unknown/.claude"
+printf 'COLOR=cyan\nSOME_FUTURE_KEY=surprise\n' \
+  > "$PROJ/writable-unknown/.claude/claude-timestamp.conf"
+( cd "$PROJ/writable-unknown" && unset CLAUDE_TIMESTAMP_CONFIG && HOME="$PROJ/home" \
+    bash "$SCRIPTS/setup.sh" --project --tz=UTC >/dev/null 2>&1 )
+written_unknown="$PROJ/writable-unknown/.claude/claude-timestamp.conf"
+is "an unrelated --project write keeps an unknown key"      "1" "$(grep -c '^SOME_FUTURE_KEY=surprise$' "$written_unknown")"
+is "an unrelated --project write still keeps the rest too"  "1" "$(grep -c '^COLOR=cyan$' "$written_unknown")"
+is "an unrelated --project write still writes the new one"  "1" "$(grep -c '^TZ=UTC$' "$written_unknown")"
 
 rm -rf "$PROJ/writable-historyflag"; mkdir -p "$PROJ/writable-historyflag"
 ( cd "$PROJ/writable-historyflag" && unset CLAUDE_TIMESTAMP_CONFIG && HOME="$PROJ/home" \

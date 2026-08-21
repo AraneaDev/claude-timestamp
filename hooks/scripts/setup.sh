@@ -418,7 +418,7 @@ CONF
 # today's values. Only the settings named on the command line are written,
 # merged with whatever the file already pinned.
 write_project_config() {
-  local file dir key value existing out=""
+  local file dir key value existing out="" marker_named named line ekey known
   file="$PWD/$CT_CONFIG_NAME"
   dir="$(dirname "$file")"
   mkdir -p "$dir"
@@ -426,18 +426,42 @@ write_project_config() {
   existing=""
   [ -r "$file" ] && existing="$(cat "$file")"
 
+  # Read before `set --` below replaces the positional parameters this came
+  # in on. MARKER is the one key whose legitimately-named value can itself be
+  # the empty string (an empty template renders no prefix at all), so its
+  # caller passes this alongside to say "named, even though empty" -- every
+  # other key can tell "empty" and "not named" apart from the raw value alone
+  # (TZ spells its empty case "local", the part colours spell theirs
+  # "inherit", so an actually-empty value only ever means "not named").
+  marker_named="${21:-}"
+
   set -- TZ "$1" DISPLAY_FORMAT "$2" CONTEXT_FORMAT "$3" COLOR "$4" \
          ELAPSED "$5" INJECT_CONTEXT "$6" DATE_ROLLOVER "$7" SLOW_AFTER "$8" \
          SLOW_COLOR "$9" IDLE_AFTER "${10}" SUMMARY "${11}" SUBAGENTS "${12}" \
          TOOL_TIMING "${13}" ENABLED "${14}" MARKER "${15}" TIME_COLOR "${16}" \
          ELAPSED_COLOR "${17}" TOOL_COLOR "${18}" HISTORY "${19}" HISTORY_LIMIT "${20}"
 
+  known="|TZ|DISPLAY_FORMAT|CONTEXT_FORMAT|COLOR|ELAPSED|INJECT_CONTEXT|"
+  known="${known}DATE_ROLLOVER|SLOW_AFTER|SLOW_COLOR|IDLE_AFTER|SUMMARY|"
+  known="${known}SUBAGENTS|TOOL_TIMING|ENABLED|MARKER|TIME_COLOR|ELAPSED_COLOR|"
+  known="${known}TOOL_COLOR|HISTORY|HISTORY_LIMIT|"
+
   while [ "$#" -gt 0 ]; do
     key="$1"; value="$2"; shift 2
-    if [ -z "$value" ]; then
-      # Not named now, but keep it if this project already pinned it.
-      value="$(printf '%s\n' "$existing" | sed -n "s/^${key}=//p" | tail -1)"
-      [ -z "$value" ] && continue
+    named=1
+    [ -n "$value" ] || { [ "$key" = "MARKER" ] && [ "$marker_named" = "1" ]; } || named=0
+    if [ "$named" = "0" ]; then
+      # Not named now. Keep it only if this project already pinned it -- and
+      # test that by whether the key is present in the file, not by whether
+      # the value that comes back is empty. Both an absent key and a key
+      # pinned to the empty string (TZ=, or a colour set to inherit) extract
+      # as "", so emptiness alone cannot tell "nothing to keep" from "keep an
+      # empty pin"; presence can.
+      if printf '%s\n' "$existing" | grep -q "^${key}="; then
+        value="$(printf '%s\n' "$existing" | sed -n "s/^${key}=//p" | tail -1)"
+      else
+        continue
+      fi
     fi
     case "$key" in
       TZ)                                    [ "$value" = "local" ]    && value="" ;;
@@ -446,6 +470,30 @@ write_project_config() {
     out="${out}${key}=${value}
 "
   done
+
+  # A key this run does not recognise -- one a newer version of the plugin
+  # wrote -- is carried over unchanged rather than dropped. lib/config.sh
+  # promises that a config a newer version writes stays readable by an older
+  # one; silently losing such a key the next time this (older) setup.sh
+  # rewrites the file would break that promise the moment the file is
+  # written, not merely read.
+  if [ -n "$existing" ]; then
+    while IFS= read -r line; do
+      case "$line" in
+        ''|'#'*) continue ;;
+        *=*)     ekey="${line%%=*}" ;;
+        *)       continue ;;
+      esac
+      case "$ekey" in
+        *[![:upper:][:digit:]_]*|'') continue ;;
+      esac
+      case "$known" in
+        *"|${ekey}|"*) continue ;;
+      esac
+      out="${out}${line}
+"
+    done < <(printf '%s\n' "$existing")
+  fi
 
   if [ -z "$out" ]; then
     echo "Nothing to write: name at least one setting, for example --color=none." >&2
@@ -706,7 +754,7 @@ main() {
   local set_slow="" set_slowcolor="" set_idle="" set_summary="" set_subagents="" set_tooltiming=""
   local set_history="" set_historylimit="" set_enabled=""
   local set_marker="" set_timecolor="" set_elapsedcolor="" set_toolcolor=""
-  local timecolor_named=0 elapsedcolor_named=0 toolcolor_named=0
+  local marker_named=0 timecolor_named=0 elapsedcolor_named=0 toolcolor_named=0
 
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -716,7 +764,7 @@ main() {
       --display=*)        set_display="${1#*=}"; interactive=0 ;;
       --context=*)        set_context="${1#*=}"; interactive=0 ;;
       --color=*)          set_color="${1#*=}";   interactive=0 ;;
-      --marker=*)         set_marker="${1#*=}";  interactive=0 ;;
+      --marker=*)         set_marker="${1#*=}";  marker_named=1; interactive=0 ;;
       --time-color=*)     set_timecolor="${1#*=}";    timecolor_named=1;    interactive=0 ;;
       --elapsed-color=*)  set_elapsedcolor="${1#*=}"; elapsedcolor_named=1; interactive=0 ;;
       --tool-color=*)     set_toolcolor="${1#*=}";    toolcolor_named=1;    interactive=0 ;;
@@ -757,7 +805,11 @@ main() {
   [ -n "$set_display" ] && CT_DISPLAY_FORMAT="$set_display"
   [ -n "$set_context" ] && CT_CONTEXT_FORMAT="$set_context"
   if [ -n "$set_color" ];   then valid_color "$set_color" || exit 2; CT_COLOR="$set_color"; fi
-  if [ -n "$set_marker" ]; then valid_marker "$set_marker" || exit 2; CT_MARKER_TEMPLATE="$set_marker"; fi
+  # A bare --marker= is unlike a bare --time-color=: an empty template is
+  # already a legal, meaningful value (ct_is_valid_marker accepts it, and a
+  # marker that renders empty emits no prefix at all), so it is honoured
+  # rather than rejected -- the same way --tz=local sets an empty TZ.
+  if [ "$marker_named" = "1" ]; then valid_marker "$set_marker" || exit 2; CT_MARKER_TEMPLATE="$set_marker"; fi
   apply_part_color "--time-color"    "$timecolor_named"    "$set_timecolor"    CT_TIME_COLOR
   apply_part_color "--elapsed-color" "$elapsedcolor_named" "$set_elapsedcolor" CT_ELAPSED_COLOR
   apply_part_color "--tool-color"    "$toolcolor_named"    "$set_toolcolor"    CT_TOOL_COLOR
@@ -779,7 +831,7 @@ main() {
       "$set_elapsed" "$set_inject" "$set_rollover" "$set_slow" "$set_slowcolor" \
       "$set_idle" "$set_summary" "$set_subagents" "$set_tooltiming" "$set_enabled" \
       "$set_marker" "$set_timecolor" "$set_elapsedcolor" "$set_toolcolor" \
-      "$set_history" "$set_historylimit"
+      "$set_history" "$set_historylimit" "$marker_named"
   else
     write_config
   fi
