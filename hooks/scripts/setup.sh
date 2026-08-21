@@ -672,6 +672,11 @@ wizard() {
       24h|short|12h|iso|*%*) CT_DISPLAY_FORMAT="$fmt"; break ;;
       *) echo "  Pick 24h, short, 12h, iso, or a strftime string containing %." ;;
     esac
+    # Safe today because ct_validate_config guarantees the offered default
+    # always matches this case, but the other re-ask loops carry this guard
+    # too and there is no reason for this one to depend on a property that
+    # lives in a different file.
+    [ -n "${CT_ASK_EOF:-}" ] && break
   done
   echo
 
