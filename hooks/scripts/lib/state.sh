@@ -134,7 +134,10 @@ ct_dominant_tool() {
   case "$total" in ''|*[!0-9]*) return 1 ;; esac
   [ "$total" -gt 0 ] || return 1
   awk -v total="$total" '
-    { sum[$1] += $2 }
+    # A line is only counted when it is whole. The writer appends while this
+    # runs, so the last line can be a fragment, and a fragment summed as a
+    # tool name would put the wrong name on a marker.
+    NF == 3 && $2 ~ /^[0-9]+\.[0-9][0-9][0-9]$/ { sum[$1] += $2 }
     END {
       best = ""; top = 0
       for (t in sum) if (sum[t] > top) { top = sum[t]; best = t }

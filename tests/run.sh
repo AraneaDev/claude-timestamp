@@ -2121,6 +2121,15 @@ contains "stats names the longest"      "2026-08-12"         "$out"
 contains "stats reports the range"      "recorded from"      "$out"
 contains "stats counts failures"        "failed tools    1"  "$out"
 
+# A damaged history row must be reported, not silently shifted into the
+# wrong columns.
+fresh 'HISTORY=on'
+printf '2026-08-20T10:00:00\t100\t5\t20\t0\t0\n' >  "$CLAUDE_TIMESTAMP_HISTORY"
+printf 'broken\n'                                 >> "$CLAUDE_TIMESTAMP_HISTORY"
+out="$(bash "$SCRIPTS/setup.sh" --stats 2>&1)"
+contains "stats: reports the damaged row"    "1 unreadable" "$out"
+contains "stats: still totals the good ones" "sessions        1" "$out"
+
 bash "$SCRIPTS/setup.sh" --history=off --history-limit=50 >/dev/null
 ct_load_config
 is "--history is accepted"       "off" "$CT_HISTORY"
@@ -2708,28 +2717,48 @@ fresh
 mkdir -p "$(ct_state_dir)"
 log="$(ct_state_dir)/attr.turntools"
 
-printf 'Bash 118\nRead 2\n' > "$log"
+printf 'Bash 118.000 ok\nRead 2.000 ok\n' > "$log"
 is "attribution: names the dominant tool" "Bash 1m58s" "$(ct_dominant_tool "$log" 134)"
 
-printf 'Bash 40\nRead 2\n' > "$log"
+printf 'Bash 40.000 ok\nRead 2.000 ok\n' > "$log"
 refutes "attribution: silent when no tool dominates" ct_dominant_tool "$log" 134
 
-printf 'Bash 45\n' > "$log"
+printf 'Bash 45.000 ok\n' > "$log"
 is "attribution: sub-minute reads in seconds" "Bash 45s" "$(ct_dominant_tool "$log" 60)"
 
-printf 'Bash 30\nRead 32\n' > "$log"
+printf 'Bash 30.000 ok\nRead 32.000 ok\n' > "$log"
 is "attribution: sums per tool, not per call" "Read 32s" "$(ct_dominant_tool "$log" 62)"
 
 # Tool calls run concurrently, so four 30s Bash calls can finish inside a 32s
 # turn. The per-tool sum (120s) must never be rendered larger than the turn
 # actually took.
-printf 'Bash 30\nBash 30\nBash 30\nBash 30\n' > "$log"
+printf 'Bash 30.000 ok\nBash 30.000 ok\nBash 30.000 ok\nBash 30.000 ok\n' > "$log"
 is "attribution: clamps a duration sum larger than the turn" "Bash 32s" "$(ct_dominant_tool "$log" 32)"
 
 : > "$log"
 refutes "attribution: silent on an empty log" ct_dominant_tool "$log" 134
 refutes "attribution: silent on a missing log" ct_dominant_tool "$(ct_state_dir)/nope" 134
 refutes "attribution: silent when the turn was instant" ct_dominant_tool "$log" 0
+
+# The per-turn log is appended by one hook while another reads it, so a torn
+# final line is possible. A partial line must be skipped, not summed as a tool
+# named by whatever prefix landed.
+# The fragment must be able to WIN, or the assertion proves nothing. A line torn
+# before its duration (`WebFe`) has an empty second field, which awk coerces to
+# 0 -- that never beats a real entry, so the guard is never consulted and the
+# test passes with or without it. Tear it MID-DURATION instead: `55.5` is
+# numeric, beats the 20 above it, and sits on a two-field line, so without the
+# guard it wins (clamped to the 32s turn) and with the guard it is rejected,
+# leaving Bash's 20s -- which is why the turn total here is 32, not 60: at 60,
+# Bash's own 20s would not clear the "at least half the turn" bar below and
+# the fixture would prove nothing either way.
+fresh
+log="$WORK/torn.tools"
+printf 'Bash 20.000 ok\nWebFetch 55.5' > "$log"
+is "attribution: a torn line is skipped" "Bash 20s" "$(ct_dominant_tool "$log" 32)"
+
+printf 'Bash 20.000 ok\nRead 55.5 ok\n' > "$log"
+is "attribution: a malformed duration is skipped" "Bash 20s" "$(ct_dominant_tool "$log" 32)"
 
 # The per-turn log must be cleared at each prompt, or the second turn inherits
 # the first turn's tools and blames the wrong one.
@@ -2743,7 +2772,7 @@ is "attribution: the per-turn log is cleared each prompt" "" "$(cat "$(ct_turn_t
 fresh 'TOOL_TIMING=on' 'SLOW_AFTER=1'
 printf '{"session_id":"marker","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
 printf '%s' "$(( $(date +%s) - 200 ))" > "$(ct_state_file marker)"
-printf 'Bash 190\n' > "$(ct_turn_tool_log marker)"
+printf 'Bash 190.000 ok\n' > "$(ct_turn_tool_log marker)"
 out="$(strip_ansi "$(printf '{"index":0,"session_id":"marker","delta":"x"}' \
   | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')")"
 contains "attribution: appears in the marker" "Bash 3m10s" "$out"

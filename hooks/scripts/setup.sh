@@ -215,9 +215,13 @@ stats() {
     return 0
   fi
 
-  local n total turns waited idle failed maxd maxwhen maxturns first last
-  read -r n total turns waited idle failed maxd maxwhen maxturns first last <<EOF
+  local n total turns waited idle failed maxd maxwhen maxturns first last bad
+  read -r n total turns waited idle failed maxd maxwhen maxturns first last bad <<EOF
 $(awk -F'\t' '
+  # Six fields, or the row is not a session. A partial write or a hand edit
+  # used to shift every field after the damaged one, which printed a total
+  # that was wrong rather than a message saying the file was.
+  NF != 6 { bad++; next }
   {
     n++; total += $2; turns += $3; waited += $4; idle += $5; failed += $6
     if ($2 + 0 > maxd + 0) { maxd = $2; maxwhen = $1; maxturns = $3 }
@@ -225,17 +229,24 @@ $(awk -F'\t' '
     last = $1
   }
   END {
-    if (n == 0) { print "0 0 0 0 0 0 0 - 0 - -"; exit }
-    printf "%d %d %d %d %d %d %d %s %d %s %s\n",
-      n, total, turns, waited, idle, failed, maxd, maxwhen, maxturns, first, last
+    if (n == 0) { printf "0 0 0 0 0 0 0 - 0 - - %d\n", bad + 0; exit }
+    printf "%d %d %d %d %d %d %d %s %d %s %s %d\n",
+      n, total, turns, waited, idle, failed, maxd, maxwhen, maxturns, first, last, bad + 0
   }' "$file")
 EOF
+
+  if [ "$n" -eq 0 ]; then
+    echo "No readable sessions recorded."
+    [ "$bad" -gt 0 ] && echo "  $bad unreadable row(s) in $(ct_tilde "$file")."
+    return 0
+  fi
 
   printf 'claude-timestamp stats%*slast %s session' "$((28 - 21))" "" "$n"
   [ "$n" -eq 1 ] || printf 's'
   printf '\n\n'
 
   echo "  sessions        $n"
+  [ "$bad" -gt 0 ] && echo "  $bad unreadable row(s) skipped; the file may have been edited by hand"
   echo "  total time      $(ct_format_duration "$total")"
   if [ "$total" -gt 0 ]; then
     echo "  waiting         $(ct_format_duration "$waited")  ($(( waited * 100 / total ))% of it)"
