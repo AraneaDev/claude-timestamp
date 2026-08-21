@@ -573,18 +573,28 @@ detect_tz() {
   printf ''
 }
 
+# Ask one question, into _CT_ANSWER.
+#
+# Assigns rather than printing because every caller used to write
+# answer="$(ask ...)", which runs this in a subshell -- and CT_ASK_EOF, set
+# here when input runs out, never reached the caller. Every re-ask loop's
+# escape hatch was therefore dead code, and the wizard spun forever whenever
+# the default it kept offering was itself invalid.
+#
+# The same assign-don't-print shape ct_paint_part uses, for the same reason:
+# a subshell loses what the caller needs.
 ask() {
   local prompt="$1" default="$2" answer
   if [ -t 0 ]; then
     # Interactive: read the terminal directly, so the wizard still works when
     # something has redirected this script's stdin.
-    read -r -p "$prompt [$default]: " answer </dev/tty || answer=""
+    if ! read -r -p "$prompt [$default]: " answer </dev/tty; then
+      answer=""
+      CT_ASK_EOF=1
+    fi
   else
     # No terminal, so answers are being piped in. Reading stdin here is what
     # makes the wizard testable without a pseudo-terminal.
-    #
-    # The prompt goes to stderr because this function's stdout is captured by
-    # the caller; printing it there would put the prompt inside the answer.
     printf '%s [%s]: ' "$prompt" "$default" >&2
     if ! read -r answer; then
       answer=""
@@ -593,7 +603,8 @@ ask() {
       CT_ASK_EOF=1
     fi
   fi
-  printf '%s' "${answer:-$default}"
+  _CT_ANSWER="${answer:-$default}"
+  return 0
 }
 
 wizard() {
@@ -605,37 +616,49 @@ wizard() {
 
   local answer
   local tpl wp_time wp_el wp_tool
+  local CT_ASK_EOF=""
 
   # Enabled
   echo "Master switch for the whole plugin. Off silences every hook without"
   echo "uninstalling it, and the rest of your settings stay put for next time."
-  answer="$(ask "Enable claude-timestamp? (on/off)" "$CT_ENABLED")"
+  ask "Enable claude-timestamp? (on/off)" "$CT_ENABLED"; answer="$_CT_ANSWER"
   case "$answer" in on|off) CT_ENABLED="$answer" ;; esac
   echo
 
   # Timezone
+  # The detected zone is a guess from the environment, not a validated setting,
+  # so it can name something this machine cannot resolve. Offering it as the
+  # default then means the wizard suggests an answer it will refuse, which on
+  # exhausted stdin is a loop with no exit.
   local detected current
   detected="$(detect_tz)"
+  if [ -n "$detected" ] && ! valid_tz "$detected" 2>/dev/null; then
+    detected=""
+  fi
   current="${CT_TZ:-${detected:-local}}"
   echo "Timezone. Type an IANA name (Europe/Amsterdam), or 'local' for this"
   echo "machine's own time. Type 'list' to search the installed zones."
   while :; do
-    answer="$(ask "  Timezone" "$current")"
+    ask "  Timezone" "$current"; answer="$_CT_ANSWER"
     if [ "$answer" = "list" ]; then
       local term
-      term="$(ask "  Search for" "Europe")"
+      ask "  Search for" "Europe"; term="$_CT_ANSWER"
       if [ -d "$ZONEINFO" ]; then
         find "$ZONEINFO" -type f -path "*$term*" 2>/dev/null \
           | sed "s|^$ZONEINFO/||" | grep -v '^posix/\|^right/\|\.' | sort | head -25
       else
         echo "  No zoneinfo database on this machine; type the name directly."
       fi
+      [ -n "${CT_ASK_EOF:-}" ] && break
       continue
     fi
     if valid_tz "$answer"; then
       [ "$answer" = "local" ] && CT_TZ="" || CT_TZ="$answer"
       break
     fi
+    # Input is exhausted, so re-asking would spin forever on a value that can
+    # never become valid. Every other question here breaks the same way.
+    [ -n "${CT_ASK_EOF:-}" ] && break
   done
   echo
 
@@ -644,7 +667,7 @@ wizard() {
   local fmt
   while :; do
     echo "  24h = $(ct_now 24h)   short = $(ct_now short)   12h = $(ct_now 12h)   iso = $(ct_now iso)"
-    fmt="$(ask "  Display format" "$CT_DISPLAY_FORMAT")"
+    ask "  Display format" "$CT_DISPLAY_FORMAT"; fmt="$_CT_ANSWER"
     case "$fmt" in
       24h|short|12h|iso|*%*) CT_DISPLAY_FORMAT="$fmt"; break ;;
       *) echo "  Pick 24h, short, 12h, iso, or a strftime string containing %." ;;
@@ -653,29 +676,29 @@ wizard() {
   echo
 
   # Elapsed
-  answer="$(ask "Show how long each turn took? (on/off)" "$CT_ELAPSED")"
+  ask "Show how long each turn took? (on/off)" "$CT_ELAPSED"; answer="$_CT_ANSWER"
   case "$answer" in on|off) CT_ELAPSED="$answer" ;; esac
   echo
 
   # Duration extras, only worth asking about when durations are shown at all.
   if [ "$CT_ELAPSED" = "on" ]; then
     while :; do
-      answer="$(ask "  Colour the duration after how many seconds? (0 = never)" "$CT_SLOW_AFTER")"
+      ask "  Colour the duration after how many seconds? (0 = never)" "$CT_SLOW_AFTER"; answer="$_CT_ANSWER"
       if valid_seconds SLOW_AFTER "$answer"; then CT_SLOW_AFTER="$answer"; break; fi
       [ -n "${CT_ASK_EOF:-}" ] && break
     done
   fi
   while :; do
-    answer="$(ask "Mark a gap between messages after how many seconds? (0 = never)" "$CT_IDLE_AFTER")"
+    ask "Mark a gap between messages after how many seconds? (0 = never)" "$CT_IDLE_AFTER"; answer="$_CT_ANSWER"
     if valid_seconds IDLE_AFTER "$answer"; then CT_IDLE_AFTER="$answer"; break; fi
     [ -n "${CT_ASK_EOF:-}" ] && break
   done
-  answer="$(ask "Report session totals when the session ends? (on/off)" "$CT_SUMMARY")"
+  ask "Report session totals when the session ends? (on/off)" "$CT_SUMMARY"; answer="$_CT_ANSWER"
   case "$answer" in on|off) CT_SUMMARY="$answer" ;; esac
   if [ "$CT_SUMMARY" = "on" ]; then
     echo "  Tool timing names the slowest tools in that summary. It is the only"
     echo "  setting that costs anything per tool call rather than per message."
-    answer="$(ask "  Record what each tool call cost? (on/off)" "$CT_TOOL_TIMING")"
+    ask "  Record what each tool call cost? (on/off)" "$CT_TOOL_TIMING"; answer="$_CT_ANSWER"
     case "$answer" in on|off) CT_TOOL_TIMING="$answer" ;; esac
   fi
   echo
@@ -688,7 +711,7 @@ wizard() {
   done
   echo "  none     [$(ct_now "$CT_DISPLAY_FORMAT")]"
   while :; do
-    answer="$(ask "  Color" "$CT_COLOR")"
+    ask "  Color" "$CT_COLOR"; answer="$_CT_ANSWER"
     if valid_color "$answer"; then CT_COLOR="$answer"; break; fi
     [ -n "${CT_ASK_EOF:-}" ] && break
   done
@@ -715,7 +738,7 @@ wizard() {
       "$(ct_color_start "$CT_COLOR")" "$CT_MARKER" "$(ct_color_end "$CT_COLOR")"
   done
   while :; do
-    answer="$(ask "  Marker" "$CT_MARKER_TEMPLATE")"
+    ask "  Marker" "$CT_MARKER_TEMPLATE"; answer="$_CT_ANSWER"
     if valid_marker "$answer"; then CT_MARKER_TEMPLATE="$answer"; break; fi
     # Input is exhausted, so re-asking would spin forever on a value that can
     # never become valid. Every other question here breaks the same way.
@@ -726,11 +749,11 @@ wizard() {
   # Model-facing context
   echo "Claude can also be told the local time each prompt was sent, so it can"
   echo "reason about when things happened. This costs a few tokens per message."
-  answer="$(ask "  Tell Claude the time? (true/false)" "$CT_INJECT_CONTEXT")"
+  ask "  Tell Claude the time? (true/false)" "$CT_INJECT_CONTEXT"; answer="$_CT_ANSWER"
   case "$answer" in true|false) CT_INJECT_CONTEXT="$answer" ;; esac
   if [ "$CT_INJECT_CONTEXT" = "true" ]; then
     while :; do
-      fmt="$(ask "  Format Claude sees" "$CT_CONTEXT_FORMAT")"
+      ask "  Format Claude sees" "$CT_CONTEXT_FORMAT"; fmt="$_CT_ANSWER"
       case "$fmt" in
         24h|short|12h|iso|*%*) CT_CONTEXT_FORMAT="$fmt"; break ;;
         *) echo "  Pick 24h, short, 12h, iso, or a strftime string containing %." ;;
@@ -742,7 +765,7 @@ wizard() {
 
   echo -n "Result: "; preview
   echo
-  answer="$(ask "Write this configuration? (y/n)" "y")"
+  ask "Write this configuration? (y/n)" "y"; answer="$_CT_ANSWER"
   case "$answer" in
     y|Y|yes) write_config; echo "This takes effect on your next message. No restart needed." ;;
     *) echo "Nothing written." ;;

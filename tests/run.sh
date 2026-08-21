@@ -1567,6 +1567,28 @@ else
   fi
 fi
 
+# The wizard re-asks until it gets a usable answer. When stdin is exhausted it
+# must stop rather than spin: the default it keeps offering can itself be
+# invalid, which is what a TZ environment variable naming a zone this machine
+# does not have produces.
+if command -v timeout >/dev/null 2>&1; then
+  if timeout 10 env TZ=Mars/Olympus HOME="$WORK" \
+       CLAUDE_TIMESTAMP_CONFIG="$WORK/wizard-eof.conf" \
+       bash "$SCRIPTS/setup.sh" </dev/null >/dev/null 2>&1; then
+    pass "wizard: terminates on exhausted stdin with an invalid default"
+  else
+    rc=$?
+    if [ "$rc" -eq 124 ]; then
+      fail "wizard: terminates on exhausted stdin with an invalid default" \
+           "an exit" "timed out after 10s"
+    else
+      pass "wizard: terminates on exhausted stdin with an invalid default"
+    fi
+  fi
+else
+  echo "  skip timeout not installed, wizard EOF case not run"
+fi
+
 echo
 echo "session history"
 
