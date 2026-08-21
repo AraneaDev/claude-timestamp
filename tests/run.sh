@@ -328,6 +328,18 @@ if command -v jq >/dev/null 2>&1; then
   out="$(printf '{"session_id":"test-session","index":10,"delta":"x"}' | bash "$SCRIPTS/message-display.sh")"
   is "message-display emits nothing for a two-digit index" "" "$out"
 
+  # An absent index key is not proof of a later batch -- the downstream jq
+  # call defaults a missing index to 0 -- so the guard must let it through
+  # rather than treating "cannot tell" as "skip".
+  out="$(printf '{"session_id":"test-session","delta":"no index field"}' | bash "$SCRIPTS/message-display.sh")"
+  contains "message-display stamps a payload with no index key" "no index field" \
+    "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.displayContent')"
+
+  # Confirm the fix above did not simply disable the optimisation: a plain
+  # later batch still emits nothing.
+  out="$(printf '{"session_id":"test-session","index":5,"delta":"still skipped"}' | bash "$SCRIPTS/message-display.sh")"
+  is "message-display still emits nothing for an ordinary later batch" "" "$out"
+
   out="$(printf '{"session_id":"test-session","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh")"
   contains "user-prompt-submit injects context" "Message sent at local time" "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext')"
   if [ -r "$(ct_state_dir)/test-session" ]; then

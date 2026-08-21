@@ -30,14 +30,20 @@ input="$(cat)"
 # invocations have nothing to do. Deciding that in the shell keeps them from
 # forking jq to find out.
 #
-# This is a filter, not a parser. A real index of zero always matches, so no
-# first batch is ever wrongly skipped; a delta whose own text happens to match
-# costs one fork and is then rejected by the parse below, which remains the
-# only thing that decides. The pattern lives in a variable because bash 3.2
-# needs an unquoted expansion here to treat it as a regex rather than a
-# literal.
+# This is a filter, not a parser: it may only skip what it can positively
+# prove is a later batch. It can prove that when the payload contains an
+# "index" key whose value is not 0. Absence of the key is not proof of
+# anything -- the downstream jq call treats a missing index as 0 via
+# `.index // 0` -- so an absent key must fall through to the parse, same as
+# a delta whose own text happens to contain the pattern: one extra fork,
+# rejected by the parse below, which remains the only thing that decides.
+# The patterns live in variables because bash 3.2 needs an unquoted
+# expansion here to treat them as regexes rather than literals.
+ct_has_index='"index"[[:space:]]*:'
 ct_first_batch='"index"[[:space:]]*:[[:space:]]*0[[:space:],}]'
-[[ "$input" =~ $ct_first_batch ]] || exit 0
+if [[ "$input" =~ $ct_has_index ]] && ! [[ "$input" =~ $ct_first_batch ]]; then
+  exit 0
+fi
 
 # One cheap jq call decides whether there is any work to do at all.
 # Split on the ASCII unit separator rather than a tab. cwd can contain spaces,
