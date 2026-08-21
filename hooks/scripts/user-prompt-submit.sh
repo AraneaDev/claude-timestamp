@@ -58,6 +58,16 @@ if state_file="$(ct_state_file "$session_id")"; then
   ct_stage_flag "$session_id" "tooltiming" "$CT_TOOL_TIMING"
   ct_stage_flag "$session_id" "enabled"    "$CT_ENABLED"
 
+  # A sentinel whose mere existence answers "does any session on this machine
+  # want tool timing", so the tool hook can decide it has nothing to do with a
+  # glob rather than a jq fork. Cleared when the answer is no, or a project
+  # that once pinned it on would keep every later session paying for it.
+  if [ "$CT_TOOL_TIMING" = "on" ] && [ "$CT_ENABLED" = "on" ]; then
+    ct_stage_flag "$session_id" "timing-on" "1"
+  else
+    ct_clear_flag "$session_id" "timing-on"
+  fi
+
   # Cleared unconditionally rather than under TOOL_TIMING, so switching tool
   # timing on mid-session cannot inherit a log from before it was on.
   if turn_log="$(ct_turn_tool_log "$session_id")"; then

@@ -1083,6 +1083,10 @@ if command -v jq >/dev/null 2>&1; then
   fi
 
   fresh 'TOOL_TIMING=on'
+  # post-tool-use.sh now gates on a per-session sentinel that user-prompt-submit.sh
+  # normally stages; these cases call the tool hook directly, so the sentinel is
+  # staged by hand to stand in for the prompt hook that would otherwise have run.
+  ct_stage_flag "tools" "timing-on" "1"
 
   # Three calls, one of them a different tool. No pairing state is involved any
   # more, so a call is logged on its own rather than needing a start to match.
@@ -1147,6 +1151,7 @@ if command -v jq >/dev/null 2>&1; then
   # The outcome rides on the log line rather than in a counter, because tool
   # calls run in parallel and a shared read-modify-write loses writes.
   fresh 'TOOL_TIMING=on'
+  ct_stage_flag "outcome" "timing-on" "1"
   printf '{"session_id":"outcome","tool_use_id":"t1","tool_name":"Bash","duration_ms":1000,"hook_event_name":"PostToolUse"}' \
     | bash "$SCRIPTS/post-tool-use.sh"
   printf '{"session_id":"outcome","tool_use_id":"t2","tool_name":"Bash","duration_ms":2000,"hook_event_name":"PostToolUseFailure"}' \
@@ -1978,6 +1983,7 @@ if command -v jq >/dev/null 2>&1; then
   is_near "clamp: away absorbs the overflow"             40 "$_CT_IDLE" 2
 
   fresh 'TOOL_TIMING=on'
+  ct_stage_flag "f" "timing-on" "1"
   printf '{"session_id":"f","tool_use_id":"t1","tool_name":"Bash","duration_ms":1000,"hook_event_name":"PostToolUseFailure"}' \
     | bash "$SCRIPTS/post-tool-use.sh"
   is "a failed call is still timed" "1" "$(wc -l < "$(ct_tool_log f)" | tr -d ' ')"

@@ -24,9 +24,20 @@
 # owned it: for the next user it was either unwritable, silently disabling
 # elapsed time and the summary, or -- if created world-writable -- a place to
 # pre-plant a symlink under a filename the plugin would then open for writing.
-ct_state_dir() {
-  printf '%s/claude-timestamp-%s' "${TMPDIR:-/tmp}" "$(id -u 2>/dev/null || printf 'x')"
+#
+# Assign the state directory into _CT_STATE_DIR, without forking.
+#
+# ct_state_dir prints, which means a command substitution, which means a
+# subshell. That is fine on a path that runs once per message and wrong on one
+# that runs once per tool call. Same assign-don't-print reasoning as
+# ct_color_seq and ct_paint_part, for the same reason: a fork on a hot path.
+#
+# $UID is a bash builtin and matches `id -u`, so the uid costs nothing either.
+ct_state_dir_var() {
+  _CT_STATE_DIR="${TMPDIR:-/tmp}/claude-timestamp-${UID:-0}"
 }
+
+ct_state_dir() { ct_state_dir_var; printf '%s' "$_CT_STATE_DIR"; }
 
 # Make sure the state directory exists, belongs to us, and is private.
 #
@@ -159,6 +170,14 @@ ct_read_flag() {
   base="$(ct_state_file "$sid")" || return 0
   [ -r "${base}.${name}" ] || return 0
   cat "${base}.${name}" 2>/dev/null
+  return 0
+}
+
+ct_clear_flag() {
+  local sid="${1:-}" name="${2:-}" base
+  [ -n "$name" ] || return 0
+  base="$(ct_state_file "$sid")" || return 0
+  rm -f "${base}.${name}" 2>/dev/null || true
   return 0
 }
 

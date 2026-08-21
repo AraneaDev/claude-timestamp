@@ -28,9 +28,48 @@ CT_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib"
 source "$CT_LIB/config.sh"
 source "$CT_LIB/state.sh"
 
+# Decide with a glob, before anything forks.
+#
+# This hook runs on every tool call, and the README promises TOOL_TIMING is the
+# only setting that costs anything at that rate. Learning the session id needs
+# jq, and forking jq to discover there was nothing to do would make every user
+# running the default pay for a feature they have switched off. A sentinel is
+# staged per session while tool timing is on, so no match here means no session
+# wants timing and this hook is finished. A match means SOME session does; which
+# one still needs the payload, and that is where the fork earns its place.
+#
+# Conservative on purpose: one session with timing on makes every concurrent
+# session pay the parse. Over-recording is recoverable, a missed measurement is
+# not.
+ct_state_dir_var
+_ct_timing_wanted=0
+for _ct_f in "$_CT_STATE_DIR"/*.timing-on; do
+  [ -e "$_ct_f" ] && _ct_timing_wanted=1
+  break
+done
+
+# A session whose first prompt predates this fix has a turn file but never
+# staged an .enabled sibling, so it cannot appear in the glob above -- it has
+# no way to say what it wants. Rather than let the gate answer "no session
+# wants timing" on its behalf, its calls fall through to the same jq parse
+# and config resolution every call used to pay, until its next prompt catches
+# it up and stages a real answer. Checked with a second glob rather than
+# folded into the loop above so the common case -- every session already
+# staged -- still costs nothing but filesystem stats, no forks either way.
+if [ "$_ct_timing_wanted" -eq 0 ]; then
+  for _ct_f in "$_CT_STATE_DIR"/*; do
+    case "$_ct_f" in
+      *.*) continue ;;
+    esac
+    [ -e "$_ct_f" ] || continue
+    [ -e "${_ct_f}.enabled" ] || { _ct_timing_wanted=1; break; }
+  done
+fi
+
+[ "$_ct_timing_wanted" -eq 1 ] || exit 0
+
 # No jq: nothing can be read out of the payload, including the session id this
-# hook needs to find its own state. Checked first because everything below
-# depends on it.
+# hook needs to find its own state.
 command -v jq >/dev/null 2>&1 || exit 0
 
 input="$(cat)"
