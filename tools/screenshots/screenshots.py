@@ -157,6 +157,65 @@ def capture_pty(argv, keys, cols, rows, settle=12, total=150, env=None, record=F
     return bytes(raw)
 
 
+def capture_pty_until(argv, until, answer, cols, rows, tick=0.35, settle=3, total=40, env=None):
+    """Run argv in a pty, pressing Enter on a timer until the transcript so
+    far contains `until`, then send `answer` once and let the process finish.
+
+    This exists so a script with a fixed sequence of "accept every default"
+    questions followed by one real answer does not need its keystroke count
+    hardcoded and bumped by hand every time a question is inserted before the
+    one `answer` is meant for -- it was exactly that hardcoded count, sized
+    for the wizard before it gained a Marker question, that once made this
+    shot capture the wizard rejecting `answer` at the wrong prompt instead of
+    reaching the one it was meant for.
+    """
+    pid, fd = pty.fork()
+    if pid == 0:
+        os.environ.update(env or {})
+        os.environ["TERM"] = "xterm-256color"
+        os.environ["COLUMNS"], os.environ["LINES"] = str(cols), str(rows)
+        os.execvp(argv[0], argv)
+
+    fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+
+    start = last_output = time.time()
+    next_key = start + 0.8  # let the first prompt actually draw first
+    until_bytes = until.encode()
+    raw = bytearray()
+    answered = False
+    while time.time() - start < total:
+        now = time.time()
+        if not answered and now >= next_key:
+            os.write(fd, b"\r")
+            next_key = now + tick
+        r, _, _ = select.select([fd], [], [], 0.1)
+        if r:
+            try:
+                data = os.read(fd, 65536)
+            except OSError:
+                break
+            if not data:
+                break
+            raw += data
+            last_output = now
+            if not answered and until_bytes in raw:
+                os.write(fd, answer.encode())
+                answered = True
+        elif answered and now - last_output > settle:
+            break
+    try:
+        os.write(fd, b"\x03")
+        time.sleep(0.2)
+        os.close(fd)
+    except OSError:
+        pass
+    try:
+        os.waitpid(pid, os.WNOHANG)
+    except ChildProcessError:
+        pass
+    return bytes(raw)
+
+
 def to_rgb(spec):
     spec = PALETTE.get(spec, spec)
     if not spec.startswith("#"):
@@ -551,7 +610,11 @@ def shot_wizard():
     """The interactive wizard, driven through a pty so it has a real TTY.
 
     Every prompt is answered by accepting its default, which is what makes the
-    shot readable: the defaults are the thing worth showing.
+    shot readable: the defaults are the thing worth showing. Enter is pressed
+    on a timer until the transcript shows the write-confirmation prompt, then
+    `y` answers that one -- rather than a fixed keystroke count sized for
+    today's number of questions, which silently rots the next time a question
+    is inserted before it (see capture_pty_until's docstring).
     """
     work = WORK / "wizard"
     home = work / "home" / ".claude"
@@ -559,13 +622,10 @@ def shot_wizard():
     (home / "claude-timestamp.conf").write_text(DOCTOR_CONFIG)
 
     cols, rows = 84, 58
-    # One Enter per question, then y to write. Spaced out because the wizard
-    # redraws a colour palette between some of them.
-    keys = [(0.8 + i * 0.35, "\r") for i in range(11)]
-    keys.append((0.8 + 11 * 0.35, "y\r"))
-    raw = capture_pty(
+    raw = capture_pty_until(
         ["bash", str(SCRIPTS / "setup.sh")],
-        keys=keys, cols=cols, rows=rows, settle=3, total=40,
+        until="Write this configuration?", answer="y\r",
+        cols=cols, rows=rows, settle=3, total=40,
         env={"HOME": str(work / "home"), "CLAUDE_TIMESTAMP_CONFIG": ""},
     )
     (work / "wizard.raw").write_bytes(raw)

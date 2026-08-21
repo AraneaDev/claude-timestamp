@@ -247,11 +247,9 @@ cannot run anything.
 | `HISTORY` | `on` | Record each finished session, for `/timestamps` and `--stats` |
 | `HISTORY_LIMIT` | `200` | How many recorded sessions to keep |
 
-`NO_COLOR` disables colour regardless of `COLOR`.
-
-Colour is emitted only in a terminal session, so a client that does not
-interpret ANSI, such as the VS Code extension, gets plain text instead of
-visible escape codes. `FORCE_COLOR` forces it back on.
+Colour behaviour, including when it is suppressed and how `NO_COLOR` and
+`FORCE_COLOR` override that, is covered above under **Colour, and where it
+applies**.
 
 A value the plugin cannot use is replaced by its default rather than silently
 doing nothing, and it is named at the start of the next session and by
