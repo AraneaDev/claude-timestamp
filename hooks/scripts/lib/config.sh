@@ -314,26 +314,6 @@ ct_paint() {
   fi
 }
 
-# The clock used for tool timings. EPOCHREALTIME gives sub-second precision but
-# is bash 5+, and macOS still ships bash 3.2 as /bin/bash while BSD date has no
-# %N -- so there is no portable sub-second fallback. Whole seconds it is, and
-# the call counts carry the signal where durations round to zero.
-ct_now_precise() {
-  if [ -n "${EPOCHREALTIME:-}" ]; then
-    # Some locales render EPOCHREALTIME with a comma.
-    printf '%s' "${EPOCHREALTIME/,/.}"
-  else
-    date +%s
-  fi
-}
-
-# Difference between two ct_now_precise readings, to one decimal. Uses awk
-# because the shell cannot do decimal arithmetic. A negative result means the
-# clock moved backwards mid-call and is reported as zero.
-ct_duration_between() {
-  awk -v a="${1:-0}" -v b="${2:-0}" 'BEGIN { d = b - a; if (d < 0) d = 0; printf "%.3f", d }'
-}
-
 # Elapsed-time state. One file per session, holding the epoch second the last
 # prompt was submitted.
 ct_state_dir() { printf '%s' "${TMPDIR:-/tmp}/claude-timestamp"; }
@@ -348,17 +328,6 @@ ct_state_file() {
   sid="$(printf '%s' "${1:-}" | tr -cd 'A-Za-z0-9_-')"
   [ -n "$sid" ] || return 1
   printf '%s/%s' "$(ct_state_dir)" "$sid"
-}
-
-# Where one in-flight tool call's start time is parked. Keyed by tool_use_id
-# rather than tool name because Claude Code runs tool calls in parallel, so
-# name-keyed state would interleave between concurrent calls of the same tool.
-ct_tool_state_file() {
-  local base tuid
-  base="$(ct_state_file "${1:-}")" || return 1
-  tuid="$(printf '%s' "${2:-}" | tr -cd 'A-Za-z0-9_-')"
-  [ -n "$tuid" ] || return 1
-  printf '%s.tool.%s' "$base" "$tuid"
 }
 
 # The append-only log of completed tool calls for a session.

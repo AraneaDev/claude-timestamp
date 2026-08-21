@@ -681,14 +681,6 @@ echo "tool timing"
 fresh
 is "tool timing is off by default" "off" "$(ct_load_config; printf '%s' "$CT_TOOL_TIMING")"
 
-is "duration between two readings" "1.500" "$(ct_duration_between 10.000 11.500)"
-is "a backwards clock reads as zero" "0.000" "$(ct_duration_between 20 10)"
-contains "precise clock returns a number" "." "$(ct_now_precise).0"
-
-is "tool state is keyed by tool use id" "$(ct_state_dir)/s.tool.toolu_01AB" "$(ct_tool_state_file "s" "toolu_01AB")"
-is "tool use id is sanitised" "$(ct_state_dir)/s.tool.etcpasswd" "$(ct_tool_state_file "s" "../../etc/passwd")"
-refutes "an empty tool use id is refused" ct_tool_state_file "s" ""
-
 if command -v jq >/dev/null 2>&1; then
   # Disabled: the hook must write nothing at all.
   fresh 'TOOL_TIMING=off'
