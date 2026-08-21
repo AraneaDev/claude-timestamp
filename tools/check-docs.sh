@@ -134,6 +134,45 @@ else
   status=1
 fi
 
+echo "lint file list"
+# The shellcheck and bash -n steps name their files by hand, so a new script
+# is linted by nobody until someone remembers to add it. Compare the tracked
+# set against the set CI actually names.
+# Bounded by the step's own name and by the start of the next step or job,
+# rather than by the first blank line: a blank line inside the step's comment
+# block would silently end the range early and the check would then report a
+# gap that is not there.
+lint_listed="$(awk '
+  /^      - name: shellcheck$/ { inblock = 1; next }
+  inblock && /^      - name: / { inblock = 0 }
+  inblock && /^  [a-z]/        { inblock = 0 }
+  inblock                      { print }
+' .github/workflows/ci.yml | grep -oE '[A-Za-z0-9_./*-]+\.sh|\.githooks/[a-z-]+' | sort -u)"
+lint_tracked="$(git ls-files '*.sh' .githooks | sort -u)"
+
+lint_missing=""
+while read -r f; do
+  [ -n "$f" ] || continue
+  covered=0
+  while read -r pat; do
+    [ -n "$pat" ] || continue
+    # shellcheck disable=SC2254  # the glob in the CI list is meant to expand
+    case "$f" in $pat) covered=1; break ;; esac
+  done <<EOF
+$lint_listed
+EOF
+  [ "$covered" -eq 1 ] || lint_missing="$lint_missing $f"
+done <<EOF
+$lint_tracked
+EOF
+
+if [ -n "$lint_missing" ]; then
+  note "not covered by CI's shellcheck list:$lint_missing"
+  status=1
+else
+  note "every tracked shell script is linted"
+fi
+
 echo "assertion count"
 actual="$(bash tests/run.sh 2>/dev/null | sed -n 's/^\([0-9]*\) passed.*/\1/p' | tail -1)"
 claimed="$(sed -n 's/.*# \([0-9]*\) assertions.*/\1/p' README.md | head -1)"
