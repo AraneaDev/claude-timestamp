@@ -6,11 +6,11 @@
 
 [![Release](https://img.shields.io/github/v/release/AraneaDev/claude-timestamp)](https://github.com/AraneaDev/claude-timestamp/releases)
 [![CI](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml/badge.svg)](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-500%20passing-2b8a3e)](tests/run.sh)
+[![Tests](https://img.shields.io/badge/tests-501%20passing-2b8a3e)](tests/run.sh)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-364fc7)](#platform-notes)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
-<img src="assets/timestamps.gif" alt="A real Claude Code session, timestamps on assistant messages, with a slow turn highlighted" width="840">
+<img src="assets/timestamps.webp" alt="A real Claude Code session, timestamps on assistant messages, with a slow turn highlighted" width="840">
 
 <sub>Two fast turns render dim. The third crosses the slow threshold, so its duration is coloured and, with `TOOL_TIMING` on, named after the tool that caused it. Tool timing is off by default, so a plain install will not show this on its own. This is a real session played back at real speed -- nothing here is sped up or looped faster than it happened.</sub>
 
@@ -49,6 +49,13 @@ claude-timestamp: session lasted 1h30m over 12 turns, 24m18s of it waiting, 35m0
 slowest tools: Bash 41.2s (18 calls), WebFetch 8.1s (1 call), Read 2.0s (37 calls). 2 failed
 ```
 
+The gap divider and that closing summary, in one screenshot -- the same session
+this example is drawn from:
+
+<p align="center">
+  <img src="assets/session.webp" alt="An idle divider above a stamped message, and the end-of-session summary below it" width="700">
+</p>
+
 - **Keeps a running record.** Finished sessions are logged so you can see where
   the time actually goes.
 
@@ -85,7 +92,7 @@ Run `/timestamps` inside Claude Code. Bare, it shows what you have now and
 offers a handful of presets, each previewed as the marker it actually produces:
 
 <p align="center">
-  <img src="assets/picker.png" alt="The in-chat picker, showing presets with a preview of each" width="760">
+  <img src="assets/picker.webp" alt="The in-chat picker, showing presets with a preview of each" width="760">
 </p>
 
 It also takes the request directly, so `/timestamps tokyo`, `/timestamps no
@@ -135,6 +142,13 @@ templates express nearly everything nesting would.
 `%` followed by letters must spell one of the four names exactly: `%elapsd` is
 rejected as a typo rather than printed back at you, and `%timex` is rejected too
 rather than quietly meaning `%time` followed by an `x`.
+
+Same gallery, as a screenshot rather than a code block, with the per-part
+colours from the next section shown on the last row:
+
+<p align="center">
+  <img src="assets/markers.webp" alt="A gallery of MARKER templates beside what each actually renders" width="700">
+</p>
 
 ### Colour, and where it applies
 
@@ -186,7 +200,7 @@ bash "$CLAUDE_PLUGIN_ROOT/hooks/scripts/setup.sh"
 ```
 
 <p align="center">
-  <img src="assets/wizard.png" alt="The setup wizard, showing the colour choices and a live preview" width="760">
+  <img src="assets/wizard.webp" alt="The setup wizard, showing the colour choices and a live preview" width="760">
 </p>
 
 Every question shows its current value in brackets, and pressing enter keeps
@@ -296,7 +310,7 @@ bash "$CLAUDE_PLUGIN_ROOT/hooks/scripts/setup.sh" --stats
 ```
 
 <p align="center">
-  <img src="assets/stats.png" alt="Totals across recorded sessions" width="660">
+  <img src="assets/stats.webp" alt="Totals across recorded sessions" width="660">
 </p>
 
 Each finished session is appended to the history file, and the oldest are
@@ -320,7 +334,7 @@ bash "$CLAUDE_PLUGIN_ROOT/hooks/scripts/setup.sh" --doctor
 ```
 
 <p align="center">
-  <img src="assets/doctor.png" alt="Output of the doctor self-check" width="760">
+  <img src="assets/doctor.webp" alt="Output of the doctor self-check" width="760">
 </p>
 
 It checks that `jq` is present, that the config parses, that a pinned timezone
@@ -374,7 +388,7 @@ no database.
 ## Development
 
 ```bash
-bash tests/run.sh                                    # 500 assertions, no framework
+bash tests/run.sh                                    # 501 assertions, no framework
 shellcheck -S style -e SC1091 hooks/scripts/**/*.sh  # clean
 bash tools/check-docs.sh                             # README against the code
 ```
@@ -409,13 +423,20 @@ bash tools/screenshots/make.sh doctor   # just one
 
 It drives the real programs, then renders what was captured using a terminal
 emulator. Hero, picker and wizard run through a pty, so the shot shows a real
-terminal rather than a reconstruction; doctor and stats capture plain output
-instead, since neither draws anything a pty would change. Nothing in those
-images is mocked up. Hero and picker talk to an actual Claude Code session, so
-they need a working login and spend tokens; wizard, doctor and stats run local
-scripts only and are free and offline. The hero shot's durations differ every
-run because they are real measurements. Python dependencies install into a
-virtualenv beside the script.
+terminal rather than a reconstruction; doctor, stats and markers capture plain
+output instead, since none of them draw anything a pty would change; session
+drives message-display.sh and session-end.sh directly with planted state, the
+way tests/run.sh does. Nothing in those images is mocked up. Hero and picker
+talk to an actual Claude Code session, so they need a working login and spend
+tokens; wizard, doctor, stats, markers and session run local scripts only and
+are free and offline. The hero shot's durations differ every run because they
+are real measurements. Python dependencies install into a virtualenv beside
+the script.
+
+Every image is a lossless WebP, animation included: terminal captures are flat
+colour with hard edges, which lossless compression suits far better than a
+lossy setting would, at a fraction of the size PNG and GIF needed for the
+same pixels.
 
 ## Releases
 

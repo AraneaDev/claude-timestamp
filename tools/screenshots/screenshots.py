@@ -3,36 +3,44 @@
 Every shot is captured from the real thing rather than mocked up. The hero
 and picker shots each drive an actual Claude Code session inside a pty. The
 wizard shot runs the real setup script through a pty too, since it needs a
-TTY. The doctor and stats shots run the real setup script directly and
-capture its output. Nothing here fabricates output -- the hero shot is an
-animated GIF built from a real recording, timed to real seconds, not a sped
-up or looped approximation of one.
+TTY. The doctor, stats and markers shots run real code directly and capture
+its output. The session shot drives the real hooks with planted state, the
+way the test suite does. Nothing here fabricates output -- the hero shot is
+an animated WebP built from a real recording, timed to real seconds, not a
+sped up or looped approximation of one.
+
+Producing a shot of the end-of-session summary by exiting the TUI under
+automation does not go quietly: typing /exit opens the command autocomplete
+and the newline picks from the menu, while Ctrl-D is ignored whenever a
+history suggestion is sitting in the input. shot_session sidesteps that
+entirely by calling session-end.sh directly with state planted the way a real
+session would have left it, the same approach the test suite uses.
 
 pyte is a terminal emulator, so what gets rendered is whatever was actually
 painted, escape codes and all. It models bold and italics but has no notion of
 SGR 2 (dim), which is exactly what this plugin uses by default, so Screen is
 subclassed below to track it.
 
-Usage:  python screenshots.py [hero|picker|wizard|doctor|stats|all]
+Usage:  python screenshots.py [hero|picker|wizard|doctor|stats|markers|session|all]
 
 Costs: hero and picker each drive a real Claude Code session (tokens, and
-however long the model takes to answer). wizard, doctor and stats run local
-scripts only and are free and offline. Plain `all` therefore spends two real
-sessions every time it runs -- pass a single name if that is not what you
-want.
-
-There is deliberately no shot of the end-of-session summary. Producing one
-means exiting the TUI under automation, and it does not go quietly: typing
-/exit opens the command autocomplete and the newline picks from the menu,
-while Ctrl-D is ignored whenever a history suggestion is sitting in the input.
-The README shows that output as text instead.
+however long the model takes to answer). wizard, doctor, stats, markers and
+session run local scripts only and are free and offline. Plain `all`
+therefore spends two real sessions every time it runs -- pass a single name
+if that is not what you want.
 
 The hero shot starts a real session and therefore spends tokens. It also
 depends on how fast the model answers, so the durations differ every run;
-that is the point, they are real measurements rather than props. Its GIF's
-own playback speed is likewise real: frame durations are read off the
-recording's true timestamps, never compressed, so a viewer watching it
+that is the point, they are real measurements rather than props. Its
+animation's own playback speed is likewise real: frame durations are read off
+the recording's true timestamps, never compressed, so a viewer watching it
 experiences the same seconds the session actually took.
+
+Every image is written as lossless WebP, stills and the animation alike.
+Terminal captures are flat colour with hard edges, which lossless compression
+handles extremely well and a lossy setting would only blur; save_image and
+save_animation are the two functions every shot's output passes through, so a
+future shot cannot quietly stay PNG.
 """
 import fcntl, json, os, pickle, pty, select, struct, subprocess, sys, termios, time
 from pathlib import Path
@@ -245,17 +253,17 @@ def font_metrics(scale):
 def compose_frame(screen, cols, top, bot, font, boldf, cw, ch, pad, content_bot=None):
     """Paint one rectangular window of a pyte screen to an RGB image.
 
-    Shared by the still-shot renderer and the GIF frame sampler, so a frame
+    Shared by the still-shot renderer and the animation frame sampler, so a frame
     of the animation is drawn by exactly the same code path -- same font
     metrics, same dim blend, same glyph substitutions -- as a still.
 
     content_bot, when given, is <= bot and holds the canvas size at (top,bot)
-    while leaving every row past it blank. The GIF sampler uses this: the
+    while leaving every row past it blank. The animation sampler uses this: the
     still shots crop `bot` to land just above the rule-and-input-box chrome
     in the *final* frame, but that chrome sits at a lower row with every line
     the session prints, so at an earlier sampled moment the still shots'
     fixed (top, bot) window can still contain it. Blanking past content_bot
-    keeps every frame the same pixel size (required for a GIF) without ever
+    keeps every frame the same pixel size (required for an animation) without ever
     painting that chrome.
     """
     if content_bot is None:
@@ -276,6 +284,18 @@ def compose_frame(screen, cols, top, bot, font, boldf, cw, ch, pad, content_bot=
     return img
 
 
+# Every still image is written through this one function, so a future shot
+# cannot quietly stay PNG. Terminal captures are flat colour with hard edges,
+# which lossless WebP compresses extremely well and lossy encoding wastes bits
+# on -- measured across this repository's own shots, lossless was smaller as
+# well as sharper, so there is no lossy path to opt into by accident.
+def save_image(img, out):
+    out.parent.mkdir(parents=True, exist_ok=True)
+    img.save(out, "WEBP", lossless=True, quality=100, method=6)
+    size = out.stat().st_size
+    print(f"wrote {out.relative_to(ROOT)}  ({img.width}x{img.height}, {size / 1024:.1f} KiB)")
+
+
 def render(raw, out, cols, rows, first=None, last=None, scale=2, crlf=False):
     screen = DimScreen(cols, rows)
     if crlf:
@@ -291,9 +311,7 @@ def render(raw, out, cols, rows, first=None, last=None, scale=2, crlf=False):
     bot = last if last is not None else (used[-1] if used else rows - 1)
 
     img = compose_frame(screen, cols, top, bot, font, boldf, cw, ch, pad)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    img.save(out)
-    print(f"wrote {out.relative_to(ROOT)}  ({img.width}x{img.height})")
+    save_image(img, out)
 
 
 def _rule_row(screen, top, bot):
@@ -331,7 +349,7 @@ def _window_snapshot(screen, cols, top, content_bot):
     """A cheap hashable fingerprint of one rectangular window of a screen.
 
     Used only to tell whether two sampled moments looked different, so
-    identical consecutive samples can be merged into one longer-held GIF
+    identical consecutive samples can be merged into one longer-held animation
     frame instead of two identical ones -- real time still elapses either
     way, it is just spent as one frame's duration rather than several. Only
     scans down to content_bot, matching what compose_frame actually paints,
@@ -355,13 +373,13 @@ def sample_frames(timeline, elapsed, cols, rows, top, bot, scale, dt):
     """Replay a timed byte stream into (image, real_seconds_shown) frames.
 
     The recording is walked in fixed dt buckets covering [0, elapsed] --
-    dt chosen well above any delay a GIF player would silently round up to,
+    dt chosen well above any delay a WebP player would silently round up to,
     so no bucket is ever faster than what was actually captured. Each
     bucket's displayed content is the screen state after every byte that had
     actually arrived by that bucket's end, so the very last bucket always
     reflects the true final state. Consecutive buckets that look identical
     are merged into one frame whose duration is their combined real time,
-    which is what keeps a long idle stretch from costing one GIF frame per
+    which is what keeps a long idle stretch from costing one animation frame per
     dt: sum(duration for every returned frame) always equals `elapsed`
     exactly, whether that time was spent as one frame or a hundred.
 
@@ -398,53 +416,45 @@ def sample_frames(timeline, elapsed, cols, rows, top, bot, scale, dt):
     return frames
 
 
-def save_gif(frames, out, elapsed):
-    """Write sample_frames() output as a GIF whose playback matches real time.
+def save_animation(imgs, durations, out):
+    """Write frames as a lossless animated WebP, through the one save routine
+    every animation uses.
 
-    Every frame is quantised against one shared, exact palette (the terminal
-    background plus this script's own ANSI colours and their dim blends)
-    instead of Pillow's default per-frame adaptive palette. The colours
-    actually on screen are already flat and few, so an exact palette needs no
-    dithering and keeps large runs of identical pixels, which is what makes
-    LZW/GIF compression cheap here; a wobbling adaptive palette across frames
-    would both look worse and compress worse.
-
-    Per-frame durations are rounded to whole milliseconds with the leftover
-    pushed onto the final frame, so the file's total duration matches
-    `elapsed` to the millisecond rather than drifting from rounding a few
-    hundred frames independently.
+    method=4 rather than the stills' method=6: 6 is very slow across dozens of
+    frames for no size gain once the encoding is already lossless. Loops
+    forever (loop=0), matching how the README animation has always behaved.
     """
-    colors = [to_rgb(BG)]
-    for v in PALETTE.values():
-        rgb = to_rgb(v)
-        if rgb not in colors:
-            colors.append(rgb)
-        dim = blend(rgb, to_rgb(BG), 0.45)
-        if dim not in colors:
-            colors.append(dim)
-    pal_img = Image.new("P", (1, 1))
-    pal_img.putpalette([c for rgb in colors for c in rgb])
+    out.parent.mkdir(parents=True, exist_ok=True)
+    imgs[0].save(out, "WEBP", save_all=True, append_images=imgs[1:],
+                 duration=durations, loop=0, lossless=True, quality=100, method=4)
+    size = out.stat().st_size
+    print(f"wrote {out.relative_to(ROOT)}  ({imgs[0].width}x{imgs[0].height}, "
+          f"{len(imgs)} frames, {sum(durations) / 1000:.1f}s, {size / 1024:.0f} KiB)")
 
+
+def save_timed_animation(frames, out, elapsed):
+    """Write sample_frames() output as an animated WebP whose playback matches
+    real time.
+
+    Unlike GIF, lossless WebP needs no shared palette or quantisation: the
+    frames are RGB images saved as-is. Per-frame durations are rounded to
+    whole milliseconds with the leftover pushed onto the final frame, so the
+    file's total duration matches `elapsed` to the millisecond rather than
+    drifting from rounding a few hundred frames independently.
+    """
     total_ms = round(elapsed * 1000)
-    quantised = []
+    imgs = []
+    durations = []
     remaining_ms = total_ms
     for i, (img, secs) in enumerate(frames):
-        q = img.quantize(palette=pal_img, dither=Image.Dither.NONE)
         if i == len(frames) - 1:
             ms = remaining_ms
         else:
             ms = round(secs * 1000)
             remaining_ms -= ms
-        quantised.append((q, ms))
-
-    out.parent.mkdir(parents=True, exist_ok=True)
-    imgs = [q for q, _ in quantised]
-    durations = [ms for _, ms in quantised]
-    imgs[0].save(out, format="GIF", save_all=True, append_images=imgs[1:],
-                 duration=durations, loop=0, optimize=True, disposal=2)
-    size = out.stat().st_size
-    print(f"wrote {out.relative_to(ROOT)}  ({imgs[0].width}x{imgs[0].height}, "
-          f"{len(imgs)} frames, {sum(durations) / 1000:.1f}s, {size / 1024:.0f} KiB)")
+        imgs.append(img)
+        durations.append(ms)
+    save_animation(imgs, durations, out)
 
 
 DEMO_CONFIG = """\
@@ -476,7 +486,7 @@ TOOL_TIMING=on
 
 
 def shot_hero():
-    """A real session, recorded and played back as a GIF at real speed.
+    """A real session, recorded and played back as a WebP animation at real speed.
 
     Two quick turns, then one slow enough to name its tool. The third prompt
     has to make Claude actually run something slow, or TOOL_TIMING has
@@ -488,7 +498,7 @@ def shot_hero():
     or network access, it can't touch anything outside this work directory
     even by accident. Prompts are spaced tight (a few seconds apart) rather
     than the leisurely gaps an earlier still version of this shot used, so
-    the whole recording -- and the GIF's own runtime -- stays under a minute
+    the whole recording -- and the animation's own runtime -- stays under a minute
     without asking a reader to sit through dead air.
 
     This is the only place the README shows the marker, the duration or the
@@ -525,7 +535,7 @@ def shot_hero():
 
     # Crop past the welcome banner and stop before the status line. The banner
     # carries the account's name, email and organisation, which do not belong
-    # in a published GIF. The same fixed window is used for every sampled
+    # in a published animation. The same fixed window is used for every sampled
     # frame, not recomputed per frame -- this rows buffer is generous enough
     # (verified against the captured raw below) that nothing in this session
     # scrolls, so a row position printed to means the same thing at every
@@ -537,7 +547,7 @@ def shot_hero():
     last = max((y for y in range(rows) if lines[y].strip().startswith("✻")), default=rows - 1)
 
     frames = sample_frames(timeline, elapsed, cols, rows, first, last, scale=2, dt=0.45)
-    save_gif(frames, ASSETS / "timestamps.gif", elapsed)
+    save_timed_animation(frames, ASSETS / "timestamps.webp", elapsed)
     print(f"  real session duration: {elapsed:.1f}s")
 
 
@@ -603,7 +613,7 @@ def shot_picker():
     pyte.ByteStream(screen).feed(raw)
     lines = screen.display
     first = next((y for y in range(rows) if lines[y].lstrip().startswith("❯")), 12) - 1
-    render(raw, ASSETS / "picker.png", cols, rows, first=first)
+    render(raw, ASSETS / "picker.webp", cols, rows, first=first)
 
 
 def shot_wizard():
@@ -629,7 +639,7 @@ def shot_wizard():
         env={"HOME": str(work / "home"), "CLAUDE_TIMESTAMP_CONFIG": ""},
     )
     (work / "wizard.raw").write_bytes(raw)
-    render(raw, ASSETS / "wizard.png", cols, rows)
+    render(raw, ASSETS / "wizard.webp", cols, rows)
 
 
 def shot_doctor():
@@ -653,7 +663,7 @@ def shot_doctor():
     )
     raw = proc.stdout + proc.stderr
     (work / "doctor.raw").write_bytes(raw)
-    render(raw, ASSETS / "doctor.png", cols=84, rows=36, crlf=True)
+    render(raw, ASSETS / "doctor.webp", cols=84, rows=36, crlf=True)
 
 
 def shot_stats():
@@ -692,11 +702,182 @@ def shot_stats():
     )
     raw = proc.stdout + proc.stderr
     (work / "stats.raw").write_bytes(raw)
-    render(raw, ASSETS / "stats.png", cols=64, rows=22, crlf=True)
+    render(raw, ASSETS / "stats.webp", cols=64, rows=22, crlf=True)
+
+
+# A bash snippet, not a hand-written table: it sources the library the plugin
+# itself uses and calls the exact same ct_paint_part / ct_render_marker every
+# hook calls, so what the gallery shows can never drift from what a real
+# marker renders. `__LIB__` is substituted for lib/config.sh's real path
+# before this runs.
+#
+# _display_width matches setup.sh's own _ct_display_width (same wc -c minus
+# continuation-byte count, same LC_ALL=C) rather than inventing a second way
+# to measure it: three of these templates carry a multi-byte character (`·`,
+# `→`, `⟨⟩`), and padding by byte count would land their column short.
+MARKERS_SCRIPT = r"""
+set -euo pipefail
+source "__LIB__"
+
+_display_width() {
+  local s="$1" bytes cont
+  bytes="$(printf '%s' "$s" | wc -c | tr -d ' ')"
+  cont="$(printf '%s' "$s" | LC_ALL=C tr -d -c '\200-\277' | wc -c | tr -d ' ')"
+  printf '%d' "$((bytes - cont))"
+}
+
+templates=(
+  '[{%date }%time{ %elapsed}{ · %tool}]'
+  '%time'
+  '%time{ %elapsed}'
+  '%time{ → %elapsed}'
+  '%time{ (%elapsed)}'
+  '⟨%time⟩'
+)
+
+width=0
+for tpl in "${templates[@]}"; do
+  w="$(_display_width "$tpl")"
+  [ "$w" -gt "$width" ] && width="$w"
+done
+
+render_row() {
+  local tpl="$1" base="$2" time_color="$3" elapsed_color="$4" tool_color="$5" w pad
+  ct_paint_part "$time_color"    "13:22:13"   "$base"; wp_time="$_CT_PART"
+  ct_paint_part "$elapsed_color" "+2m14s"     "$base"; wp_elapsed="$_CT_PART"
+  ct_paint_part "$tool_color"    "Bash 1m58s" "$base"; wp_tool="$_CT_PART"
+  ct_render_marker "$tpl" "$wp_time" "$wp_elapsed" "$wp_tool" ""
+  w="$(_display_width "$tpl")"
+  pad=$(( width - w ))
+  printf '  %s%*s  %s%s%s\n' "$tpl" "$pad" "" "$(ct_color_start "$base")" "$CT_MARKER" "$(ct_color_end "$base")"
+}
+
+echo "MARKER templates, rendered by the real code"
+echo
+for tpl in "${templates[@]}"; do
+  render_row "$tpl" dim "" "" ""
+done
+echo
+echo "Per-part colour (TIME_COLOR=gray ELAPSED_COLOR=cyan):"
+render_row '%time{ %elapsed}' dim gray cyan ""
+"""
+
+
+def shot_markers():
+    """A gallery of marker templates beside what each actually renders.
+
+    Every row comes from running ct_paint_part and ct_render_marker, the same
+    functions message-display.sh calls on every message, rather than typing
+    out what a template "should" produce. FORCE_COLOR=1 makes this
+    deterministic regardless of what invokes this script: the plugin only
+    emits ANSI when it believes it is in a terminal, and a subprocess under a
+    capture harness may not qualify as one on its own.
+    """
+    script = MARKERS_SCRIPT.replace("__LIB__", str(SCRIPTS / "lib" / "config.sh"))
+    env = dict(os.environ)
+    env["FORCE_COLOR"] = "1"
+    env.pop("NO_COLOR", None)
+    proc = subprocess.run(["bash", "-c", script], capture_output=True, env=env)
+    raw = proc.stdout + proc.stderr
+    work = WORK / "markers"
+    work.mkdir(parents=True, exist_ok=True)
+    (work / "markers.raw").write_bytes(raw)
+    render(raw, ASSETS / "markers.webp", cols=100, rows=20, crlf=True)
+
+
+SESSION_CONFIG = """\
+TZ=Europe/Amsterdam
+DISPLAY_FORMAT=24h
+COLOR=dim
+ELAPSED=on
+SLOW_AFTER=60
+IDLE_AFTER=3600
+DATE_ROLLOVER=off
+SUMMARY=on
+SUBAGENTS=on
+TOOL_TIMING=on
+"""
+
+
+def shot_session():
+    """The idle divider and the end-of-session summary, from the real hooks.
+
+    Exiting a live TUI under automation to capture the real end-of-session
+    text does not go quietly (typing /exit opens the command autocomplete,
+    and Ctrl-D is ignored whenever a history suggestion sits in the input), so
+    this drives message-display.sh and session-end.sh directly with state
+    planted the way tests/run.sh plants it -- see that file's "turn
+    accounting" and "session summary" sections for the same pattern. The
+    divider, the marker and the summary line are the hooks' own real output;
+    only the state that produces them, and the message text the divider sits
+    above, are made up for the shot.
+
+    The planted numbers reproduce the README's own worked example (1h30m
+    over 12 turns, 24m18s waiting, 35m00s away, and the three-tool timing
+    line with two failures) rather than arbitrary ones, so the shot and the
+    prose beside it describe the same session.
+    """
+    work = WORK / "session"
+    home = work / "home" / ".claude"
+    home.mkdir(parents=True, exist_ok=True)
+    conf = work / "config.conf"
+    conf.write_text(SESSION_CONFIG)
+    tmp = work / "tmp"
+    state_dir = tmp / "claude-timestamp"
+    state_dir.mkdir(parents=True, exist_ok=True)
+
+    env = dict(os.environ)
+    env["HOME"] = str(work / "home")
+    env["CLAUDE_TIMESTAMP_CONFIG"] = str(conf)
+    env["TMPDIR"] = str(tmp)
+
+    sid = "demo-session"
+    base = state_dir / sid
+    now = int(time.time())
+
+    # A gap since the last message, well past IDLE_AFTER, so the divider
+    # shows. No turn is left open (base itself is never written), so the
+    # marker on this message carries a time and nothing else -- exactly what
+    # message-display.sh draws for a message with no turn in progress.
+    (state_dir / f"{sid}.last").write_text(str(now - 7200))
+    proc = subprocess.run(
+        ["bash", str(SCRIPTS / "message-display.sh")],
+        input=json.dumps({
+            "session_id": sid, "index": 0,
+            "delta": "Sounds good, picking this up where we left off.",
+        }),
+        capture_output=True, env=env, text=True,
+    )
+    display = json.loads(proc.stdout)["hookSpecificOutput"]["displayContent"]
+
+    # The end-of-session summary: state planted directly, the same way
+    # tests/run.sh's "session summary" cases plant .start/.turns/.wait/.idle
+    # and a .tools log before calling session-end.sh.
+    (state_dir / f"{sid}.start").write_text(str(now - 5400))
+    (state_dir / f"{sid}.turns").write_text("12")
+    (state_dir / f"{sid}.wait").write_text("1458")
+    (state_dir / f"{sid}.idle").write_text("2100")
+    tools = (
+        "Bash 2.000 ok\n" * 17 + "Bash 7.200 fail\n"
+        "WebFetch 8.100 fail\n"
+        + "Read 0.054 ok\n" * 36 + "Read 0.056 ok\n"
+    )
+    (state_dir / f"{sid}.tools").write_text(tools)
+    proc = subprocess.run(
+        ["bash", str(SCRIPTS / "session-end.sh")],
+        input=json.dumps({"session_id": sid}),
+        capture_output=True, env=env, text=True,
+    )
+    summary = json.loads(proc.stdout)["systemMessage"]
+
+    raw = (display + "\n\n" + summary + "\n").encode()
+    (work / "session.raw").write_bytes(raw)
+    render(raw, ASSETS / "session.webp", cols=100, rows=20, crlf=True)
 
 
 SHOTS = {"hero": shot_hero, "picker": shot_picker, "wizard": shot_wizard,
-         "doctor": shot_doctor, "stats": shot_stats}
+         "doctor": shot_doctor, "stats": shot_stats,
+         "markers": shot_markers, "session": shot_session}
 
 if __name__ == "__main__":
     which = sys.argv[1] if len(sys.argv) > 1 else "all"

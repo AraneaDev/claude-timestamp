@@ -2161,6 +2161,20 @@ out="$(printf '{"session_id":"firstprompt","prompt":"hi"}' | bash "$SCRIPTS/user
 lacks "away: the first prompt of a session has no gap" "break" "$out"
 
 echo
+echo "asset format"
+
+# Every README screenshot is a lossless WebP (see tools/screenshots/screenshots.py's
+# save_image / save_animation), never a PNG or a GIF -- checked by magic bytes,
+# not by extension, so a file merely renamed to .webp cannot pass. This is what
+# stops a future shot silently reverting to PNG.
+bad_assets="$(for f in "$ROOT"/assets/*; do
+  [ -f "$f" ] || continue
+  sig="$(head -c 12 "$f" | tail -c 4)"
+  [ "$sig" = "WEBP" ] || basename "$f"
+done)"
+is "every file in assets/ is a WebP" "" "$bad_assets"
+
+echo
 echo "----"
 printf '%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
