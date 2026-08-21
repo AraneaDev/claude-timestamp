@@ -1651,6 +1651,38 @@ is "--project writes nothing else"   "0" "$(grep -c '^DISPLAY_FORMAT=' "$written
 is "--project keeps what was already pinned" "1" "$(grep -c '^COLOR=cyan' "$written")"
 is "--project adds the new setting"          "1" "$(grep -c '^DISPLAY_FORMAT=short' "$written")"
 
+# The marker and its part colours must be wired into the project writer the
+# same way every other setting is, or --project silently drops them: the
+# command exits 0, claims nothing, and the repository's pinned marker never
+# lands anywhere.
+rm -rf "$PROJ/writable-marker"; mkdir -p "$PROJ/writable-marker"
+( cd "$PROJ/writable-marker" && unset CLAUDE_TIMESTAMP_CONFIG && HOME="$PROJ/home" \
+    bash "$SCRIPTS/setup.sh" --project --marker='%time' >/dev/null 2>&1 )
+written_marker="$PROJ/writable-marker/.claude/claude-timestamp.conf"
+is "--project writes the marker"      "1" "$(grep -c '^MARKER=%time$' "$written_marker")"
+is "--project writes only the marker" "1" "$(grep -c '^[A-Z_]*=' "$written_marker")"
+marker_read_back="$(
+  unset CLAUDE_TIMESTAMP_CONFIG
+  HOME="$PROJ/home"
+  ct_load_config "$PROJ/writable-marker"
+  printf '%s' "$CT_MARKER_TEMPLATE"
+)"
+is "a project marker is read back by the loader" "%time" "$marker_read_back"
+
+rm -rf "$PROJ/writable-timecolor"; mkdir -p "$PROJ/writable-timecolor"
+( cd "$PROJ/writable-timecolor" && unset CLAUDE_TIMESTAMP_CONFIG && HOME="$PROJ/home" \
+    bash "$SCRIPTS/setup.sh" --project --time-color=cyan >/dev/null 2>&1 )
+written_timecolor="$PROJ/writable-timecolor/.claude/claude-timestamp.conf"
+is "--project writes the time colour"      "1" "$(grep -c '^TIME_COLOR=cyan$' "$written_timecolor")"
+is "--project writes only the time colour" "1" "$(grep -c '^[A-Z_]*=' "$written_timecolor")"
+timecolor_read_back="$(
+  unset CLAUDE_TIMESTAMP_CONFIG
+  HOME="$PROJ/home"
+  ct_load_config "$PROJ/writable-timecolor"
+  printf '%s' "$CT_TIME_COLOR"
+)"
+is "a project time colour is read back by the loader" "cyan" "$timecolor_read_back"
+
 # In a directory that has pinned nothing yet, --project on its own has no
 # settings to write and should say so rather than create an empty file.
 mkdir -p "$PROJ/empty"

@@ -407,7 +407,8 @@ write_project_config() {
   set -- TZ "$1" DISPLAY_FORMAT "$2" CONTEXT_FORMAT "$3" COLOR "$4" \
          ELAPSED "$5" INJECT_CONTEXT "$6" DATE_ROLLOVER "$7" SLOW_AFTER "$8" \
          SLOW_COLOR "$9" IDLE_AFTER "${10}" SUMMARY "${11}" SUBAGENTS "${12}" \
-         TOOL_TIMING "${13}" ENABLED "${14}"
+         TOOL_TIMING "${13}" ENABLED "${14}" MARKER "${15}" TIME_COLOR "${16}" \
+         ELAPSED_COLOR "${17}" TOOL_COLOR "${18}"
 
   while [ "$#" -gt 0 ]; do
     key="$1"; value="$2"; shift 2
@@ -725,7 +726,8 @@ main() {
   if [ "$project_scope" = "1" ]; then
     write_project_config "$set_tz" "$set_display" "$set_context" "$set_color" \
       "$set_elapsed" "$set_inject" "$set_rollover" "$set_slow" "$set_slowcolor" \
-      "$set_idle" "$set_summary" "$set_subagents" "$set_tooltiming" "$set_enabled"
+      "$set_idle" "$set_summary" "$set_subagents" "$set_tooltiming" "$set_enabled" \
+      "$set_marker" "$set_timecolor" "$set_elapsedcolor" "$set_toolcolor"
   else
     write_config
   fi
