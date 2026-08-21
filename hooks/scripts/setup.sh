@@ -271,7 +271,7 @@ doctor() {
   echo "  summary         $CT_SUMMARY"
   echo "  subagents       $CT_SUBAGENTS"
   echo "  history         $CT_HISTORY, keeping $CT_HISTORY_LIMIT"
-  echo "  tool timing     $CT_TOOL_TIMING$([ "$CT_TOOL_TIMING" = "on" ] && [ -z "${EPOCHREALTIME:-}" ] && echo " (whole seconds only: bash ${BASH_VERSION%%.*} has no EPOCHREALTIME)")"
+  echo "  tool timing     $CT_TOOL_TIMING"
   echo
 
   echo "State"

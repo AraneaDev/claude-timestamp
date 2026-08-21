@@ -1211,6 +1211,16 @@ contains "doctor renders a preview"    "Preview" "$out"
 contains "doctor reports no problems on a healthy setup" "No problems found" "$out"
 asserts "doctor exits zero when healthy" bash "$SCRIPTS/setup.sh" --doctor
 
+# Tool duration comes from the payload's duration_ms, never from EPOCHREALTIME,
+# so the tool-timing line must not vary with it. `bash setup.sh --doctor`
+# always starts a fresh bash 5 process here, which repopulates EPOCHREALTIME
+# on its own no matter what the caller unset, so proving the line is
+# EPOCHREALTIME-independent means unsetting it and then sourcing the script
+# into the very same process rather than exec'ing a new one.
+fresh "TOOL_TIMING=on"
+out="$(bash -c 'unset EPOCHREALTIME; . "$1" --doctor' _ "$SCRIPTS/setup.sh" 2>&1)"
+lacks "doctor's tool-timing line ignores EPOCHREALTIME" "whole seconds only" "$out"
+
 echo
 echo "facts file"
 
