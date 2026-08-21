@@ -142,7 +142,14 @@ ct_paint_part "$CT_TIME_COLOR" "$date_part"    "$CT_COLOR"; painted_date="$_CT_P
 ct_render_marker "$CT_MARKER_TEMPLATE" \
   "$painted_time" "$painted_elapsed" "$painted_tool" "$painted_date"
 
-marker="${base_start}${CT_MARKER}${base_end}"
+# A MARKER that renders empty -- MARKER=, or MARKER=%elapsed with ELAPSED=off
+# -- passes validation and would otherwise still leave the trailing separator
+# space behind: the prefix becomes an escape, a space, an escape, and every
+# message is indented by one space with no marker to explain it. Emitting no
+# prefix at all when there is nothing to show keeps that space tied to an
+# actual marker rather than being unconditional.
+marker=""
+[ -n "$CT_MARKER" ] && marker="${base_start}${CT_MARKER}${base_end} "
 
 # A gap since the previous message means you stepped away. Marked on its own
 # line above the message, because MessageDisplay can only replace a delta --
@@ -174,7 +181,7 @@ if [ -n "$state_file" ]; then
   printf '%s' "$now" > "$last_file"
 fi
 
-printf '%s' "$input" | jq --arg prefix "${divider}${marker} " '{
+printf '%s' "$input" | jq --arg prefix "${divider}${marker}" '{
   hookSpecificOutput: {
     hookEventName: "MessageDisplay",
     displayContent: ($prefix + .delta)

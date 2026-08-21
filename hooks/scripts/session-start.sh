@@ -64,7 +64,8 @@ ct_write_facts() {
       --arg version "$version" \
       --argjson tz_database "$(ct_tz_supported && printf 'true' || printf 'false')" \
       --argjson state_dir_writable "$writable" \
-      '{jq: true, tz_database: $tz_database, state_dir_writable: $state_dir_writable, version: $version}' \
+      --arg entrypoint "${CLAUDE_CODE_ENTRYPOINT:-}" \
+      '{jq: true, tz_database: $tz_database, state_dir_writable: $state_dir_writable, version: $version, entrypoint: $entrypoint}' \
       > "$tmp" 2>/dev/null; then
     mv "$tmp" "$file" 2>/dev/null || rm -f "$tmp" 2>/dev/null
   else

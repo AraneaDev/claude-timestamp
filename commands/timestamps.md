@@ -314,11 +314,15 @@ Read the facts file and the config files, and check them against
 - A value `schema.json` rejects: the plugin is using the default instead.
 - `ENABLED=off`: everything is switched off, which is easy to forget having
   done.
-- The marker has no colour and they are not in a terminal, such as the VS Code
-  extension: colour is only emitted for a real terminal session, because a
-  client that does not interpret ANSI would otherwise show the escape codes as
-  literal text. `FORCE_COLOR=1` overrides that and turns colour on anyway;
-  `NO_COLOR` still wins over everything, including `FORCE_COLOR`.
+- The marker has no colour: check the facts file's `entrypoint`. `cli` is the
+  only value that gets colour, because colour is only emitted for a real
+  terminal session; anything else, such as `claude-vscode`, is a client that
+  does not interpret ANSI, so the plugin sends plain text there on purpose. An
+  empty `entrypoint` almost always means an older Claude Code that predates
+  this variable, which still gets colour, so look at the terminal itself if
+  colour is missing there. `FORCE_COLOR=1` turns colour on regardless of
+  `entrypoint`; `NO_COLOR` still wins over everything, including
+  `FORCE_COLOR`.
 
 If none of those explain it, stop there rather than inventing a next step. Say
 what you checked and what each answer was, so the user can see the ground you

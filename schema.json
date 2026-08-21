@@ -73,7 +73,7 @@
         "magenta",
         "cyan"
       ],
-      "describes": "colour of %time; empty inherits COLOR"
+      "describes": "colour of %time and %date; empty inherits COLOR"
     },
     "ELAPSED_COLOR": {
       "default": "",

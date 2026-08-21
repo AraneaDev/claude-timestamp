@@ -517,8 +517,9 @@ _ct_all_empty() {
 # vanish. It assigns rather than printing, because message-display.sh writes
 # JSON to stdout and a helper that printed would corrupt the hook's output.
 #
-# CT_MARKER is this library's public interface -- nothing in this file reads
-# it yet, since the caller that will (task 4) does not exist.
+# CT_MARKER is this library's public interface -- every consumer, such as
+# message-display.sh, lives in a separate file, so shellcheck cannot see it
+# being read.
 ct_render_marker() {
   local tpl="${1:-}"
   local out i n depth j grp k

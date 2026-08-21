@@ -529,6 +529,13 @@ if command -v jq >/dev/null 2>&1; then
   out="$(printf '{"session_id":"test-session","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')"
   case "$out" in *"+"*) fail "ELAPSED=off hides the duration" "no + marker" "$out" ;; *) pass "ELAPSED=off hides the duration" ;; esac
 
+  # A MARKER that renders empty -- here MARKER=%elapsed with ELAPSED=off --
+  # passes validation, so nothing before this fix stopped a bare leading
+  # space from being sent ahead of the delta on every message.
+  fresh 'MARKER=%elapsed' 'ELAPSED=off' 'COLOR=none' 'IDLE_AFTER=0' 'DATE_ROLLOVER=off'
+  out="$(printf '{"session_id":"test-session","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')"
+  is "an empty marker leaves no bare leading space" "x" "$out"
+
   # Date rollover: a stale date on file means the session crossed midnight.
   fresh 'COLOR=none' 'ELAPSED=off'
   printf '2000-01-01' > "$(ct_state_dir)/test-session.date"
@@ -545,6 +552,15 @@ if command -v jq >/dev/null 2>&1; then
   printf '2000-01-01' > "$(ct_state_dir)/test-session.date"
   out="$(printf '{"session_id":"test-session","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')"
   lacks "DATE_ROLLOVER=off suppresses the date" "$(date '+%b')" "$out"
+
+  # %date is painted with TIME_COLOR, since the date is part of the clock --
+  # not documented, not in schema.json, and not asserted anywhere before this,
+  # so a previous review could (and did) replace the paint call with plain
+  # COLOR and still see the whole suite report green.
+  fresh 'COLOR=none' 'ELAPSED=off' 'TIME_COLOR=cyan' 'MARKER=%date' 'DATE_ROLLOVER=on'
+  printf '2000-01-01' > "$(ct_state_dir)/test-session.date"
+  out="$(printf '{"session_id":"test-session","index":0,"delta":"x"}' | bash "$SCRIPTS/message-display.sh" | jq -r '.hookSpecificOutput.displayContent')"
+  contains "%date is painted in TIME_COLOR" "[36m" "$out"
 
   # Slow-turn colouring: the duration alone is painted, the rest is not.
   fresh 'COLOR=none' 'SLOW_AFTER=60' 'SLOW_COLOR=cyan' 'IDLE_AFTER=0' 'DATE_ROLLOVER=off'
@@ -824,6 +840,11 @@ refutes "rejects an unknown timezone" bash "$SCRIPTS/setup.sh" --tz=Mars/Olympus
 refutes "rejects a non on/off elapsed value" bash "$SCRIPTS/setup.sh" --elapsed=maybe
 refutes "rejects an unknown flag" bash "$SCRIPTS/setup.sh" --nonsense
 contains "--show prints the config path" "$(ct_tilde "$CLAUDE_TIMESTAMP_CONFIG")" "$(bash "$SCRIPTS/setup.sh" --show)"
+
+# doctor() gained marker and part-colour rows when MARKER was added; --show is
+# a second surface that also claims to list every setting, and was left behind.
+fresh 'MARKER=%time{ %elapsed}'
+contains "--show mentions the marker template" '%time{ %elapsed}' "$(bash "$SCRIPTS/setup.sh" --show)"
 contains "--help lists the flags" "--elapsed" "$(bash "$SCRIPTS/setup.sh" --help)"
 bash "$SCRIPTS/setup.sh" --date-rollover=off >/dev/null
 ct_load_config
@@ -856,6 +877,23 @@ ct_load_config
 is "setup: writes the time colour"    "cyan"  "$CT_TIME_COLOR"
 is "setup: writes the elapsed colour" "green" "$CT_ELAPSED_COLOR"
 is "setup: writes the tool colour"    "gray"  "$CT_TOOL_COLOR"
+
+# A part colour is empty by default and that emptiness is meaningful --
+# "inherit COLOR" -- so the CLI needs a way to set it back once it has been
+# pointed at a real colour, the same way --tz=local resets TZ.
+bash "$SCRIPTS/setup.sh" --time-color=inherit >/dev/null
+ct_load_config
+is "setup: --time-color=inherit clears the time colour" "" "$CT_TIME_COLOR"
+
+# A bare --time-color= is ambiguous with "not named on the command line" (both
+# split to an empty string), so it is rejected rather than silently doing
+# nothing -- the same silent-success class this fix exists to close.
+bash "$SCRIPTS/setup.sh" --time-color=cyan >/dev/null
+refutes "setup: a bare --time-color= is rejected" \
+  bash "$SCRIPTS/setup.sh" --time-color=
+bash "$SCRIPTS/setup.sh" --time-color= >/dev/null 2>&1
+ct_load_config
+is "setup: a rejected bare --time-color= changes nothing" "cyan" "$CT_TIME_COLOR"
 
 fresh 'MARKER=%time'
 refutes "setup: refuses an invalid template" \
@@ -1683,6 +1721,52 @@ timecolor_read_back="$(
 )"
 is "a project time colour is read back by the loader" "cyan" "$timecolor_read_back"
 
+( cd "$PROJ/writable-timecolor" && unset CLAUDE_TIMESTAMP_CONFIG && HOME="$PROJ/home" \
+    bash "$SCRIPTS/setup.sh" --project --time-color=inherit >/dev/null 2>&1 )
+is "--project --time-color=inherit clears the pinned colour" "1" "$(grep -c '^TIME_COLOR=$' "$written_timecolor")"
+
+# HISTORY and HISTORY_LIMIT were missing from write_project_config's own
+# positional list, so they were not merely un-writable through --project but
+# silently erased from a project config that already pinned them: an unrelated
+# write destroyed settings the user pinned by hand.
+rm -rf "$PROJ/writable-history"; mkdir -p "$PROJ/writable-history/.claude"
+printf 'HISTORY=off\nHISTORY_LIMIT=10\nCOLOR=cyan\nMARKER=%%time\n' \
+  > "$PROJ/writable-history/.claude/claude-timestamp.conf"
+( cd "$PROJ/writable-history" && unset CLAUDE_TIMESTAMP_CONFIG && HOME="$PROJ/home" \
+    bash "$SCRIPTS/setup.sh" --project --tz=UTC >/dev/null 2>&1 )
+written_history="$PROJ/writable-history/.claude/claude-timestamp.conf"
+is "an unrelated --project write keeps a pinned HISTORY"       "1" "$(grep -c '^HISTORY=off$' "$written_history")"
+is "an unrelated --project write keeps a pinned HISTORY_LIMIT" "1" "$(grep -c '^HISTORY_LIMIT=10$' "$written_history")"
+is "an unrelated --project write keeps the rest too"           "1" "$(grep -c '^COLOR=cyan$' "$written_history")"
+
+rm -rf "$PROJ/writable-historyflag"; mkdir -p "$PROJ/writable-historyflag"
+( cd "$PROJ/writable-historyflag" && unset CLAUDE_TIMESTAMP_CONFIG && HOME="$PROJ/home" \
+    bash "$SCRIPTS/setup.sh" --project --history=off >/dev/null 2>&1 )
+written_historyflag="$PROJ/writable-historyflag/.claude/claude-timestamp.conf"
+is "--project writes HISTORY"      "1" "$(grep -c '^HISTORY=off$' "$written_historyflag")"
+is "--project writes only HISTORY" "1" "$(grep -c '^[A-Z_]*=' "$written_historyflag")"
+historyflag_read_back="$(
+  unset CLAUDE_TIMESTAMP_CONFIG
+  HOME="$PROJ/home"
+  ct_load_config "$PROJ/writable-historyflag"
+  printf '%s' "$CT_HISTORY"
+)"
+is "a project HISTORY is read back by the loader" "off" "$historyflag_read_back"
+
+rm -rf "$PROJ/writable-historylimit"; mkdir -p "$PROJ/writable-historylimit"
+( cd "$PROJ/writable-historylimit" && unset CLAUDE_TIMESTAMP_CONFIG && HOME="$PROJ/home" \
+    bash "$SCRIPTS/setup.sh" --project --history-limit=10 >/dev/null 2>&1 )
+written_historylimit="$PROJ/writable-historylimit/.claude/claude-timestamp.conf"
+is "--project writes HISTORY_LIMIT"      "1" "$(grep -c '^HISTORY_LIMIT=10$' "$written_historylimit")"
+is "--project writes only HISTORY_LIMIT" "1" "$(grep -c '^[A-Z_]*=' "$written_historylimit")"
+historylimit_read_back="$(
+  unset CLAUDE_TIMESTAMP_CONFIG
+  HOME="$PROJ/home"
+  ct_load_config "$PROJ/writable-historylimit"
+  printf '%s' "$CT_HISTORY_LIMIT"
+)"
+is "a project HISTORY_LIMIT is read back by the loader" "10" "$historylimit_read_back"
+
 # In a directory that has pinned nothing yet, --project on its own has no
 # settings to write and should say so rather than create an empty file.
 mkdir -p "$PROJ/empty"
@@ -1745,6 +1829,13 @@ if ct_tz_supported; then
 else
   is "facts: timezone database absent" "false" "$(jq -r '.tz_database' "$CLAUDE_TIMESTAMP_FACTS")"
 fi
+
+# /timestamps is asked to diagnose "no colour, not a terminal" from facts the
+# hook actually writes, so the entrypoint it inherits from Claude Code has to
+# be one of them.
+rm -f "$CLAUDE_TIMESTAMP_FACTS"
+printf '{"session_id":"facts"}' | CLAUDE_CODE_ENTRYPOINT=claude-vscode bash "$SCRIPTS/session-start.sh" >/dev/null
+is "facts: carries the entrypoint" "claude-vscode" "$(jq -r '.entrypoint' "$CLAUDE_TIMESTAMP_FACTS")"
 
 # A stale file must be replaced rather than appended to or left alone.
 printf 'not json at all' > "$CLAUDE_TIMESTAMP_FACTS"

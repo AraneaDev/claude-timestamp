@@ -39,10 +39,12 @@ Flags
   --marker=TEMPLATE           The marker's layout. %time %elapsed %tool %date
                               are the parts; a {...} group disappears when
                               every part inside it is empty.
-  --time-color=COLOR          Colour of %time. Empty follows --color.
-  --elapsed-color=COLOR       Colour of %elapsed. A slow turn still uses
-                              --slow-color.
-  --tool-color=COLOR          Colour of %tool. Empty follows --color.
+  --time-color=COLOR          Colour of %time. inherit follows --color, which
+                              is also the default.
+  --elapsed-color=COLOR       Colour of %elapsed, or inherit. A slow turn
+                              still uses --slow-color.
+  --tool-color=COLOR          Colour of %tool. inherit follows --color, which
+                              is also the default.
   --elapsed=on|off            Show how long the turn took.
   --slow-after=SECONDS        Colour the duration once a turn takes this long
                               (0 disables).
@@ -118,8 +120,28 @@ valid_marker() {
 
 valid_part_color() {
   ct_is_valid_part_color "$1" && return 0
-  echo "Unknown colour '$1'. Pick: none dim gray red green yellow blue magenta cyan, or leave it empty to follow COLOR." >&2
+  echo "Unknown colour '$1'. Pick: none dim gray red green yellow blue magenta cyan, or 'inherit' to follow COLOR." >&2
   return 1
+}
+
+# Apply a --time-color/--elapsed-color/--tool-color flag, distinguishing three
+# cases that all reduce to the empty string once the flag is split on '=':
+# the flag absent entirely (do nothing), --foo=inherit (explicitly follow
+# COLOR, the same sentinel role --tz=local plays for TZ), and a bare --foo=
+# (rejected -- unlike TZ, this flag's empty value already has a meaning of its
+# own, so a bare empty cannot double as "not named" the way it does elsewhere).
+apply_part_color() {
+  local flag="$1" named="$2" value="$3" var="$4"
+  [ "$named" = "1" ] || return 0
+  case "$value" in
+    inherit) value="" ;;
+    '')
+      echo "$flag needs a value: a colour name, or 'inherit' to follow --color." >&2
+      exit 2
+      ;;
+  esac
+  valid_part_color "$value" || exit 2
+  printf -v "$var" '%s' "$value"
 }
 
 valid_seconds() {
@@ -408,7 +430,7 @@ write_project_config() {
          ELAPSED "$5" INJECT_CONTEXT "$6" DATE_ROLLOVER "$7" SLOW_AFTER "$8" \
          SLOW_COLOR "$9" IDLE_AFTER "${10}" SUMMARY "${11}" SUBAGENTS "${12}" \
          TOOL_TIMING "${13}" ENABLED "${14}" MARKER "${15}" TIME_COLOR "${16}" \
-         ELAPSED_COLOR "${17}" TOOL_COLOR "${18}"
+         ELAPSED_COLOR "${17}" TOOL_COLOR "${18}" HISTORY "${19}" HISTORY_LIMIT "${20}"
 
   while [ "$#" -gt 0 ]; do
     key="$1"; value="$2"; shift 2
@@ -417,7 +439,10 @@ write_project_config() {
       value="$(printf '%s\n' "$existing" | sed -n "s/^${key}=//p" | tail -1)"
       [ -z "$value" ] && continue
     fi
-    [ "$key" = "TZ" ] && [ "$value" = "local" ] && value=""
+    case "$key" in
+      TZ)                                    [ "$value" = "local" ]    && value="" ;;
+      TIME_COLOR|ELAPSED_COLOR|TOOL_COLOR)   [ "$value" = "inherit" ]  && value="" ;;
+    esac
     out="${out}${key}=${value}
 "
   done
@@ -454,6 +479,8 @@ show_config() {
   echo "  Display format  $CT_DISPLAY_FORMAT"
   echo "  Context format  $CT_CONTEXT_FORMAT"
   echo "  Color           $CT_COLOR"
+  echo "  Marker          $CT_MARKER_TEMPLATE"
+  echo "  Part colours    time ${CT_TIME_COLOR:-<inherit>}, elapsed ${CT_ELAPSED_COLOR:-<inherit>}, tool ${CT_TOOL_COLOR:-<inherit>}"
   echo "  Elapsed         $CT_ELAPSED"
   echo "  Slow after      $CT_SLOW_AFTER s in $CT_SLOW_COLOR"
   echo "  Idle marker     $CT_IDLE_AFTER s"
@@ -468,6 +495,22 @@ show_config() {
 }
 
 # --- wizard -----------------------------------------------------------------
+
+# Terminal columns a string occupies, as opposed to its byte length.
+#
+# printf's own %-Ns field width pads by bytes, not columns, so a string
+# carrying a multi-byte character (such as the template previews' `·` and `→`)
+# comes out one or more columns short: the byte count includes each
+# continuation byte, but a continuation byte draws nothing of its own. This is
+# locale-independent by construction -- LC_ALL=C forces tr to work on raw
+# bytes -- rather than relying on ${#s} or printf's width, either of which a
+# non-UTF-8 locale can make byte-based again.
+_ct_display_width() {
+  local s="$1" bytes cont
+  bytes="$(printf '%s' "$s" | wc -c | tr -d ' ')"
+  cont="$(printf '%s' "$s" | LC_ALL=C tr -d -c '\200-\277' | wc -c | tr -d ' ')"
+  printf '%d' "$((bytes - cont))"
+}
 
 detect_tz() {
   if [ -n "${TZ:-}" ]; then printf '%s' "$TZ"; return; fi
@@ -605,12 +648,19 @@ wizard() {
   echo "The marker's layout is a template. %time %elapsed %tool %date are the"
   echo "parts, and a {...} group disappears when every part inside it is empty."
   echo
+  local tpl_width tpl_pad
   for tpl in '[{%date }%time{ %elapsed}{ · %tool}]' '%time' '%time{ → %elapsed}'; do
     ct_paint_part "$CT_TIME_COLOR"    "$(ct_now "$CT_DISPLAY_FORMAT")" "$CT_COLOR"; wp_time="$_CT_PART"
     ct_paint_part "$CT_ELAPSED_COLOR" "+2m14s"                          "$CT_COLOR"; wp_el="$_CT_PART"
     ct_paint_part "$CT_TOOL_COLOR"    "Bash 1m58s"                      "$CT_COLOR"; wp_tool="$_CT_PART"
     ct_render_marker "$tpl" "$wp_time" "$wp_el" "$wp_tool" ""
-    printf '  %-38s %s%s%s\n' "$tpl" \
+    # %-38s pads by bytes, not by the columns a multi-byte character such as
+    # `·` or `→` actually draws, so two of these three templates would land
+    # their preview one or two columns early. Padded by hand instead.
+    tpl_width="$(_ct_display_width "$tpl")"
+    tpl_pad=$(( 38 - tpl_width ))
+    [ "$tpl_pad" -lt 0 ] && tpl_pad=0
+    printf '  %s%*s %s%s%s\n' "$tpl" "$tpl_pad" "" \
       "$(ct_color_start "$CT_COLOR")" "$CT_MARKER" "$(ct_color_end "$CT_COLOR")"
   done
   while :; do
@@ -656,6 +706,7 @@ main() {
   local set_slow="" set_slowcolor="" set_idle="" set_summary="" set_subagents="" set_tooltiming=""
   local set_history="" set_historylimit="" set_enabled=""
   local set_marker="" set_timecolor="" set_elapsedcolor="" set_toolcolor=""
+  local timecolor_named=0 elapsedcolor_named=0 toolcolor_named=0
 
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -666,9 +717,9 @@ main() {
       --context=*)        set_context="${1#*=}"; interactive=0 ;;
       --color=*)          set_color="${1#*=}";   interactive=0 ;;
       --marker=*)         set_marker="${1#*=}";  interactive=0 ;;
-      --time-color=*)     set_timecolor="${1#*=}";    interactive=0 ;;
-      --elapsed-color=*)  set_elapsedcolor="${1#*=}"; interactive=0 ;;
-      --tool-color=*)     set_toolcolor="${1#*=}";    interactive=0 ;;
+      --time-color=*)     set_timecolor="${1#*=}";    timecolor_named=1;    interactive=0 ;;
+      --elapsed-color=*)  set_elapsedcolor="${1#*=}"; elapsedcolor_named=1; interactive=0 ;;
+      --tool-color=*)     set_toolcolor="${1#*=}";    toolcolor_named=1;    interactive=0 ;;
       --elapsed=*)        set_elapsed="${1#*=}"; interactive=0 ;;
       --enabled=*)        set_enabled="${1#*=}";  interactive=0 ;;
       --date-rollover=*)  set_rollover="${1#*=}"; interactive=0 ;;
@@ -707,9 +758,9 @@ main() {
   [ -n "$set_context" ] && CT_CONTEXT_FORMAT="$set_context"
   if [ -n "$set_color" ];   then valid_color "$set_color" || exit 2; CT_COLOR="$set_color"; fi
   if [ -n "$set_marker" ]; then valid_marker "$set_marker" || exit 2; CT_MARKER_TEMPLATE="$set_marker"; fi
-  if [ -n "$set_timecolor" ]; then valid_part_color "$set_timecolor" || exit 2; CT_TIME_COLOR="$set_timecolor"; fi
-  if [ -n "$set_elapsedcolor" ]; then valid_part_color "$set_elapsedcolor" || exit 2; CT_ELAPSED_COLOR="$set_elapsedcolor"; fi
-  if [ -n "$set_toolcolor" ]; then valid_part_color "$set_toolcolor" || exit 2; CT_TOOL_COLOR="$set_toolcolor"; fi
+  apply_part_color "--time-color"    "$timecolor_named"    "$set_timecolor"    CT_TIME_COLOR
+  apply_part_color "--elapsed-color" "$elapsedcolor_named" "$set_elapsedcolor" CT_ELAPSED_COLOR
+  apply_part_color "--tool-color"    "$toolcolor_named"    "$set_toolcolor"    CT_TOOL_COLOR
   if [ -n "$set_elapsed" ]; then valid_onoff ELAPSED "$set_elapsed" || exit 2; CT_ELAPSED="$set_elapsed"; fi
   if [ -n "$set_inject" ];  then valid_bool INJECT_CONTEXT "$set_inject" || exit 2; CT_INJECT_CONTEXT="$set_inject"; fi
   if [ -n "$set_rollover" ]; then valid_onoff DATE_ROLLOVER "$set_rollover" || exit 2; CT_DATE_ROLLOVER="$set_rollover"; fi
@@ -727,7 +778,8 @@ main() {
     write_project_config "$set_tz" "$set_display" "$set_context" "$set_color" \
       "$set_elapsed" "$set_inject" "$set_rollover" "$set_slow" "$set_slowcolor" \
       "$set_idle" "$set_summary" "$set_subagents" "$set_tooltiming" "$set_enabled" \
-      "$set_marker" "$set_timecolor" "$set_elapsedcolor" "$set_toolcolor"
+      "$set_marker" "$set_timecolor" "$set_elapsedcolor" "$set_toolcolor" \
+      "$set_history" "$set_historylimit"
   else
     write_config
   fi
