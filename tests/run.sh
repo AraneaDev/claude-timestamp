@@ -324,6 +324,19 @@ ct_paint_part cyan "x" ""
 is "paint part: an empty base restores nothing" \
   "$(printf '\033[36mx\033[0m')" "$_CT_PART"
 
+# Both helpers must always return 0: the real hook runs under set -e, where a
+# stray non-zero return in an unmatched branch would abort the marker render.
+asserts "color seq returns 0 for a known colour"   ct_color_seq cyan
+asserts "color seq returns 0 for an unknown colour" ct_color_seq banana
+asserts "color seq returns 0 for an empty colour"  ct_color_seq ""
+asserts "paint part returns 0 with text"           ct_paint_part cyan "x" dim
+asserts "paint part returns 0 with empty text"     ct_paint_part cyan "" dim
+asserts "paint part returns 0 with an empty base"  ct_paint_part cyan "x" ""
+
+( NO_COLOR=1; ct_color_seq cyan ) \
+  && pass "color seq returns 0 under NO_COLOR" \
+  || fail "color seq returns 0 under NO_COLOR" "exit 0" "non-zero exit"
+
 echo
 echo "hooks"
 
