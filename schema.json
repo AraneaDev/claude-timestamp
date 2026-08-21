@@ -125,7 +125,7 @@
         "on",
         "off"
       ],
-      "describes": "time individual tool calls; the only setting that costs anything per tool call rather than per message"
+      "describes": "record what each tool call cost; the only setting that costs anything per tool call rather than per message"
     },
     "HISTORY": {
       "default": "on",

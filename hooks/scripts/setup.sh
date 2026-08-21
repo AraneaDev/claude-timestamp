@@ -46,7 +46,7 @@ Flags
   --subagents=on|off          Stamp subagent messages too.
   --history=on|off            Record each finished session for --stats.
   --history-limit=N           How many sessions to keep (default 200).
-  --tool-timing=on|off        Time individual tool calls and report the
+  --tool-timing=on|off        Record what each tool call cost and report the
                               slowest in the session summary. Off by default:
                               it is the only setting that costs anything per
                               tool call rather than per message.
@@ -338,7 +338,7 @@ SUMMARY=$CT_SUMMARY
 # Stamp messages from subagents as well as the main conversation.
 SUBAGENTS=$CT_SUBAGENTS
 
-# Time individual tool calls and name the slowest in the session summary.
+# Record what each tool call cost and name the slowest in the session summary.
 # The only setting that costs anything per tool call rather than per message.
 TOOL_TIMING=$CT_TOOL_TIMING
 
@@ -543,7 +543,7 @@ wizard() {
   if [ "$CT_SUMMARY" = "on" ]; then
     echo "  Tool timing names the slowest tools in that summary. It is the only"
     echo "  setting that costs anything per tool call rather than per message."
-    answer="$(ask "  Time individual tool calls? (on/off)" "$CT_TOOL_TIMING")"
+    answer="$(ask "  Record what each tool call cost? (on/off)" "$CT_TOOL_TIMING")"
     case "$answer" in on|off) CT_TOOL_TIMING="$answer" ;; esac
   fi
   echo

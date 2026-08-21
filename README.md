@@ -165,7 +165,7 @@ cannot run anything.
 | `DATE_ROLLOVER` | `on` | Show the date on the first message after midnight |
 | `SUMMARY` | `on` | Report session totals on exit |
 | `SUBAGENTS` | `on` | Stamp subagent messages as well |
-| `TOOL_TIMING` | `off` | Time individual tool calls and name the slowest |
+| `TOOL_TIMING` | `off` | Record what each tool call cost and name the slowest |
 | `HISTORY` | `on` | Record each finished session, for `/timestamps` and `--stats` |
 | `HISTORY_LIMIT` | `200` | How many recorded sessions to keep |
 
@@ -187,7 +187,13 @@ for `12h`, and `2026-08-19T14:03:22` for `iso`. Any value containing a `%` is
 treated as a strftime string, so the escape hatch needs no separate setting.
 
 `TOOL_TIMING` is off by default because it is the only setting that costs
-anything per tool call. Everything else costs once per message.
+anything per tool call. Everything else costs once per message. Claude Code
+reports how long each call took, so the plugin no longer times them itself,
+but the hook that records the number still runs on every call.
+
+Those timings cover the call alone. Time a permission prompt spent waiting for
+you is not counted against the tool, so a slow turn you spent deciding through
+will show its duration without naming a culprit.
 
 Alongside the config, the plugin writes `~/.claude/claude-timestamp.facts.json`
 at the start of every session. It holds what cannot be worked out by reading
@@ -244,20 +250,30 @@ doctor in the first place.
 
 ## How it works
 
-Seven hooks, all of them harness-only, so none of this costs model context.
+Six scripts across eight events, all of them harness-only, so none of this
+costs model context.
 
 | Hook | Job |
 | --- | --- |
 | `SessionStart` | Check `jq`, prune old state, point a new user at `/timestamps` |
-| `UserPromptSubmit` | Record the turn start, tell Claude the local time |
+| `UserPromptSubmit` | Open the turn, close one an interrupt left behind, tell Claude the local time |
 | `MessageDisplay` | Draw the marker on the first batch of each message |
+| `Stop` / `StopFailure` | Close the turn and record what it cost |
 | `SessionEnd` | Report the summary, record the session, clear its state |
-| `PreToolUse` / `PostToolUse` / `PostToolUseFailure` | Time tool calls and count failures, only when `TOOL_TIMING=on` |
+| `PostToolUse` / `PostToolUseFailure` | Record what each tool call cost, only when `TOOL_TIMING=on` |
+
+A turn is opened by the prompt that started it and closed by the event that
+ended it, so what a turn cost is measured once rather than accumulated as its
+messages arrive. A turn that ends in neither `Stop` nor `StopFailure`, which is
+what an interrupt looks like from a hook, is closed by the next prompt using
+the last message it drew.
 
 `MessageDisplay` fires repeatedly as a message streams. Only the first batch is
 stamped, and the rest return nothing at all, which Claude Code treats as "show
 the original text". Returning the text unchanged would have meant a wasted
-round trip on every batch of every message.
+round trip on every batch of every message. The hook decides in the shell,
+before `jq` or anything else forks, whether a batch needs stamping at all, so
+a later batch costs nothing more than that one check.
 
 Timing state lives in `$TMPDIR/claude-timestamp`, one small file per session,
 cleared when the session ends and pruned after seven days.
@@ -272,11 +288,6 @@ show the wrong time and say nothing. The plugin detects this and uses local
 time instead, mentions it once at session start, and refuses to write a pinned
 zone it knows cannot be honoured. `UTC` and `GMT` still work, since those need
 no database.
-
-Tool timings use sub-second precision where the shell provides it. That needs
-bash 5 or newer. macOS still ships bash 3.2 as `/bin/bash`, and BSD `date` has
-no `%N`, so there is no portable fallback. On those platforms durations round
-to whole seconds and the call counts carry the signal.
 
 ## Development
 
@@ -301,8 +312,9 @@ that stops matching the suite, and an image link pointing at a file that has
 been renamed.
 
 CI runs on Linux, macOS and Windows. On macOS it runs the suite twice, once
-with the default bash and once with `/bin/bash`, which is still 3.2. That is
-what keeps the bash 3.2 claim above honest rather than aspirational.
+with the default bash and once with `/bin/bash`, which is still 3.2. The
+plugin claims to work there, and this is the only runner that can actually
+check that claim.
 
 ### Screenshots
 
