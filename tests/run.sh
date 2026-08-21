@@ -308,9 +308,55 @@ rm -rf "$(ct_state_dir)"
 asserts "state dir: a fresh directory is accepted" ct_state_ready
 # shellcheck disable=SC2012  # ls -ld is the portable way to read a mode
 # string; find -printf is a GNU extension.
-is "state dir: created 0700" "700" \
-   "$(ls -ld "$(ct_state_dir)" | awk '{print substr($1,2,9)}' \
-      | sed 's/rwx/7/;s/---/0/g' | tr -d '-')"
+is "state dir: created private to us" "drwx------" \
+   "$(ls -ld "$(ct_state_dir)" | cut -c1-10)"
+
+# Ownership alone was never the guarantee. A directory we own but that anyone
+# can write to lets any local user create a symlink inside it, which is the
+# original attack with one extra step.
+fresh
+chmod 777 "$(ct_state_dir)"
+asserts "state dir: a permissive mode is repaired, not refused" ct_state_ready
+# shellcheck disable=SC2012  # ls -ld is the portable way to read a mode
+# string; find -printf is a GNU extension.
+is "state dir: and it ends up private" "drwx------" \
+   "$(ls -ld "$(ct_state_dir)" | cut -c1-10)"
+
+# The legacy shared directory is untrusted ground now: another user may own it
+# and may have put things in it. The sweep must reach only old regular files
+# sitting directly inside it.
+fresh
+legacy="${TMPDIR:-/tmp}/claude-timestamp"
+rm -rf "$legacy"; mkdir -p "$legacy/sub"
+: > "$legacy/old"; : > "$legacy/sub/deep"
+touch -t 200001010000 "$legacy/old" "$legacy/sub/deep"
+ct_prune_state
+refutes "prune: an old file in the legacy directory is swept" test -e "$legacy/old"
+asserts "prune: a file one level deeper is left alone"        test -e "$legacy/sub/deep"
+rm -rf "$legacy"
+
+# And it must not follow the legacy path if that path is itself a symlink,
+# which is the cheapest way for somebody else to aim the sweep at your files.
+fresh
+elsewhere="${TMPDIR:-/tmp}/ct-elsewhere"
+rm -rf "$legacy" "$elsewhere"; mkdir -p "$elsewhere"
+: > "$elsewhere/keep"; touch -t 200001010000 "$elsewhere/keep"
+ln -s "$elsewhere" "$legacy"
+ct_prune_state
+asserts "prune: a symlinked legacy directory is not followed" test -e "$elsewhere/keep"
+rm -rf "$legacy" "$elsewhere"
+
+# Declining a directory somebody else owns needs a directory somebody else
+# owns, which needs privileges the suite does not usually have. Run it when we
+# can and say so when we cannot, rather than skipping in silence.
+if [ "$(id -u)" = "0" ]; then
+  fresh
+  chown 65534:65534 "$(ct_state_dir)" 2>/dev/null
+  refutes "state dir: one owned by another user is declined" ct_state_ready
+  chown "$(id -u):$(id -g)" "$(ct_state_dir)" 2>/dev/null
+else
+  echo "  skip not root, foreign-ownership case not run"
+fi
 
 echo
 echo "color"

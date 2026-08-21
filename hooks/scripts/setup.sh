@@ -329,11 +329,12 @@ doctor() {
   echo "State"
   local dir
   dir="$(ct_state_dir)"
-  if mkdir -p "$dir" 2>/dev/null && [ -w "$dir" ]; then
+  if ct_state_ready; then
     echo "  directory       $dir (writable)"
   else
-    echo "  directory       $dir NOT WRITABLE - elapsed time and the summary"
-    echo "                  will not work."
+    echo "  directory       $dir NOT USABLE - missing, not writable, or owned"
+    echo "                  by another user. Elapsed time and the summary will"
+    echo "                  not work."
     problems=$((problems + 1))
   fi
   echo

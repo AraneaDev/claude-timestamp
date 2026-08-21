@@ -28,28 +28,57 @@ ct_state_dir() {
   printf '%s/claude-timestamp-%s' "${TMPDIR:-/tmp}" "$(id -u 2>/dev/null || printf 'x')"
 }
 
-# Make sure the state directory exists and belongs to us.
+# Make sure the state directory exists, belongs to us, and is private.
 #
-# Returns 1 rather than repairing anything: a directory of this name owned by
-# somebody else is a situation to decline, not to take over. Callers treat a
-# failure the way they already treat an unwritable directory, which is to do
-# less rather than to fail.
+# Returns 1 rather than repairing anything about who owns it: a directory of
+# this name owned by somebody else is a situation to decline, not to take
+# over. Callers treat a failure the way they already treat an unwritable
+# directory, which is to do less rather than to fail.
 ct_state_ready() {
-  local dir owner
+  local dir line owner perms
   dir="$(ct_state_dir)"
-  if [ ! -d "$dir" ]; then
-    # -p only applies -m to the deepest directory, which is fine here: the
-    # deepest directory is the only one this ever creates, since $TMPDIR
-    # itself is expected to already exist.
-    # shellcheck disable=SC2174
-    mkdir -m 700 -p "$dir" 2>/dev/null || return 1
+
+  # Create the leaf without -p, and treat failure as the signal to look rather
+  # than as an error to swallow.
+  #
+  # A check-then-create is a race, and not a theoretical one: `mkdir -p`
+  # succeeds on a directory that already exists no matter who owns it, so a
+  # function that tested `[ ! -d ]` first and then created would return success
+  # having never inspected a directory an attacker planted in the window
+  # between the two. /tmp is swept periodically on many systems, so that window
+  # reopens over a machine's lifetime rather than existing once at install.
+  #
+  # Without -p, an existing directory makes mkdir fail, and mkdir itself is
+  # atomic, so exactly one racer creates it and every other caller falls
+  # through to the inspection below. The parent is created separately: there is
+  # no security question about $TMPDIR itself, only about the leaf we own.
+  mkdir -p "${dir%/*}" 2>/dev/null || true
+  if mkdir -m 700 "$dir" 2>/dev/null; then
     return 0
   fi
-  # shellcheck disable=SC2012  # ls -ld is the portable way to read an owner
-  # name and mode string in one call; find -printf is a GNU extension.
-  owner="$(ls -ld "$dir" 2>/dev/null | awk '{print $3}')"
+
+  # It exists, or it could not be created. Either way, inspect what is there.
+  [ -d "$dir" ] || return 1
+  # shellcheck disable=SC2012  # one ls -ld answers both owner and mode; find -printf is GNU-only
+  line="$(ls -ld "$dir" 2>/dev/null)" || return 1
+  [ -n "$line" ] || return 1
+
+  owner="$(printf '%s' "$line" | awk '{print $3}')"
   [ -n "$owner" ] || return 1
   [ "$owner" = "$(id -un 2>/dev/null)" ] || return 1
+
+  # Ownership alone was never the guarantee. A directory we own but that anyone
+  # can write to lets any local user create a symlink inside it, which is the
+  # original attack with one extra step. Tighten rather than decline: the
+  # directory is ours, so repairing it is both safe and what the user wants.
+  # The mode comes from the `ls -ld` already run, so this costs no extra
+  # process in the common case where it is already right.
+  perms="${line%% *}"
+  case "$perms" in
+    drwx------*) ;;
+    *) chmod 700 "$dir" 2>/dev/null || return 1 ;;
+  esac
+
   [ -w "$dir" ] || return 1
   return 0
 }
