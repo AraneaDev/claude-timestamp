@@ -1,32 +1,25 @@
 #!/usr/bin/env bash
-# PreToolUse hook -- records when a tool call started.
+# Deliberate no-op. Not bound by hooks.json -- kept only for compatibility.
 #
-# Half of the optional tool-timing feature; post-tool-use.sh closes the pair.
-# Off by default, because unlike everything else in this plugin these two hooks
-# fire per tool call rather than per message.
+# ad31d05 removed the PreToolUse binding and this file, because Claude Code
+# now hands post-tool-use.sh the duration it used to measure itself. That is
+# correct for any session that starts after the update: hooks.json is read
+# fresh, and a fresh read has no PreToolUse entry at all.
 #
-# Never blocks or alters a tool call: it writes one file and exits 0 whatever
-# happens.
-set -euo pipefail
-
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/config.sh"
-ct_load_config
-
-# The master switch. Everything below draws on screen, writes state, or talks
-# to the model, and off means none of it.
-[ "$CT_ENABLED" = "on" ] || exit 0
-[ "$CT_TOOL_TIMING" = "on" ] || exit 0
-# Checked last, so the common case -- tool timing off -- costs a bash builtin
-# rather than a jq process fork on every tool call.
-command -v jq >/dev/null 2>&1 || exit 0
-
-input="$(cat)"
-read -r session_id tool_use_id <<< "$(printf '%s' "$input" \
-  | jq -r '"\(.session_id // "-") \(.tool_use_id // "")"')"
-
-if state_file="$(ct_tool_state_file "$session_id" "$tool_use_id")"; then
-  mkdir -p "$(ct_state_dir)"
-  ct_now_precise > "$state_file"
-fi
-
+# It is wrong for a session already running when the update lands, because
+# hooks are bound once at session start. That session goes on holding the old
+# PreToolUse binding for the rest of its life and keeps trying to exec this
+# path, failing with "No such file or directory" on every single tool call
+# until the user restarts. Non-blocking, so nothing actually breaks, but noisy
+# in exactly the way this plugin avoids everywhere else.
+#
+# So the file stays, doing nothing, purely so a stale binding finds something
+# harmless to run instead of nothing at all. Delete it once no supported
+# version of this plugin still binds PreToolUse -- in practice, once every
+# session that predates ad31d05 has cycled (restarted or ended), which for a
+# CLI plugin means one release or two, not indefinitely.
+#
+# Invoked as `bash <this script>` (see the old hooks.json, not the current
+# one), so it does not depend on the executable bit surviving clones, zips,
+# or Windows checkouts.
 exit 0

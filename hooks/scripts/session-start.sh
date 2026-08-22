@@ -24,7 +24,9 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 0
 fi
 
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/config.sh"
+CT_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib"
+source "$CT_LIB/config.sh"
+source "$CT_LIB/state.sh"
 
 cwd="$(cat | jq -r '.cwd // empty' 2>/dev/null || true)"
 
@@ -42,7 +44,7 @@ ct_load_config "$cwd"
 # file's absence carries that case. Recording it anyway means a reader gets one
 # shape rather than having to infer a negative from a missing file.
 ct_write_facts() {
-  local file tmp root version writable=false
+  local file tmp root version writable=false probe
   file="$(ct_facts_path)"
   mkdir -p "$(dirname "$file")" 2>/dev/null || return 0
 
@@ -52,9 +54,13 @@ ct_write_facts() {
   version="$(tr -d '[:space:]' 2>/dev/null < "$root/version.txt")" || version=""
   [ -n "$version" ] || version="unknown"
 
-  if mkdir -p "$(ct_state_dir)" 2>/dev/null && : > "$(ct_state_dir)/.probe" 2>/dev/null; then
+  # A fixed filename in a shared directory can be pre-planted as a symlink, and
+  # `: >` follows it. The pid makes the name unguessable to anyone who is not
+  # already able to watch this process.
+  probe="$(ct_state_dir)/.probe.$$"
+  if ct_state_ready && : > "$probe" 2>/dev/null; then
     writable=true
-    rm -f "$(ct_state_dir)/.probe" 2>/dev/null
+    rm -f "$probe" 2>/dev/null
   fi
 
   # Temp file and rename, so a session starting while another reads this never
@@ -64,7 +70,8 @@ ct_write_facts() {
       --arg version "$version" \
       --argjson tz_database "$(ct_tz_supported && printf 'true' || printf 'false')" \
       --argjson state_dir_writable "$writable" \
-      '{jq: true, tz_database: $tz_database, state_dir_writable: $state_dir_writable, version: $version}' \
+      --arg entrypoint "${CLAUDE_CODE_ENTRYPOINT:-}" \
+      '{jq: true, tz_database: $tz_database, state_dir_writable: $state_dir_writable, version: $version, entrypoint: $entrypoint}' \
       > "$tmp" 2>/dev/null; then
     mv "$tmp" "$file" 2>/dev/null || rm -f "$tmp" 2>/dev/null
   else
@@ -79,22 +86,47 @@ ct_write_facts
 # without them, /timestamps would have no way to switch the plugin back on.
 [ "$CT_ENABLED" = "on" ] || exit 0
 
+# Everything below is a thing worth saying once, at the only moment that is not
+# in the middle of a conversation. They are collected rather than printed as
+# they are found, because a hook returns one object: three jq calls each
+# printing a complete one produced a stream, and a consumer parsing a single
+# object rejects the lot -- losing every message exactly when there was most to
+# say.
+#
+# The order below is deliberate and not alphabetical: what is broken, then what
+# cannot be honoured, then what merely exists. A user with a typo in their
+# config needs to see that before an introduction to a command they have
+# already found, and a timezone that cannot be applied is a degraded setting
+# rather than a rejected one. Reordering these changes what a first-time user
+# reads first, so it is a UX decision rather than a formatting one.
+notes=""
+_ct_add_note() { notes="${notes}${notes:+$'\n\n'}$1"; }
+
 # A typo in the config file would otherwise do nothing visible: the value is
-# replaced by its default and the plugin carries on. Say it once, at the only
-# moment that is not in the middle of a conversation.
+# replaced by its default and the plugin carries on.
 if [ -n "${CT_CONFIG_PROBLEMS:-}" ]; then
-  jq -n --arg problems "$CT_CONFIG_PROBLEMS" \
-    '{systemMessage: ("claude-timestamp: some settings could not be used.\n" + $problems + "\nRun /timestamps to fix them.")}'
+  _ct_add_note "claude-timestamp: some settings could not be used.
+${CT_CONFIG_PROBLEMS}
+Run /timestamps to fix them."
 fi
 
 if ct_tz_unhonoured; then
-  jq -n --arg tz "$CT_TZ" '{systemMessage: ("claude-timestamp: this system has no timezone database, so " + $tz + " cannot be applied. Showing local time instead. Run /timestamps and choose \"local\" to silence this.")}'
+  _ct_add_note "claude-timestamp: this system has no timezone database, so ${CT_TZ} cannot be applied. Showing local time instead. Run /timestamps and choose \"local\" to silence this."
 fi
 
 # First run: there is no README in this repo by design, so the config command
 # has to introduce itself or nobody will ever know it exists.
 if [ ! -r "$(ct_config_path)" ]; then
-  jq -n '{systemMessage: "claude-timestamp is running with default settings. Run /timestamps to pick a timezone, clock format, and color."}'
+  _ct_add_note "claude-timestamp is running with default settings. Run /timestamps to pick a timezone, clock format, and color."
+fi
+
+# An `if` rather than `[ ... ] && jq ...`: under set -e an AND-list whose test
+# fails returns non-zero, and the only thing making that harmless here is the
+# `exit 0` on the next line. That is safety at a distance -- delete or move the
+# exit and a session with nothing to say starts reporting failure. The branch
+# carries its own exit status.
+if [ -n "$notes" ]; then
+  jq -n --arg msg "$notes" '{systemMessage: $msg}'
 fi
 
 exit 0

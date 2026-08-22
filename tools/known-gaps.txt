@@ -1,0 +1,7 @@
+# Check ids tools/check-docs.sh expects to fail, one per line, blank lines and
+# # comments ignored.
+#
+# A listed id that PASSES is also an error: the gap is closed, so the line must
+# go. That is what stops a fix landing without the baseline being tidied.
+#
+# This file being empty is the completion signal for the audit remediation.

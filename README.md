@@ -6,11 +6,11 @@
 
 [![Release](https://img.shields.io/github/v/release/AraneaDev/claude-timestamp)](https://github.com/AraneaDev/claude-timestamp/releases)
 [![CI](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml/badge.svg)](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-297%20passing-2b8a3e)](tests/run.sh)
+[![Tests](https://img.shields.io/badge/tests-609%20passing-2b8a3e)](tests/run.sh)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-364fc7)](#platform-notes)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
-<img src="assets/timestamps.gif" alt="A real Claude Code session, timestamps on assistant messages, with a slow turn highlighted" width="840">
+<img src="assets/timestamps.webp" alt="A real Claude Code session, timestamps on assistant messages, with a slow turn highlighted" width="840">
 
 <sub>Two fast turns render dim. The third crosses the slow threshold, so its duration is coloured and, with `TOOL_TIMING` on, named after the tool that caused it. Tool timing is off by default, so a plain install will not show this on its own. This is a real session played back at real speed -- nothing here is sped up or looped faster than it happened.</sub>
 
@@ -41,13 +41,21 @@ There is nothing to set up. The defaults work as soon as it is installed, and
   sent, which lets it reason about when things happened. You can switch this
   off and keep the display-only marker.
 - **Summarises the session.** On exit: how long it ran, how many turns, how
-  much of that you spent waiting, and how much you were away. Optionally which
-  tools were slowest and how many calls failed.
+  much of that you spent waiting, and how much you were away. Waiting and away
+  never cover the same seconds, so the two add up to no more than the session
+  itself. Optionally which tools were slowest and how many calls failed.
 
-```
+```text
 claude-timestamp: session lasted 1h30m over 12 turns, 24m18s of it waiting, 35m00s away.
 slowest tools: Bash 41.2s (18 calls), WebFetch 8.1s (1 call), Read 2.0s (37 calls). 2 failed
 ```
+
+The gap divider and that closing summary, in one screenshot -- the same session
+this example is drawn from:
+
+<p align="center">
+  <img src="assets/session.webp" alt="An idle divider above a stamped message, and the end-of-session summary below it" width="700">
+</p>
 
 - **Keeps a running record.** Finished sessions are logged so you can see where
   the time actually goes.
@@ -60,7 +68,7 @@ enters the transcript and never reaches the model.
 `jq`, and `bash`. That is the whole list. If `jq` is missing the plugin says so
 once and then does nothing, rather than failing quietly.
 
-```
+```text
 macOS           brew install jq
 Debian/Ubuntu   sudo apt-get install jq
 Windows         winget install jqlang.jq
@@ -85,11 +93,94 @@ Run `/timestamps` inside Claude Code. Bare, it shows what you have now and
 offers a handful of presets, each previewed as the marker it actually produces:
 
 <p align="center">
-  <img src="assets/picker.png" alt="The in-chat picker, showing presets with a preview of each" width="760">
+  <img src="assets/picker.webp" alt="The in-chat picker, showing presets with a preview of each" width="760">
 </p>
 
 It also takes the request directly, so `/timestamps tokyo`, `/timestamps no
 colour` and `/timestamps 12 hour clock` each land in one step.
+
+### The marker's layout
+
+`MARKER` decides what the marker is made of and how it is arranged. The parts
+are `%time`, `%elapsed`, `%tool` and `%date`, and a `{...}` group disappears
+when every part inside it is empty:
+
+Every line below was produced by running the renderer, not written by hand.
+The first column is the setting, the second is what appears on screen.
+
+```text
+MARKER=                                          renders as
+
+[{%date }%time{ %elapsed}{ · %tool}]             [13:22:13 +2m14s · Bash 1m58s]
+[{%date }%time{ %elapsed}{ · %tool}]             [13:22:13]
+   the default, on a turn with no duration and no tool
+
+%time                                            13:22:13
+%time{ %elapsed}                                 13:22:13 +2m14s
+%time{ → %elapsed}                               13:22:13 → +2m14s
+%time{ (%elapsed)}                               13:22:13 (+2m14s)
+%time{ (%elapsed)}                               13:22:13
+   the same template, on a turn with no duration
+
+⟨%time⟩                                          ⟨13:22:13⟩
+{%date }%time                                    Aug 21 13:22:13
+%elapsed                                         +2m14s
+[%time %elapsed]                                 [13:22:13]
+   an empty part eats one run of spaces
+```
+
+**Groups matter when a part carries decoration.** `%time (%elapsed)` leaves an
+empty pair of brackets behind on a turn with no duration. `%time{ (%elapsed)}`
+does not, because the whole group goes when the part inside it is empty. Outside
+a group, an empty part eats one run of spaces, which is why `[%time %elapsed]`
+closes up on its own without needing a group at all.
+
+**Groups do not nest.** A `{` inside a group makes the template invalid, and the
+plugin falls back to the default and says so at the next session start. Flat
+templates express nearly everything nesting would.
+
+**A `%` that does not begin a part is literal**, so `100%` needs no escaping. A
+`%` followed by letters must spell one of the four names exactly: `%elapsd` is
+rejected as a typo rather than printed back at you, and `%timex` is rejected too
+rather than quietly meaning `%time` followed by an `x`.
+
+Same gallery, as a screenshot rather than a code block, with the per-part
+colours from the next section shown on the last row:
+
+<p align="center">
+  <img src="assets/markers.webp" alt="A gallery of MARKER templates beside what each actually renders" width="700">
+</p>
+
+### Colour, and where it applies
+
+Each part takes its own colour through `TIME_COLOR`, `ELAPSED_COLOR` and
+`TOOL_COLOR`. An empty one follows `COLOR`, which is what "inherit" means in the
+settings table. `SLOW_COLOR` still wins over `ELAPSED_COLOR` once a turn crosses
+`SLOW_AFTER`, because a slow turn being obvious is the point of that setting.
+`TIME_COLOR` colours both `%time` and `%date`, since the date is part of the
+clock.
+
+Colour is written as ANSI escape sequences, which only help where something
+interprets them. A terminal does. Claude Code in VS Code, and other clients that
+render the text as-is, do not, and an escape sequence sent there arrives as
+visible `[2m` characters wrapped around the marker.
+
+So the plugin sends colour only when it is running in a terminal session, and
+sends plain text everywhere else. Nothing needs configuring: the marker simply
+arrives clean in VS Code and coloured in a terminal.
+
+Two environment variables override that, and both are read before anything else:
+
+- **`NO_COLOR`**: never send colour, whatever `COLOR` says. Any non-empty value.
+- **`FORCE_COLOR`**: send colour even outside a terminal, for a client you know renders it.
+
+`NO_COLOR` wins when both are set. `setup.sh --doctor` reports which client it
+detected and whether colour is being suppressed, which is the quickest way to
+find out why a marker looks plainer than expected.
+
+`ELAPSED` and `TOOL_TIMING` decide whether those parts have anything to say;
+`MARKER` decides where they go. A part with nothing to say leaves no trace,
+whichever of the two silenced it.
 
 Changes take effect on your **next message**. Every hook reads the config file
 each time it runs, so nothing needs restarting. Only installing the plugin
@@ -110,7 +201,7 @@ bash "$CLAUDE_PLUGIN_ROOT/hooks/scripts/setup.sh"
 ```
 
 <p align="center">
-  <img src="assets/wizard.png" alt="The setup wizard, showing the colour choices and a live preview" width="760">
+  <img src="assets/wizard.webp" alt="The setup wizard, showing the colour choices and a live preview" width="760">
 </p>
 
 Every question shows its current value in brackets, and pressing enter keeps
@@ -140,7 +231,13 @@ bash "$CLAUDE_PLUGIN_ROOT/hooks/scripts/setup.sh" --project --tz=UTC
 That writes only `TZ=UTC`. Everything else still comes from your account. The
 file is found by walking up from the directory the conversation is about, so it
 applies from subdirectories too, and the search stops at your home directory so
-your own config is never mistaken for a project one.
+your own config is never mistaken for a project one. For the same reason
+`--project` refuses to run from your home directory: the file it would write
+there is your account config, which no project layer would ever load.
+
+The search also stops at the filesystem root, so a config directly in `/` is
+not picked up, and after forty levels, which `--doctor` reports when it
+happens.
 
 Which files are in play is shown by `--doctor` and `--show`.
 
@@ -157,25 +254,31 @@ cannot run anything.
 | `DISPLAY_FORMAT` | `24h` | `24h`, `short`, `12h`, `iso`, or any strftime string |
 | `CONTEXT_FORMAT` | `24h` | Same values, for the time Claude is told |
 | `COLOR` | `dim` | `none`, `dim`, `gray`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan` |
+| `MARKER` | `[{%date }%time{ %elapsed}{ · %tool}]` | The marker's layout. `%time`, `%elapsed`, `%tool` and `%date` are the parts, a `{...}` group disappears when every part inside it is empty, and groups do not nest |
+| `TIME_COLOR` | inherit | Colour of `%time` and `%date`; empty follows `COLOR` |
+| `ELAPSED_COLOR` | inherit | Colour of `%elapsed`; `SLOW_COLOR` still wins on a slow turn |
+| `TOOL_COLOR` | inherit | Colour of `%tool`; empty follows `COLOR` |
 | `ELAPSED` | `on` | Show how long the turn took |
 | `INJECT_CONTEXT` | `true` | Tell Claude the local time each prompt was sent |
 | `SLOW_AFTER` | `60` | Colour the duration past this many seconds, `0` disables |
 | `SLOW_COLOR` | `yellow` | Colour used for a slow turn |
 | `IDLE_AFTER` | `3600` | Mark a gap this long between messages, `0` disables |
 | `DATE_ROLLOVER` | `on` | Show the date on the first message after midnight |
-| `SUMMARY` | `on` | Report session totals on exit |
+| `SUMMARY` | `on` | Report session totals on exit. Independent of `HISTORY`: both read the same counters, which are kept either way |
 | `SUBAGENTS` | `on` | Stamp subagent messages as well |
-| `TOOL_TIMING` | `off` | Time individual tool calls and name the slowest |
-| `HISTORY` | `on` | Record each finished session, for `/timestamps` and `--stats` |
-| `HISTORY_LIMIT` | `200` | How many recorded sessions to keep |
+| `TOOL_TIMING` | `off` | Record what each tool call cost and name the slowest |
+| `HISTORY` | `on` | Record each finished session, for `/timestamps` and `--stats`. Independent of `SUMMARY` |
+| `HISTORY_LIMIT` | `200` | How many recorded sessions to keep, 1 or more; `HISTORY=off` keeps none |
 
-`NO_COLOR` disables colour regardless of `COLOR`.
+Colour behaviour, including when it is suppressed and how `NO_COLOR` and
+`FORCE_COLOR` override that, is covered above under **Colour, and where it
+applies**.
 
 A value the plugin cannot use is replaced by its default rather than silently
 doing nothing, and it is named at the start of the next session and by
 `--doctor`:
 
-```
+```text
 claude-timestamp: some settings could not be used.
   COLOR=banana is not valid, using dim
   SLOW_AFTER=soon is not valid, using 60
@@ -187,7 +290,13 @@ for `12h`, and `2026-08-19T14:03:22` for `iso`. Any value containing a `%` is
 treated as a strftime string, so the escape hatch needs no separate setting.
 
 `TOOL_TIMING` is off by default because it is the only setting that costs
-anything per tool call. Everything else costs once per message.
+anything per tool call. Everything else costs once per message. Claude Code
+reports how long each call took, so the plugin no longer times them itself,
+but the hook that records the number still runs on every call.
+
+Those timings cover the call alone. Time a permission prompt spent waiting for
+you is not counted against the tool, so a slow turn you spent deciding through
+will show its duration without naming a culprit.
 
 Alongside the config, the plugin writes `~/.claude/claude-timestamp.facts.json`
 at the start of every session. It holds what cannot be worked out by reading
@@ -208,15 +317,17 @@ bash "$CLAUDE_PLUGIN_ROOT/hooks/scripts/setup.sh" --stats
 ```
 
 <p align="center">
-  <img src="assets/stats.png" alt="Totals across recorded sessions" width="660">
+  <img src="assets/stats.webp" alt="Totals across recorded sessions" width="660">
 </p>
 
 Each finished session is appended to the history file, and the oldest are
 dropped once there are more than `HISTORY_LIMIT` of them.
 
-The file holds timings only: five numbers and a date per session. No message
-text, no tool arguments, and no paths, so nothing in it says what you were
-working on. Switch it off entirely with `HISTORY=off`.
+The file holds timings only: five numbers and a date per session. The date is
+in whatever timezone you pinned, the same one the markers use, so a session you
+watched happen on the 22nd is recorded on the 22nd. No message text, no tool
+arguments, and no paths, so nothing in it says what you were working on. Switch
+it off entirely with `HISTORY=off`.
 
 ## When something is wrong
 
@@ -232,7 +343,7 @@ bash "$CLAUDE_PLUGIN_ROOT/hooks/scripts/setup.sh" --doctor
 ```
 
 <p align="center">
-  <img src="assets/doctor.png" alt="Output of the doctor self-check" width="760">
+  <img src="assets/doctor.webp" alt="Output of the doctor self-check" width="760">
 </p>
 
 It checks that `jq` is present, that the config parses, that a pinned timezone
@@ -244,23 +355,35 @@ doctor in the first place.
 
 ## How it works
 
-Seven hooks, all of them harness-only, so none of this costs model context.
+Six scripts across eight events, all of them harness-only, so none of this
+costs model context.
 
 | Hook | Job |
 | --- | --- |
 | `SessionStart` | Check `jq`, prune old state, point a new user at `/timestamps` |
-| `UserPromptSubmit` | Record the turn start, tell Claude the local time |
+| `UserPromptSubmit` | Open the turn, close one an interrupt left behind, tell Claude the local time |
 | `MessageDisplay` | Draw the marker on the first batch of each message |
+| `Stop` / `StopFailure` | Close the turn and record what it cost |
 | `SessionEnd` | Report the summary, record the session, clear its state |
-| `PreToolUse` / `PostToolUse` / `PostToolUseFailure` | Time tool calls and count failures, only when `TOOL_TIMING=on` |
+| `PostToolUse` / `PostToolUseFailure` | Record what each tool call cost, only when `TOOL_TIMING=on` |
+
+A turn is opened by the prompt that started it and closed by the event that
+ended it, so what a turn cost is measured once rather than accumulated as its
+messages arrive. A turn that ends in neither `Stop` nor `StopFailure`, which is
+what an interrupt looks like from a hook, is closed by the next prompt using
+the last message it drew.
 
 `MessageDisplay` fires repeatedly as a message streams. Only the first batch is
 stamped, and the rest return nothing at all, which Claude Code treats as "show
 the original text". Returning the text unchanged would have meant a wasted
-round trip on every batch of every message.
+round trip on every batch of every message. The hook decides in the shell,
+before `jq` or anything else forks, whether a batch needs stamping at all, so
+a later batch costs nothing more than that one check.
 
-Timing state lives in `$TMPDIR/claude-timestamp`, one small file per session,
-cleared when the session ends and pruned after seven days.
+Timing state lives in `$TMPDIR/claude-timestamp-<your uid>`, one small file per
+session, cleared when the session ends and pruned after seven days. The
+directory is created private to you, and one belonging to somebody else is
+declined rather than written into.
 
 ## Platform notes
 
@@ -273,15 +396,10 @@ time instead, mentions it once at session start, and refuses to write a pinned
 zone it knows cannot be honoured. `UTC` and `GMT` still work, since those need
 no database.
 
-Tool timings use sub-second precision where the shell provides it. That needs
-bash 5 or newer. macOS still ships bash 3.2 as `/bin/bash`, and BSD `date` has
-no `%N`, so there is no portable fallback. On those platforms durations round
-to whole seconds and the call counts carry the signal.
-
 ## Development
 
 ```bash
-bash tests/run.sh                                    # 297 assertions, no framework
+bash tests/run.sh                                    # 609 assertions, no framework
 shellcheck -S style -e SC1091 hooks/scripts/**/*.sh  # clean
 bash tools/check-docs.sh                             # README against the code
 ```
@@ -301,8 +419,9 @@ that stops matching the suite, and an image link pointing at a file that has
 been renamed.
 
 CI runs on Linux, macOS and Windows. On macOS it runs the suite twice, once
-with the default bash and once with `/bin/bash`, which is still 3.2. That is
-what keeps the bash 3.2 claim above honest rather than aspirational.
+with the default bash and once with `/bin/bash`, which is still 3.2. The
+plugin claims to work there, and this is the only runner that can actually
+check that claim.
 
 ### Screenshots
 
@@ -315,13 +434,20 @@ bash tools/screenshots/make.sh doctor   # just one
 
 It drives the real programs, then renders what was captured using a terminal
 emulator. Hero, picker and wizard run through a pty, so the shot shows a real
-terminal rather than a reconstruction; doctor and stats capture plain output
-instead, since neither draws anything a pty would change. Nothing in those
-images is mocked up. Hero and picker talk to an actual Claude Code session, so
-they need a working login and spend tokens; wizard, doctor and stats run local
-scripts only and are free and offline. The hero shot's durations differ every
-run because they are real measurements. Python dependencies install into a
-virtualenv beside the script.
+terminal rather than a reconstruction; doctor, stats and markers capture plain
+output instead, since none of them draw anything a pty would change; session
+drives message-display.sh and session-end.sh directly with planted state, the
+way tests/run.sh does. Nothing in those images is mocked up. Hero and picker
+talk to an actual Claude Code session, so they need a working login and spend
+tokens; wizard, doctor, stats, markers and session run local scripts only and
+are free and offline. The hero shot's durations differ every run because they
+are real measurements. Python dependencies install into a virtualenv beside
+the script.
+
+Every image is a lossless WebP, animation included: terminal captures are flat
+colour with hard edges, which lossless compression suits far better than a
+lossy setting would, at a fraction of the size PNG and GIF needed for the
+same pixels.
 
 ## Releases
 

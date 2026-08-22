@@ -52,6 +52,63 @@
       ],
       "describes": "colour of the marker; NO_COLOR disables colour regardless"
     },
+    "MARKER": {
+      "default": "[{%date }%time{ %elapsed}{ · %tool}]",
+      "validator": "ct_is_valid_marker",
+      "type": "template",
+      "describes": "the marker's layout; %time %elapsed %tool %date are the parts, a {...} group disappears when every part inside it is empty, and groups do not nest"
+    },
+    "TIME_COLOR": {
+      "default": "",
+      "validator": "ct_is_valid_part_color",
+      "values": [
+        "",
+        "none",
+        "dim",
+        "gray",
+        "red",
+        "green",
+        "yellow",
+        "blue",
+        "magenta",
+        "cyan"
+      ],
+      "describes": "colour of %time and %date; empty inherits COLOR"
+    },
+    "ELAPSED_COLOR": {
+      "default": "",
+      "validator": "ct_is_valid_part_color",
+      "values": [
+        "",
+        "none",
+        "dim",
+        "gray",
+        "red",
+        "green",
+        "yellow",
+        "blue",
+        "magenta",
+        "cyan"
+      ],
+      "describes": "colour of %elapsed; SLOW_COLOR still wins once a turn crosses SLOW_AFTER"
+    },
+    "TOOL_COLOR": {
+      "default": "",
+      "validator": "ct_is_valid_part_color",
+      "values": [
+        "",
+        "none",
+        "dim",
+        "gray",
+        "red",
+        "green",
+        "yellow",
+        "blue",
+        "magenta",
+        "cyan"
+      ],
+      "describes": "colour of %tool; empty inherits COLOR"
+    },
     "ELAPSED": {
       "default": "on",
       "validator": "ct_is_onoff",
@@ -125,7 +182,7 @@
         "on",
         "off"
       ],
-      "describes": "time individual tool calls; the only setting that costs anything per tool call rather than per message"
+      "describes": "record what each tool call cost; the only setting that costs anything per tool call rather than per message"
     },
     "HISTORY": {
       "default": "on",
@@ -138,9 +195,10 @@
     },
     "HISTORY_LIMIT": {
       "default": "200",
-      "validator": "ct_is_seconds",
+      "validator": "ct_is_history_limit",
       "type": "count",
-      "describes": "how many recorded sessions to keep"
+      "minimum": 1,
+      "describes": "how many recorded sessions to keep; 1 or more, and HISTORY=off is how you keep none"
     },
     "INJECT_CONTEXT": {
       "default": "true",
@@ -150,6 +208,34 @@
         "false"
       ],
       "describes": "tell Claude the local time each prompt was sent"
+    }
+  },
+  "preview_context": {
+    "time": "13:22:13",
+    "elapsed": "+2m14s",
+    "tool": "Bash 1m58s",
+    "date": ""
+  },
+  "markers": {
+    "classic": {
+      "set": "[{%date }%time{ %elapsed}{ · %tool}]",
+      "renders": "[13:22:13 +2m14s · Bash 1m58s]",
+      "describes": "the time, the duration, and what made it slow"
+    },
+    "quiet": {
+      "set": "%time",
+      "renders": "13:22:13",
+      "describes": "just the clock, no brackets"
+    },
+    "trailing": {
+      "set": "%time{ %elapsed}",
+      "renders": "13:22:13 +2m14s",
+      "describes": "no brackets, the duration when there is one"
+    },
+    "arrow": {
+      "set": "{%date }%time{ → %elapsed}",
+      "renders": "13:22:13 → +2m14s",
+      "describes": "an arrow instead of brackets"
     }
   },
   "presets": {

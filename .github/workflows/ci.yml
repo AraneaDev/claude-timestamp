@@ -84,11 +84,36 @@ jobs:
             bash -n "$f"
           done
 
+      - name: Python syntax check
+        # screenshots.py is developer tooling and never runs for a user, so it
+        # gets a syntax check rather than a linter: it adds no dependency and
+        # still stops a script that cannot be imported from shipping. It does
+        # not check anything semantic, and is not meant to.
+        run: python3 -m compileall -q tools/screenshots/screenshots.py
+
       - name: shellcheck
         # SC1091 is excluded because every hook resolves its library path at
         # runtime, which shellcheck cannot follow statically.
+        #
+        # Three optional checks are on because they cost nothing here. The
+        # others were measured against this same file set and rejected, with
+        # the finding counts recorded so the decision stays legible rather
+        # than looking like an oversight:
+        #
+        #   require-variable-braces      781  fights the house style
+        #   check-extra-masked-returns   362  noisy against the || return idiom
+        #   require-double-brackets      240  [ ] is a bash 3.2 discipline
+        #   check-unassigned-uppercase    81  the CT_* public interface
+        #   add-default-case              51  render paths deliberately have none
+        #
+        # No optional check catches an assignment whose failure exits the
+        # script under set -e, which is what broke detect_tz on older macOS.
+        # Do not assume linting covers that.
         run: |
           shellcheck -S style -e SC1091 \
+            --enable=deprecate-which \
+            --enable=avoid-nullary-conditions \
+            --enable=quote-safe-variables \
             hooks/scripts/*.sh \
             hooks/scripts/lib/*.sh \
             tests/run.sh \

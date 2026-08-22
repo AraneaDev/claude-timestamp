@@ -49,6 +49,7 @@ ct_tilde() {
 # after a bounded number of steps so a symlink loop cannot hang a hook.
 ct_find_project_config() {
   local dir="${1:-}" steps=0
+  CT_PROJECT_SEARCH_CAPPED=""
   [ -n "$dir" ] || return 1
   [ -d "$dir" ] || return 1
   dir="$(cd "$dir" 2>/dev/null && pwd)" || return 1
@@ -64,6 +65,21 @@ ct_find_project_config() {
     dir="$(dirname "$dir")"
     steps=$((steps + 1))
   done
+  # Giving up at the cap and finding nothing look identical to a caller, and
+  # doctor's "none for this directory" then reads as an answer when it was a
+  # timeout. Recorded so it can say which happened.
+  #
+  # A distinct exit status (2) carries that fact out as well as the variable
+  # does: ct_load_config's caller reaches this function through
+  # `project="$(ct_find_project_config ...)"`, and command substitution always
+  # runs in a subshell, so an assignment made in here to CT_PROJECT_SEARCH_CAPPED
+  # never survives back out to it -- only the exit status does. A caller that
+  # invokes this function directly, without capturing its output, still sees
+  # the variable set normally.
+  if [ "$steps" -ge 40 ]; then
+    CT_PROJECT_SEARCH_CAPPED=1
+    return 2
+  fi
   return 1
 }
 
@@ -97,6 +113,10 @@ _ct_read_config_file() {
       DISPLAY_FORMAT) CT_DISPLAY_FORMAT="$value" ;;
       CONTEXT_FORMAT) CT_CONTEXT_FORMAT="$value" ;;
       COLOR)          CT_COLOR="$value" ;;
+      MARKER)         CT_MARKER_TEMPLATE="$value" ;;
+      TIME_COLOR)     CT_TIME_COLOR="$value" ;;
+      ELAPSED_COLOR)  CT_ELAPSED_COLOR="$value" ;;
+      TOOL_COLOR)     CT_TOOL_COLOR="$value" ;;
       ELAPSED)        CT_ELAPSED="$value" ;;
       DATE_ROLLOVER)  CT_DATE_ROLLOVER="$value" ;;
       SLOW_AFTER)     CT_SLOW_AFTER="$value" ;;
@@ -121,6 +141,10 @@ ct_load_config() {
   CT_DISPLAY_FORMAT="24h"     # preset name or raw strftime
   CT_CONTEXT_FORMAT="24h"
   CT_COLOR="dim"
+  CT_MARKER_TEMPLATE='[{%date }%time{ %elapsed}{ · %tool}]'
+  CT_TIME_COLOR=""            # empty = inherit COLOR
+  CT_ELAPSED_COLOR=""
+  CT_TOOL_COLOR=""
   CT_ELAPSED="on"
   CT_SLOW_AFTER="60"          # seconds; 0 disables
   CT_SLOW_COLOR="yellow"
@@ -135,6 +159,7 @@ ct_load_config() {
 
   CT_CONFIG_PROBLEMS=""
   CT_PROJECT_CONFIG=""
+  CT_PROJECT_SEARCH_CAPPED=""
 
   local file
   file="$(ct_config_path)"
@@ -149,10 +174,16 @@ ct_load_config() {
     # decide whether to do anything at all before reading their payload, so
     # they have no cwd to pass yet, and paying for a jq process per tool call
     # just to look one up would cost more than it is worth.
-    local project
+    local project project_rc
     if project="$(ct_find_project_config "${1:-${PWD:-}}")"; then
       CT_PROJECT_CONFIG="$project"
       _ct_read_config_file "$project"
+    else
+      # The command substitution above ran the search in a subshell, so the
+      # variable it sets on a capped search was already lost; only its exit
+      # status (2 for capped, 1 for a plain miss) made it back out.
+      project_rc=$?
+      [ "$project_rc" -eq 2 ] && CT_PROJECT_SEARCH_CAPPED=1
     fi
   fi
 
@@ -163,15 +194,42 @@ ct_load_config() {
 # and the setup script need the same answer to "is this a usable value", and
 # two copies of that question drift apart.
 ct_is_valid_color()  { case "${1:-}" in none|off|dim|gray|grey|red|green|yellow|blue|magenta|cyan) return 0 ;; *) return 1 ;; esac; }
-ct_is_valid_format() { case "${1:-}" in *%*|24h|short|12h|iso) return 0 ;; *) return 1 ;; esac; }
+# A control character is rejected everywhere a value can reach the config file,
+# because write_config interpolates values into KEY=value with no escaping: a
+# newline writes a second line the parser reads back as a real setting, and one
+# that lands after the key it came from wins. Rejecting at the validator keeps
+# the check in the single place the loader and setup.sh already share.
+ct_has_control()     { case "${1:-}" in *[[:cntrl:]]*) return 0 ;; *) return 1 ;; esac; }
+ct_is_valid_format() { ct_has_control "${1:-}" && return 1; case "${1:-}" in *%*|24h|short|12h|iso) return 0 ;; *) return 1 ;; esac; }
 ct_is_seconds()      { case "${1:-}" in ''|*[!0-9]*) return 1 ;; *) return 0 ;; esac; }
+
+# A retention count, which unlike SLOW_AFTER and IDLE_AFTER has no "0 disables"
+# reading: keeping zero sessions is what HISTORY=off means, and 0 here used to
+# be clamped up to 1, quietly doing the opposite of what it looked like.
+ct_is_history_limit() { ct_is_seconds "${1:-}" && [ "${1:-0}" -ge 1 ]; }
 ct_is_onoff()        { case "${1:-}" in on|off) return 0 ;; *) return 1 ;; esac; }
 ct_is_bool()         { case "${1:-}" in true|false) return 0 ;; *) return 1 ;; esac; }
+
+# A part colour may be empty, which means inherit COLOR. Every other value is a
+# colour name, so this is ct_is_valid_color plus the empty string.
+ct_is_valid_part_color() { [ -z "${1:-}" ] && return 0; ct_is_valid_color "${1:-}"; }
 
 # A pinned zone is checked for shape here and for whether this platform can
 # honour it separately, because those are different failures with different
 # advice attached.
+#
+# TZ is the third setting whose value is free text rather than an enum or a
+# number, so both writers put it through conf_value exactly as they do MARKER
+# and the two formats. That symmetry is the point: write_config used to be the
+# one writer that interpolated TZ raw, which meant the account-level file and a
+# project file disagreed about whether the same value needed quoting.
+# setup.sh's own valid_tz happens to block a control-character payload today,
+# but only as a side effect of checking the name against the zoneinfo
+# directory -- and that check is skipped entirely when $ZONEINFO is not a
+# directory, where valid_tz's trailing `if` then falls off the end and
+# returns success. Put the guard here so it holds regardless of that.
 ct_is_valid_tz() {
+  ct_has_control "${1:-}" && return 1
   case "${1:-}" in
     '') return 0 ;;
     /*|*/../*|*/..) return 1 ;;
@@ -183,11 +241,11 @@ ct_is_valid_tz() {
 # and record why. Values come from a file a person edited, so a typo should say
 # so rather than quietly doing nothing.
 _ct_require() {
-  local name="$1" check="$2" default="$3" var="CT_$1" value
+  local check="$2" default="$3" shown="${4:-$1}" var="CT_$1" value
   value="${!var}"
   "$check" "$value" && return 0
   printf -v "$var" '%s' "$default"
-  CT_CONFIG_PROBLEMS="${CT_CONFIG_PROBLEMS}${CT_CONFIG_PROBLEMS:+$'\n'}  $name=$value is not valid, using $default"
+  CT_CONFIG_PROBLEMS="${CT_CONFIG_PROBLEMS}${CT_CONFIG_PROBLEMS:+$'\n'}  $shown=$value is not valid, using $default"
 }
 
 # Check everything the config file can set. Reports through CT_CONFIG_PROBLEMS
@@ -200,6 +258,10 @@ ct_validate_config() {
   _ct_require DISPLAY_FORMAT ct_is_valid_format 24h
   _ct_require CONTEXT_FORMAT ct_is_valid_format 24h
   _ct_require COLOR          ct_is_valid_color  dim
+  _ct_require MARKER_TEMPLATE ct_is_valid_marker '[{%date }%time{ %elapsed}{ · %tool}]' MARKER
+  _ct_require TIME_COLOR      ct_is_valid_part_color  ""
+  _ct_require ELAPSED_COLOR   ct_is_valid_part_color  ""
+  _ct_require TOOL_COLOR      ct_is_valid_part_color  ""
   _ct_require SLOW_COLOR     ct_is_valid_color  yellow
   _ct_require SLOW_AFTER     ct_is_seconds      60
   _ct_require IDLE_AFTER     ct_is_seconds      3600
@@ -209,7 +271,7 @@ ct_validate_config() {
   _ct_require SUBAGENTS      ct_is_onoff        on
   _ct_require TOOL_TIMING    ct_is_onoff        off
   _ct_require HISTORY        ct_is_onoff        on
-  _ct_require HISTORY_LIMIT  ct_is_seconds      200
+  _ct_require HISTORY_LIMIT  ct_is_history_limit 200
   _ct_require INJECT_CONTEXT ct_is_bool         true
 }
 
@@ -279,125 +341,321 @@ ct_zone() {
   if ct_tz_honoured; then TZ="$CT_TZ" date '+%Z'; else date '+%Z'; fi
 }
 
-ct_color_start() {
-  # https://no-color.org -- any non-empty value disables color.
+# The escape sequence for a colour, assigned rather than printed so a caller on
+# the hot path pays no subshell. Sets _CT_SEQ, which is empty when the colour is
+# off, unknown, or disabled by NO_COLOR.
+ct_color_seq() {
+  _CT_SEQ=""
+  # https://no-color.org -- any non-empty value disables color. Checked before
+  # FORCE_COLOR, which is deliberately the opposite of the common convention
+  # (chalk and similar give FORCE_COLOR priority): the README promises NO_COLOR
+  # disables colour regardless of everything else, and demoting it here would
+  # quietly break that documented guarantee.
   [ -n "${NO_COLOR:-}" ] && return 0
-  case "$1" in
-    dim)       printf '%s' $'\033[2m' ;;
-    gray|grey) printf '%s' $'\033[90m' ;;
-    red)       printf '%s' $'\033[31m' ;;
-    green)     printf '%s' $'\033[32m' ;;
-    yellow)    printf '%s' $'\033[33m' ;;
-    blue)      printf '%s' $'\033[34m' ;;
-    magenta)   printf '%s' $'\033[35m' ;;
-    cyan)      printf '%s' $'\033[36m' ;;
-    *)         printf '' ;;
+  if [ -z "${FORCE_COLOR:-}" ]; then
+    # Escape codes only help where something interprets them. Claude Code sets
+    # CLAUDE_CODE_ENTRYPOINT and a hook inherits it as any child process would;
+    # "cli" is a real terminal, so it is the only value that earns colour
+    # here. Unset also earns colour: an older Claude Code that predates this
+    # variable, or setup.sh run directly as `bash setup.sh`, must not lose
+    # colour on upgrade or in the wizard. Every other value, including ones
+    # that do not exist yet (claude-vscode, claude-desktop, sdk-*, bench,
+    # remote, ...), gets plain text -- colour missing where it might have
+    # worked is the safe failure, not escape codes on every message.
+    # A single dash, not :-: unset and set-but-empty are different signals and
+    # must not be collapsed. Unset is the backward-compatibility carve-out (an
+    # older Claude Code, or setup.sh run directly, never set this variable at
+    # all). A set-but-empty value means something deliberately assigned it and
+    # produced a non-cli result, so it falls through to "*" like any other
+    # non-cli value rather than being treated as unset.
+    case "${CLAUDE_CODE_ENTRYPOINT-cli}" in
+      cli) : ;;
+      *) return 0 ;;
+    esac
+  fi
+  case "${1:-}" in
+    dim)       _CT_SEQ=$'\033[2m' ;;
+    gray|grey) _CT_SEQ=$'\033[90m' ;;
+    red)       _CT_SEQ=$'\033[31m' ;;
+    green)     _CT_SEQ=$'\033[32m' ;;
+    yellow)    _CT_SEQ=$'\033[33m' ;;
+    blue)      _CT_SEQ=$'\033[34m' ;;
+    magenta)   _CT_SEQ=$'\033[35m' ;;
+    cyan)      _CT_SEQ=$'\033[36m' ;;
   esac
-}
-
-ct_color_end() {
-  [ -n "$(ct_color_start "$1")" ] && printf '%s' $'\033[0m'
   return 0
 }
 
-ct_is_color() { [ -n "$(ct_color_start "$1")" ]; }
+ct_color_start() {
+  ct_color_seq "${1:-}"
+  printf '%s' "$_CT_SEQ"
+}
+
+# Paint one part of the marker and restore the base colour afterwards, so the
+# literal text around it keeps its own styling.
+#
+# An empty part stays empty rather than becoming a bare escape sequence. The
+# renderer decides whether a part is present by testing whether it is empty, and
+# a lone colour code would read as present and leave its separator behind.
+ct_paint_part() {
+  local color="${1:-}" text="${2:-}" base="${3:-}"
+  local seq base_seq
+  _CT_PART=""
+  [ -n "$text" ] || return 0
+  ct_color_seq "$color"; seq="$_CT_SEQ"
+  ct_color_seq "$base";  base_seq="$_CT_SEQ"
+  if [ -n "$seq" ]; then
+    _CT_PART="${seq}${text}"$'\033[0m'"${base_seq}"
+  else
+    _CT_PART="$text"
+  fi
+  return 0
+}
+
+ct_color_end() {
+  ct_color_seq "${1:-}"
+  [ -n "$_CT_SEQ" ] && printf '%s' $'\033[0m'
+  return 0
+}
+
+ct_is_color() { ct_color_seq "${1:-}"; [ -n "$_CT_SEQ" ]; }
 
 # Wrap text in a color, or return it untouched when that color is off. Keeps
 # callers from having to pair start and end themselves.
+#
+# Through ct_color_seq rather than ct_color_start, because these run on the
+# message path and a command substitution costs a process each time. That is
+# the reason ct_color_seq exists.
 ct_paint() {
-  local color="$1" text="$2" start
-  start="$(ct_color_start "$color")"
-  if [ -n "$start" ]; then
-    printf '%s%s%s' "$start" "$text" "$(ct_color_end "$color")"
+  local color="$1" text="$2" seq
+  ct_color_seq "$color"; seq="$_CT_SEQ"
+  if [ -n "$seq" ]; then
+    printf '%s%s%s' "$seq" "$text" $'\033[0m'
   else
     printf '%s' "$text"
   fi
 }
 
-# The clock used for tool timings. EPOCHREALTIME gives sub-second precision but
-# is bash 5+, and macOS still ships bash 3.2 as /bin/bash while BSD date has no
-# %N -- so there is no portable sub-second fallback. Whole seconds it is, and
-# the call counts carry the signal where durations round to zero.
-ct_now_precise() {
-  if [ -n "${EPOCHREALTIME:-}" ]; then
-    # Some locales render EPOCHREALTIME with a comma.
-    printf '%s' "${EPOCHREALTIME/,/.}"
-  else
-    date +%s
-  fi
-}
-
-# Difference between two ct_now_precise readings, to one decimal. Uses awk
-# because the shell cannot do decimal arithmetic. A negative result means the
-# clock moved backwards mid-call and is reported as zero.
-ct_duration_between() {
-  awk -v a="${1:-0}" -v b="${2:-0}" 'BEGIN { d = b - a; if (d < 0) d = 0; printf "%.3f", d }'
-}
-
-# Elapsed-time state. One file per session, holding the epoch second the last
-# prompt was submitted.
-ct_state_dir() { printf '%s' "${TMPDIR:-/tmp}/claude-timestamp"; }
-
-# Session ids come from the hook payload, so they are reduced to a safe
-# character set before being used as a filename -- an id containing ../ must
-# never be able to steer a write outside the state directory. Dots are dropped
-# rather than kept, so no id can collapse to "." or ".." and address the state
-# directory itself or its parent.
-ct_state_file() {
-  local sid
-  sid="$(printf '%s' "${1:-}" | tr -cd 'A-Za-z0-9_-')"
-  [ -n "$sid" ] || return 1
-  printf '%s/%s' "$(ct_state_dir)" "$sid"
-}
-
-# Where one in-flight tool call's start time is parked. Keyed by tool_use_id
-# rather than tool name because Claude Code runs tool calls in parallel, so
-# name-keyed state would interleave between concurrent calls of the same tool.
-ct_tool_state_file() {
-  local base tuid
-  base="$(ct_state_file "${1:-}")" || return 1
-  tuid="$(printf '%s' "${2:-}" | tr -cd 'A-Za-z0-9_-')"
-  [ -n "$tuid" ] || return 1
-  printf '%s.tool.%s' "$base" "$tuid"
-}
-
-# The append-only log of completed tool calls for a session.
-ct_tool_log() {
-  local base
-  base="$(ct_state_file "${1:-}")" || return 1
-  printf '%s.tools' "$base"
-}
-
-# The tool log for the current turn only. The session-wide log answers "what
-# made this session slow"; this one answers "what made this reply slow", which
-# is a different question and needs a log that starts empty at every prompt.
-ct_turn_tool_log() {
-  local base
-  base="$(ct_state_file "${1:-}")" || return 1
-  printf '%s.turntools' "$base"
-}
-
-# Name the tool responsible for a slow turn, or say nothing.
+# --- marker templates -------------------------------------------------------
 #
-# A tool has to account for at least half the turn before it is worth naming.
-# Below that the marker would be pointing at something that was not the reason,
-# which is worse than staying quiet. Returns non-zero when nothing dominates,
-# so the caller can simply test it.
-ct_dominant_tool() {
-  local log="${1:-}" total="${2:-0}"
-  [ -r "$log" ] || return 1
-  case "$total" in ''|*[!0-9]*) return 1 ;; esac
-  [ "$total" -gt 0 ] || return 1
-  awk -v total="$total" '
-    { sum[$1] += $2 }
-    END {
-      best = ""; top = 0
-      for (t in sum) if (sum[t] > top) { top = sum[t]; best = t }
-      if (top > total) top = total
-      if (best == "" || top * 2 < total) exit 1
-      if (top < 60) printf "%s %ds", best, int(top + 0.5)
-      else          printf "%s %dm%02ds", best, int(top / 60), int(top) % 60
-    }' "$log"
+# MARKER is a layout: literal text, four placeholders, and groups. A group is
+# {...} containing at least one placeholder, and it renders as nothing when
+# every placeholder inside it is empty. Groups exist because no automatic rule
+# works: dropping the text before an empty part handles "[%time %elapsed]" and
+# breaks "%time (%elapsed)", leaving a stray bracket, and dropping the text on
+# both sides breaks the first instead. The template cannot tell decoration from
+# structure, so the author says which is which.
+#
+# Everything here is a pure function of its arguments. No config, no clock, no
+# filesystem, and no forks: this runs on every stamped message, and the wizard
+# and doctor draw their previews with the same code, which is what keeps a
+# preview from drifting away from the real marker.
+
+# Read the placeholder starting at index $2 of $1, which is a '%'.
+#
+# Sets _CT_W to the name and _CT_WLEN to the characters consumed including the
+# '%'. Returns 0 for a known placeholder, 1 for an unknown word, and 2 for a
+# bare '%' that begins no word at all. The caller renders 1 and 2 as literal
+# text; only the validator treats 1 as an error.
+#
+# The whole run of letters must match, so %timex is unknown rather than %time
+# followed by an x. A placeholder that silently absorbed the text after it would
+# be the harder bug to find.
+_ct_word() {
+  local s="$1"
+  local i="$2" n j w
+  n=${#s}
+  j=$(( i + 1 ))
+  while [ "$j" -lt "$n" ]; do
+    case "${s:j:1}" in
+      [[:alpha:]]) j=$(( j + 1 )) ;;
+      *) break ;;
+    esac
+  done
+  w="${s:i+1:j-i-1}"
+  case "$w" in
+    time|elapsed|tool|date) _CT_W="$w"; _CT_WLEN=$(( j - i )); return 0 ;;
+    '') return 2 ;;
+    *) return 1 ;;
+  esac
+}
+
+# The value of a placeholder, from the four parts the caller passed in.
+_ct_part() {
+  case "$1" in
+    time)    _CT_V="$_CT_P_TIME" ;;
+    elapsed) _CT_V="$_CT_P_ELAPSED" ;;
+    tool)    _CT_V="$_CT_P_TOOL" ;;
+    date)    _CT_V="$_CT_P_DATE" ;;
+    *)       _CT_V="" ;;
+  esac
+  return 0
+}
+
+# Render a span containing no braces, into _CT_SPAN.
+#
+# An empty placeholder consumes one run of spaces: the run before it, or the run
+# after it when there is nothing before. One run either way, never both, so
+# "%time  %elapsed" collapses to the clock alone rather than to a trailing
+# space.
+_ct_span() {
+  local s="$1"
+  local i=0 n out ch pending val swallow rc
+  n=${#s}; out=""; pending=""; swallow=0
+  while [ "$i" -lt "$n" ]; do
+    ch="${s:i:1}"
+    if [ "$ch" = "%" ]; then
+      rc=0; _ct_word "$s" "$i" || rc=$?
+      if [ "$rc" -eq 0 ]; then
+        _ct_part "$_CT_W"; val="$_CT_V"
+        if [ -n "$val" ]; then
+          out="$out$pending$val"; pending=""; swallow=0
+        elif [ -n "$pending" ]; then
+          pending=""
+        else
+          swallow=1
+        fi
+        i=$(( i + _CT_WLEN ))
+        continue
+      fi
+      # Unknown word or bare percent: literal text.
+      swallow=0; out="$out$pending$ch"; pending=""; i=$(( i + 1 ))
+    elif [ "$ch" = " " ]; then
+      if [ "$swallow" -eq 1 ]; then i=$(( i + 1 )); continue; fi
+      pending="$pending$ch"; i=$(( i + 1 ))
+    else
+      swallow=0; out="$out$pending$ch"; pending=""; i=$(( i + 1 ))
+    fi
+  done
+  _CT_SPAN="$out$pending"
+  return 0
+}
+
+# Whether a span contains at least one placeholder.
+_ct_has_ph() {
+  local s="$1"
+  local i=0 n
+  n=${#s}
+  while [ "$i" -lt "$n" ]; do
+    if [ "${s:i:1}" = "%" ] && _ct_word "$s" "$i"; then return 0; fi
+    i=$(( i + 1 ))
+  done
+  return 1
+}
+
+# Whether a span holds at least one placeholder and every one of them is empty.
+_ct_all_empty() {
+  local s="$1"
+  local i=0 n found
+  n=${#s}; found=0
+  while [ "$i" -lt "$n" ]; do
+    if [ "${s:i:1}" = "%" ] && _ct_word "$s" "$i"; then
+      found=1
+      _ct_part "$_CT_W"
+      [ -n "$_CT_V" ] && return 1
+      i=$(( i + _CT_WLEN ))
+    else
+      i=$(( i + 1 ))
+    fi
+  done
+  [ "$found" -eq 1 ]
+}
+
+# Render TEMPLATE with the four parts, into CT_MARKER.
+#
+# The parts arrive already painted, so this function knows nothing about colour;
+# an absent part is the empty string, which is how a group learns it should
+# vanish. It assigns rather than printing, because message-display.sh writes
+# JSON to stdout and a helper that printed would corrupt the hook's output.
+#
+# CT_MARKER is this library's public interface -- every consumer, such as
+# message-display.sh, lives in a separate file, so shellcheck cannot see it
+# being read.
+ct_render_marker() {
+  local tpl="${1:-}"
+  local out i n depth j grp k
+  _CT_P_TIME="${2:-}"; _CT_P_ELAPSED="${3:-}"
+  _CT_P_TOOL="${4:-}"; _CT_P_DATE="${5:-}"
+  CT_MARKER=""
+  out=""; i=0; n=${#tpl}
+  while [ "$i" -lt "$n" ]; do
+    if [ "${tpl:i:1}" = "{" ]; then
+      depth=1; j=$(( i + 1 ))
+      while [ "$j" -lt "$n" ] && [ "$depth" -gt 0 ]; do
+        case "${tpl:j:1}" in
+          '{') depth=$(( depth + 1 )) ;;
+          '}') depth=$(( depth - 1 )) ;;
+        esac
+        j=$(( j + 1 ))
+      done
+      # An unbalanced brace cannot reach here: ct_is_valid_marker rejects the
+      # template and the loader falls back to the default. Treated as literal
+      # rather than dropped, so a bug upstream degrades to visible text.
+      if [ "$depth" -ne 0 ]; then
+        _ct_span "${tpl:i}"; out="$out$_CT_SPAN"; i="$n"; continue
+      fi
+      grp="${tpl:i+1:j-i-2}"
+      if _ct_all_empty "$grp"; then
+        :
+      elif _ct_has_ph "$grp"; then
+        _ct_span "$grp"; out="$out$_CT_SPAN"
+      else
+        out="$out{$grp}"
+      fi
+      i="$j"
+    else
+      k="$i"
+      while [ "$k" -lt "$n" ] && [ "${tpl:k:1}" != "{" ]; do k=$(( k + 1 )); done
+      _ct_span "${tpl:i:k-i}"; out="$out$_CT_SPAN"
+      i="$k"
+    fi
+  done
+  # shellcheck disable=SC2034  # CT_MARKER is this library's public interface
+  CT_MARKER="$out"
+  return 0
+}
+
+# Whether a template is renderable: no unknown placeholder, no unbalanced
+# brace, and no nested group.
+#
+# A '%' followed by letters must spell one of the four names. A typo is rejected
+# rather than rendered literally, because a user who writes %elapsd wants to
+# know it did nothing, not to read it back on every message. A '%' followed by
+# anything else is literal, so "100%" needs no escaping.
+#
+# A '{' while already inside a group is rejected rather than supported: nesting
+# only buys decoration inside decoration, which a flat template can already
+# express, and the renderer only ever scans for a group's own top-level braces
+# (_ct_span assumes no braces at all), so a nested group would be accepted here
+# and mis-rendered there. Depth is capped at 1 instead of taught to the
+# renderer.
+ct_is_valid_marker() {
+  local s="${1:-}"
+  ct_has_control "$s" && return 1
+  local i=0 n depth ch rc
+  n=${#s}; depth=0
+  while [ "$i" -lt "$n" ]; do
+    ch="${s:i:1}"
+    case "$ch" in
+      '{')
+        depth=$(( depth + 1 ))
+        [ "$depth" -gt 1 ] && return 1
+        i=$(( i + 1 ))
+        ;;
+      '}')
+        depth=$(( depth - 1 ))
+        [ "$depth" -lt 0 ] && return 1
+        i=$(( i + 1 ))
+        ;;
+      '%')
+        rc=0; _ct_word "$s" "$i" || rc=$?
+        [ "$rc" -eq 1 ] && return 1
+        if [ "$rc" -eq 0 ]; then i=$(( i + _CT_WLEN )); else i=$(( i + 1 )); fi
+        ;;
+      *) i=$(( i + 1 )) ;;
+    esac
+  done
+  [ "$depth" -eq 0 ]
 }
 
 # Seconds -> 45s / 2m14s / 1h03m. Refuses anything that is not a whole number,
@@ -429,25 +687,6 @@ ct_humanize_gap() {
   fi
 }
 
-# Read a counter from the session state, defaulting to 0 when absent or
-# corrupt, so a damaged state file degrades to "no history" rather than
-# breaking the marker.
-ct_read_counter() {
-  local file="$1" value
-  [ -r "$file" ] || { printf '0'; return 0; }
-  value="$(cat "$file" 2>/dev/null)"
-  case "$value" in ''|*[!0-9]*) printf '0' ;; *) printf '%s' "$value" ;; esac
-}
-
-# Remove every state file belonging to one session. Called at session end, so
-# the state directory does not accumulate a file set per session forever.
-ct_clear_state() {
-  local base
-  base="$(ct_state_file "${1:-}")" || return 0
-  rm -f "$base" "$base".* 2>/dev/null
-  return 0
-}
-
 # Where finished sessions are recorded. Unlike the per-session state this
 # outlives the session, so it lives beside the config rather than in a
 # temporary directory.
@@ -476,34 +715,85 @@ ct_facts_path() {
 # Append one finished session and drop anything past the retention limit.
 # Fields: when, seconds, turns, waited, idle, failed tools.
 ct_history_append() {
-  local file limit tmp
+  local file limit tmp lock dead have_lock=0 tries
   file="$(ct_history_path)"
   mkdir -p "$(dirname "$file")" 2>/dev/null || return 0
-
-  printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
-    "$(date '+%Y-%m-%dT%H:%M:%S')" "${1:-0}" "${2:-0}" "${3:-0}" "${4:-0}" "${5:-0}" >> "$file" 2>/dev/null || return 0
 
   limit="${CT_HISTORY_LIMIT:-200}"
   case "$limit" in ''|*[!0-9]*) limit=200 ;; esac
   [ "$limit" -lt 1 ] && limit=1
 
+  # One lock covers the append AND the trim, because the two race with each
+  # other, not just trim against trim.
+  #
+  # The trim is a read followed by a replace: `tail` copies the last $limit
+  # lines out, then `mv` puts them back. A line appended between those two
+  # steps lands in the file the `mv` is about to overwrite, so it is gone. An
+  # earlier version of this locked only the trim, which serialised trims
+  # against each other and left that window wide open -- the comment claimed a
+  # guarantee the code did not provide.
+  #
+  # mkdir is the lock: atomic on every filesystem this runs on, no extra tool.
+  # Acquisition retries briefly rather than giving up at once, because the
+  # holder only ever needs as long as a `tail`, and this runs once per session
+  # rather than per message.
+  lock="$file.lock"
+  tries=0
+  while [ "$tries" -lt 25 ]; do
+    if mkdir "$lock" 2>/dev/null; then have_lock=1; break; fi
+    # A lock left behind by a process that died between the mkdir and the
+    # rmdir is not a competitor. Nothing ever clears it, so every later call
+    # would find it, fail to acquire, and skip the trim -- HISTORY_LIMIT
+    # silently stops working for the life of the installation and the file
+    # grows without bound. Nothing holds this longer than a `tail` takes, so
+    # one older than a minute is debris.
+    #
+    # Reclaim by renaming rather than by removing in place. `mv` succeeds for
+    # exactly one racer, so two processes that both judge the lock stale
+    # cannot both delete it and then both believe they hold the one they went
+    # on to create. Whoever wins the rename owns the debris and clears it; the
+    # loser's mv fails and it simply retries the mkdir.
+    if [ -n "$(find "$lock" -maxdepth 0 -mmin +1 2>/dev/null)" ]; then
+      dead="$lock.dead.$$.${RANDOM:-0}"
+      if mv "$lock" "$dead" 2>/dev/null; then
+        rmdir "$dead" 2>/dev/null || rm -rf "$dead" 2>/dev/null || true
+      fi
+      # Counted like any other attempt. A `continue` that skipped this would
+      # spin forever if the rename kept failing while the lock stayed stale,
+      # and a hook that hangs is worse than a history file that is one line
+      # over its limit.
+      tries=$((tries + 1))
+      continue
+    fi
+    tries=$((tries + 1))
+    sleep 0.02 2>/dev/null || true
+  done
+
+  # The append happens whether or not the lock was won, and that is a
+  # deliberate trade rather than an oversight. Waiting indefinitely would hang
+  # a hook; giving up would drop the session's only record. Appending
+  # unprotected risks one line to a trim that is already in flight, and only
+  # after half a second of contention on an operation that takes about a
+  # millisecond. So: with the lock, no append can be lost. Without it, this
+  # one might be. What cannot happen is the record never being written.
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$(ct_now iso)" "${1:-0}" "${2:-0}" "${3:-0}" "${4:-0}" "${5:-0}" >> "$file" 2>/dev/null || {
+      if [ "$have_lock" -eq 1 ]; then rmdir "$lock" 2>/dev/null || true; fi
+      return 0
+    }
+
   # Rewrite only when the file has actually outgrown the limit, so the common
   # case is a plain append.
-  if [ "$(wc -l < "$file" 2>/dev/null || echo 0)" -gt "$limit" ]; then
-    tmp="$file.$$"
-    if tail -n "$limit" "$file" > "$tmp" 2>/dev/null; then
-      mv "$tmp" "$file" 2>/dev/null || rm -f "$tmp"
-    else
-      rm -f "$tmp"
+  if [ "$have_lock" -eq 1 ]; then
+    if [ "$(wc -l < "$file" 2>/dev/null || echo 0)" -gt "$limit" ]; then
+      tmp="$file.$$"
+      if tail -n "$limit" "$file" > "$tmp" 2>/dev/null; then
+        mv "$tmp" "$file" 2>/dev/null || rm -f "$tmp"
+      else
+        rm -f "$tmp"
+      fi
     fi
+    rmdir "$lock" 2>/dev/null || true
   fi
-  return 0
-}
-
-# Drop state files from sessions that ended days ago. Called at session start.
-ct_prune_state() {
-  local dir
-  dir="$(ct_state_dir)"
-  [ -d "$dir" ] && find "$dir" -type f -mtime +7 -delete 2>/dev/null
   return 0
 }

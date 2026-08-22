@@ -117,6 +117,19 @@ Some phrasings and what they mean:
 | "highlight slow turns after 30s" | `SLOW_AFTER=30` |
 | "time my tools" | `TOOL_TIMING=on` |
 | "why was that slow" | `TOOL_TIMING=on`, and explain it names the worst tool in the marker from now on |
+| "make the time gray" | `TIME_COLOR=gray` |
+| "colour the duration cyan" | `ELAPSED_COLOR=cyan` |
+| "no brackets" | `MARKER=%time{ %elapsed}` |
+| "just the clock" | `MARKER=%time` |
+
+Colour is named in words, never drawn. A preview box is markdown and cannot show
+ANSI, so "time gray, duration cyan" is the honest way to report a part colour,
+the same way this command already handles `COLOR`. An empty part colour means it
+follows `COLOR`, which is what "inherit" means in the settings table.
+
+`SLOW_COLOR` still wins over `ELAPSED_COLOR` once a turn passes `SLOW_AFTER`.
+Say so if a user sets `ELAPSED_COLOR` and then asks why a slow turn is a
+different colour.
 
 A request that is really the name of a preset is specific too: "quieter",
 "more detail", "off". Apply that preset rather than asking, and name the keys
@@ -150,9 +163,75 @@ made-up time and say it is an example. Either way there is nothing to look up.
 
 Add a line naming the project config when one is in play.
 
-Then ask with AskUserQuestion. One question, single-select, and the four
-presets as its four options: the tool accepts at most four, and it always
-offers an "Other" of its own for free text.
+Then ask what they want to change, with AskUserQuestion. One question,
+single-select, three options:
+
+- **How it looks**, the marker's layout, from the `markers` block. Drill into
+  the picker below.
+- **How much it says**, the presets from the `presets` block, which is the
+  question this command used to ask directly.
+- **Timezone and clock**, meaning `TZ`, `DISPLAY_FORMAT` and `CONTEXT_FORMAT`.
+
+The router exists because AskUserQuestion accepts at most four options, and a
+marker look and a behaviour preset are different axes: a preset is a whole
+configuration, a look is one template. Offering both in one question would ask
+the user to choose between things that are not alternatives.
+
+"Other" is free, so a request to change one particular setting still arrives
+there and should be taken straight to that setting without going through a
+picker.
+
+### The looks picker
+
+Read the `markers` object from `schema.json`. Ask one single-select question
+with up to four of them as options. Each option's `description` is that entry's
+`describes`, and each option's `preview` is its `renders`, used verbatim.
+
+Do not compose a preview yourself. The `renders` strings are asserted against
+the real renderer by the test suite, which is the only reason they can be
+trusted; a preview you assemble by reasoning about a template is a guess
+wearing the shape of a measurement.
+
+Applying a look writes `MARKER` and nothing else.
+
+### A template the user writes
+
+"Other" on the looks picker is where a hand-written template arrives, either as
+a string or described in words. Before writing it, check it against the grammar
+in `schema.json`:
+
+- The parts are `%time`, `%elapsed`, `%tool` and `%date`. A `%` followed by
+  letters must spell one of those four exactly. `%elapsd` is a typo and
+  `%timex` is not `%time` followed by an `x`; refuse both and name the four
+  valid parts.
+- A `%` followed by anything else is literal, so `100%` is fine.
+- A `{...}` group disappears when every part inside it is empty. Braces must
+  balance.
+- Outside a group, an empty part eats one run of spaces, so `[%time %elapsed]`
+  reads correctly when the duration is absent. A part decorated with anything
+  other than spaces needs a group: write `%time{ (%elapsed)}`, not
+  `%time (%elapsed)`, or the parentheses will be left behind on their own.
+
+Refuse to write a template that fails any of those, and say which rule it broke.
+A bad value is not silently ignored: the plugin replaces it with the default and
+complains at the next session start, so writing it would trade one confusion for
+a worse one.
+
+Do not show a rendered preview of a template you were given. You cannot run the
+renderer, and a preview you reason out is exactly the guess the stored previews
+exist to avoid. Say instead that the next message will show it, which is true:
+settings take effect on the next message, so the real marker appears in their
+own terminal, in real colour, one turn from now.
+
+### The presets picker
+
+Unchanged from before: the four presets as four options, each preview rendered
+as that preset would really produce it, `off` among them so switching the plugin
+off stays reachable.
+
+Ask with AskUserQuestion. One question, single-select, and the four presets as
+its four options: the tool accepts at most four, and it always offers an
+"Other" of its own for free text.
 
 Each option carries two fields, and both matter. The `description` is the
 sentence about what that preset changes, which is its `describes` in
@@ -209,9 +288,11 @@ preview that is a guess is worse than no picker at all.
 
 If the user asks how long they have been spending, or how much of it was
 waiting, read `~/.claude/claude-timestamp-history.tsv`. One finished session per
-line, tab separated: when, seconds, turns, waited, idle, failed tools. It is
-capped at `HISTORY_LIMIT` lines, 200 by default, so it fits in one read and the
-totals are yours to add up.
+line, tab separated: when, seconds, turns, waited, idle, failed tools. The
+timestamp is in the configured timezone, the same one the markers use. A line
+that does not have six fields has been damaged and should be reported rather
+than counted. It is capped at `HISTORY_LIMIT` lines, 200 by default, so it fits
+in one read and the totals are yours to add up.
 
 It holds timings only, no message text and no paths, which is worth saying if
 they ask what is stored.
@@ -235,6 +316,15 @@ Read the facts file and the config files, and check them against
 - A value `schema.json` rejects: the plugin is using the default instead.
 - `ENABLED=off`: everything is switched off, which is easy to forget having
   done.
+- The marker has no colour: check the facts file's `entrypoint`. `cli` is the
+  only value that gets colour, because colour is only emitted for a real
+  terminal session; anything else, such as `claude-vscode`, is a client that
+  does not interpret ANSI, so the plugin sends plain text there on purpose. An
+  empty `entrypoint` almost always means an older Claude Code that predates
+  this variable, which still gets colour, so look at the terminal itself if
+  colour is missing there. `FORCE_COLOR=1` turns colour on regardless of
+  `entrypoint`; `NO_COLOR` still wins over everything, including
+  `FORCE_COLOR`.
 
 If none of those explain it, stop there rather than inventing a next step. Say
 what you checked and what each answer was, so the user can see the ground you
