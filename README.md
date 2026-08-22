@@ -41,8 +41,9 @@ There is nothing to set up. The defaults work as soon as it is installed, and
   sent, which lets it reason about when things happened. You can switch this
   off and keep the display-only marker.
 - **Summarises the session.** On exit: how long it ran, how many turns, how
-  much of that you spent waiting, and how much you were away. Optionally which
-  tools were slowest and how many calls failed.
+  much of that you spent waiting, and how much you were away. Waiting and away
+  never cover the same seconds, so the two add up to no more than the session
+  itself. Optionally which tools were slowest and how many calls failed.
 
 ```
 claude-timestamp: session lasted 1h30m over 12 turns, 24m18s of it waiting, 35m00s away.
@@ -230,7 +231,9 @@ bash "$CLAUDE_PLUGIN_ROOT/hooks/scripts/setup.sh" --project --tz=UTC
 That writes only `TZ=UTC`. Everything else still comes from your account. The
 file is found by walking up from the directory the conversation is about, so it
 applies from subdirectories too, and the search stops at your home directory so
-your own config is never mistaken for a project one.
+your own config is never mistaken for a project one. For the same reason
+`--project` refuses to run from your home directory: the file it would write
+there is your account config, which no project layer would ever load.
 
 The search also stops at the filesystem root, so a config directly in `/` is
 not picked up, and after forty levels, which `--doctor` reports when it
@@ -320,9 +323,11 @@ bash "$CLAUDE_PLUGIN_ROOT/hooks/scripts/setup.sh" --stats
 Each finished session is appended to the history file, and the oldest are
 dropped once there are more than `HISTORY_LIMIT` of them.
 
-The file holds timings only: five numbers and a date per session. No message
-text, no tool arguments, and no paths, so nothing in it says what you were
-working on. Switch it off entirely with `HISTORY=off`.
+The file holds timings only: five numbers and a date per session. The date is
+in whatever timezone you pinned, the same one the markers use, so a session you
+watched happen on the 22nd is recorded on the 22nd. No message text, no tool
+arguments, and no paths, so nothing in it says what you were working on. Switch
+it off entirely with `HISTORY=off`.
 
 ## When something is wrong
 

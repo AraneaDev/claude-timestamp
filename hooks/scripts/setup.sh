@@ -347,9 +347,9 @@ doctor() {
   if ct_state_ready; then
     echo "  directory       $dir (writable)"
   else
-    echo "  directory       $dir NOT USABLE - missing, not writable, or owned"
-    echo "                  by another user. Elapsed time and the summary will"
-    echo "                  not work."
+    echo "  directory       $dir NOT USABLE - missing, a symlink, not"
+    echo "                  writable, or owned by another user. Elapsed time"
+    echo "                  and the summary will not work."
     problems=$((problems + 1))
   fi
   echo
