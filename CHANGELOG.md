@@ -1,5 +1,106 @@
 # Changelog
 
+## [0.0.6](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.5...v0.0.6) (2026-08-22)
+
+Closes all 21 findings from a whole-codebase logic, security and performance
+audit, and adds a configurable marker. Squashed from 74 commits on
+`feat/payload-harvest`; the sections below are those commits' own subjects.
+
+### Features
+
+* close a turn on Stop instead of guessing from messages
+* render the marker from a template
+* add MARKER and the three part colours
+* draw the marker from MARKER
+* name a few marker looks and prove what they render
+* pick a marker look without leaving Claude Code
+* set the marker layout from the terminal too
+* switch screenshots to lossless WebP and add marker/session shots
+
+### Fixes
+
+* spell the tool-log field separator as an escape sequence
+* count tool failures by appending, not by incrementing a counter
+* stamp .last unconditionally so IDLE_AFTER=0 doesn't hide turn reconciliation
+* let an absent index fall through instead of being treated as a later batch
+* stop doctor claiming tool timing loses sub-second precision
+* read duration_ms as decimal and close four review gaps
+* stop the marker renderer aborting under set -e, and reject nested groups
+* stop the timestamp marker showing as literal escape codes in VS Code
+* stop doctor blaming the wrong thing when NO_COLOR also suppresses colour
+* wire MARKER and the three part colours into --project
+* stop the wizard screenshot rejecting its own write-confirmation answer
+* close the whole-branch review's remaining gaps in MARKER and part colours
+* restore the PreToolUse shim and close two marker/project gaps
+* stop the lint-list check's glob match from crossing directories
+* hoist the duplicated comment-paths regex into one variable
+* close four gaps in the staged-script guard from review
+* record sessions even when the summary is switched off
+* stop the summary counting the same seconds as both waiting and away
+* clear the staged away figure unconditionally, before any gate
+* stop the wizard spinning forever on a timezone it will not accept
+* guard the display-format re-ask loop against exhausted stdin too
+* return one object from SessionStart instead of up to three
+* keep session state in a directory only you own
+* close the date-rollover write's bare mkdir in message-display.sh
+* close the TOCTOU race and mode gap in ct_state_ready, and doctor()'s bare mkdir
+* reject control characters in values, and drop readlink -f
+* guard TZ against control characters, restore readlink -f with a fallback
+* stamp history in the pinned zone, and refuse --project from home
+* strengthen the --project home check and its test coverage
+* resolve tool timing from the payload's project, not the process's
+* let the master switch reach the staged tool-timing flag
+* reclaim an orphaned history-trim lock instead of losing HISTORY_LIMIT forever
+* quote config values that need it, refuse a history limit of zero
+* stop write_project_config re-quoting a carried-forward value
+* skip damaged rows instead of summing them
+* refuse a symlinked state directory, and stop paying five forks to find out
+* write TZ through conf_value like every other free-text value
+* refuse an entry the mode check cannot confirm is a directory
+* point the screenshot tool at the per-uid state directory
+* make the suite and setup.sh run on macOS and Windows
+* act on the CodeRabbit review
+* harden the history lock and widen the fence check
+* count fences with a state machine, not parity
+
+### Performance
+
+* decide in the shell whether a batch needs stamping
+* gate tool timing on a glob, not a jq fork, per call
+* take the redundant forks off the message path, lock the history trim
+
+### Refactoring
+
+* take tool durations from the payload instead of timing them
+* drop the timing helpers nothing calls any more
+* assign colour escapes instead of printing them
+* move session state into lib/state.sh
+
+### Documentation
+
+* describe the hooks the plugin actually binds
+* correct state.sh header's config.sh dependency claim
+* correct the three stale descriptions and empty the baseline
+* document the three behaviour changes a user can actually see
+
+### Tests
+
+* exercise the .closed guard in the Stop-then-SessionEnd case
+* pin how message-display decides a batch is the first one
+* lock in that colour helpers always return 0
+* add the regression detector the tiling guard could not be
+* make the wizard-EOF regression test discriminate crash from fix
+* keep the attribution guard from disarming its own regression tests
+
+### Continuous integration
+
+* adopt the free shellcheck ratchets and check the lint list
+* check the five drifts the audit found by hand
+* syntax-check the screenshot tool and lint staged scripts
+
+Full diff: [`v0.0.5...v0.0.6`](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.5...v0.0.6) ·
+squashed as [`b64c15c`](https://github.com/AraneaDev/claude-timestamp/commit/b64c15c31cce6de4d713c6b99b0a380851c29ac8) from [#26](https://github.com/AraneaDev/claude-timestamp/pull/26).
+
 ## [0.0.5](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.4...v0.0.5) (2026-08-20)
 
 
