@@ -395,8 +395,13 @@ for f in README.md CONTRIBUTING.md; do
       line = $0
       sub(/^[ ]{0,3}/, "", line)
       sub(/[[:space:]]+$/, "", line)
-      if (line ~ /^`+$/ && length(line) >= 3) { c++; if (c % 2 == 1) b++ }
-      else if (line ~ /^`{3,}[^`]/) { c++ }
+      # Track the open fence and its length. Counting every fence-shaped line
+      # as a toggle miscounts a tagged ````block whose CONTENT is a literal
+      # ``` line: the inner one is text, not a closer, and treating it as one
+      # flips the parity so the real closer looks like a bare opener.
+      if (open) { if (line ~ /^`+$/ && length(line) >= fence_len) open = 0; next }
+      if (line ~ /^`+$/ && length(line) >= 3) { open = 1; fence_len = length(line); b++ }
+      else if (line ~ /^`{3,}[^`]/) { open = 1; match(line, /^`+/); fence_len = RLENGTH }
     }
     END { print b + 0 }' "$f")"
   [ "$n" -eq 0 ] || fence_bad="$fence_bad $f:$n"
