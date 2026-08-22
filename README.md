@@ -2,7 +2,8 @@
 
 # Claude Timestamp
 
-**Every message stamped with the time it happened, and how long it took.**
+**Every message stamped with the time it happened and how long it took.**
+**At the end, where the session's time actually went.**
 
 [![Release](https://img.shields.io/github/v/release/AraneaDev/claude-timestamp)](https://github.com/AraneaDev/claude-timestamp/releases)
 [![CI](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml/badge.svg)](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml)
