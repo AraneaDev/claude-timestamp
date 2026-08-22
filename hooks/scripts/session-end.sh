@@ -91,7 +91,11 @@ if [ "$CT_SUMMARY" = "on" ] && [ "$CT_TOOL_TIMING" = "on" ] && [ -s "$log" ]; th
   fi
 fi
 
-[ -n "$summary" ] && jq -n --arg msg "$summary" '{systemMessage: $msg}'
+# See session-start.sh: an `if` rather than an AND-list, so the exit status
+# does not depend on the `exit 0` further down staying where it is.
+if [ -n "$summary" ]; then
+  jq -n --arg msg "$summary" '{systemMessage: $msg}'
+fi
 
 # Record the session before its state is cleared, so /timestamps stats has
 # something to work from once the session is gone. Independent of SUMMARY:

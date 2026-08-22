@@ -267,6 +267,10 @@ echo "paths named in comments"
 # That path is deliberately not spelled out here as a real-looking one: this
 # check would find it in its own comment and never stop calling it a gap.
 #
+# Python is scanned too, but not the virtualenv beside the screenshot tool:
+# third-party package sources are full of paths that are real in THEIR repo and
+# absent from this one, and every one of them would be reported as a gap here.
+#
 # One pattern, held in a variable and used twice. A second copy is a second
 # thing to keep in step, and a contributor adding a directory to the
 # alternation would update the copy they happened to find and leave the other
@@ -279,7 +283,8 @@ while read -r path; do
   [ -e "$path" ] || cp_missing="$cp_missing $path"
 done < <(
   { grep -rhoE "$cp_re" \
-         --include='*.sh' --include='*.md' --include='*.yml' \
+         --include='*.sh' --include='*.md' --include='*.yml' --include='*.py' \
+         --exclude-dir='.venv' --exclude-dir='__pycache__' \
          hooks tools tests commands .github .claude-plugin README.md CONTRIBUTING.md 2>/dev/null
     # Git hook scripts carry no extension, and --include excludes an
     # extensionless file even when it is named explicitly on the command line,

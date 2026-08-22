@@ -92,27 +92,41 @@ ct_write_facts
 # printing a complete one produced a stream, and a consumer parsing a single
 # object rejects the lot -- losing every message exactly when there was most to
 # say.
+#
+# The order below is deliberate and not alphabetical: what is broken, then what
+# cannot be honoured, then what merely exists. A user with a typo in their
+# config needs to see that before an introduction to a command they have
+# already found, and a timezone that cannot be applied is a degraded setting
+# rather than a rejected one. Reordering these changes what a first-time user
+# reads first, so it is a UX decision rather than a formatting one.
 notes=""
-add_note() { notes="${notes}${notes:+$'\n\n'}$1"; }
+_ct_add_note() { notes="${notes}${notes:+$'\n\n'}$1"; }
 
 # A typo in the config file would otherwise do nothing visible: the value is
 # replaced by its default and the plugin carries on.
 if [ -n "${CT_CONFIG_PROBLEMS:-}" ]; then
-  add_note "claude-timestamp: some settings could not be used.
+  _ct_add_note "claude-timestamp: some settings could not be used.
 ${CT_CONFIG_PROBLEMS}
 Run /timestamps to fix them."
 fi
 
 if ct_tz_unhonoured; then
-  add_note "claude-timestamp: this system has no timezone database, so ${CT_TZ} cannot be applied. Showing local time instead. Run /timestamps and choose \"local\" to silence this."
+  _ct_add_note "claude-timestamp: this system has no timezone database, so ${CT_TZ} cannot be applied. Showing local time instead. Run /timestamps and choose \"local\" to silence this."
 fi
 
 # First run: there is no README in this repo by design, so the config command
 # has to introduce itself or nobody will ever know it exists.
 if [ ! -r "$(ct_config_path)" ]; then
-  add_note "claude-timestamp is running with default settings. Run /timestamps to pick a timezone, clock format, and color."
+  _ct_add_note "claude-timestamp is running with default settings. Run /timestamps to pick a timezone, clock format, and color."
 fi
 
-[ -n "$notes" ] && jq -n --arg msg "$notes" '{systemMessage: $msg}'
+# An `if` rather than `[ ... ] && jq ...`: under set -e an AND-list whose test
+# fails returns non-zero, and the only thing making that harmless here is the
+# `exit 0` on the next line. That is safety at a distance -- delete or move the
+# exit and a session with nothing to say starts reporting failure. The branch
+# carries its own exit status.
+if [ -n "$notes" ]; then
+  jq -n --arg msg "$notes" '{systemMessage: $msg}'
+fi
 
 exit 0
