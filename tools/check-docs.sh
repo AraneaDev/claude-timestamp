@@ -320,6 +320,31 @@ else
   gate state-glob 0 "ct_clear_state no longer removes \"\$base\".*"
 fi
 
+echo "no case statement inside a command substitution"
+# bash 3.2 is what macOS ships, and it closes a command substitution on the
+# first unparenthesised `)` in a case pattern. A `$(case ... in x) ... esac)`
+# therefore makes the whole FILE fail to parse there, not just that line, so
+# one of these takes every flag in setup.sh down with it. CI's macos runner
+# catches it, but only after a push; this catches it before one.
+# Whole-line comments are stripped before matching. The comment above spells
+# the construct out on purpose, and a check that fails on its own explanation
+# of itself teaches contributors to stop writing explanations.
+# shellcheck disable=SC2016  # a literal grep pattern, not a subshell
+b3_pat='[$][(].*case .* in [^(]'
+b3_bad=""
+for f in hooks/scripts/*.sh hooks/scripts/lib/*.sh tests/run.sh tools/*.sh; do
+  [ -f "$f" ] || continue
+  # grep -E rather than -qE: -q exits on the first match, the upstream grep
+  # then takes SIGPIPE, and under `pipefail` the whole pipeline reports 141
+  # instead of 0. That silently dropped a real hit from this very check.
+  grep -v '^[[:space:]]*#' "$f" | grep -E "$b3_pat" >/dev/null && b3_bad="$b3_bad $f"
+done
+if [ -n "$b3_bad" ]; then
+  gate bash3-case-subst 0 "case inside a command substitution, unparseable on bash 3.2:$b3_bad"
+else
+  gate bash3-case-subst 1 "no case statement sits inside a command substitution"
+fi
+
 echo "config values are written the same way by both writers"
 # write_config and write_project_config produce the same file format, so a
 # value that one of them quotes and the other interpolates raw is a round-trip

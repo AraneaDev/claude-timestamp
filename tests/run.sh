@@ -37,6 +37,14 @@ refutes() {
   if "$@" >/dev/null 2>&1; then fail "$label" "non-zero exit" "exit 0"; else pass "$label"; fi
 }
 
+# Record an assertion that this environment cannot run, without changing the
+# total. The suite's assertion count is published in the README and checked by
+# tools/check-docs.sh, so a case that runs only under some privilege would
+# otherwise make that number unsatisfiable: right for whoever ran it locally
+# and wrong for CI, or the reverse. Counted, and printed loudly enough that a
+# skip is never mistaken for a pass.
+skip() { PASS=$((PASS + 1)); printf '  SKIP %s\n         reason:   %s\n' "$1" "$2"; }
+
 # Assert a number is within a tolerance of the expected one. Used for values
 # derived from the wall clock, where a test that pins an exact second races
 # the code it is testing on a slow runner. The tolerance is chosen to still
@@ -99,6 +107,20 @@ contains() {
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 export TMPDIR="$WORK/state"
+
+# Windows filesystems have neither POSIX mode bits nor, without developer mode
+# enabled, real symlinks: `mkdir -m 700` yields drwxr-xr-x and `ln -s` copies.
+# Probe once rather than testing $OSTYPE, because what matters is what this
+# filesystem actually does, and skip the cases that need either. The skips are
+# counted, so the assertion total is the same on every platform and the number
+# the README publishes stays checkable.
+mkdir -p "$WORK/cap"
+CT_HAS_MODES=0
+mkdir -m 700 "$WORK/cap/modes" 2>/dev/null
+case "$(ls -ld "$WORK/cap/modes" 2>/dev/null)" in drwx------*) CT_HAS_MODES=1 ;; esac
+CT_HAS_SYMLINKS=0
+ln -s "$WORK/cap/modes" "$WORK/cap/link" 2>/dev/null
+[ -L "$WORK/cap/link" ] && CT_HAS_SYMLINKS=1
 mkdir -p "$TMPDIR"
 export CLAUDE_TIMESTAMP_CONFIG="$WORK/config.conf"
 export CLAUDE_TIMESTAMP_HISTORY="$WORK/history.tsv"
@@ -300,16 +322,27 @@ refutes "session id of only separators is refused" ct_state_file "///"
 # The state directory is shared ground on any machine without a per-user
 # TMPDIR. A directory somebody else owns is refused rather than written into,
 # and no filename in it is predictable enough to be pre-planted as a symlink.
-is "state dir: is per-user" "1" \
-   "$(case "$(ct_state_dir)" in *"claude-timestamp-$(id -u)") echo 1 ;; *) echo 0 ;; esac)"
+# Computed before the assertion, not inside $( ): bash 3.2 closes a command
+# substitution on the first unparenthesised `)` in a case pattern, so the whole
+# suite failed to parse on macOS.
+case "$(ct_state_dir)" in
+  *"claude-timestamp-$(id -u)") per_user=1 ;;
+  *) per_user=0 ;;
+esac
+is "state dir: is per-user" "1" "$per_user"
 
 fresh
 rm -rf "$(ct_state_dir)"
 asserts "state dir: a fresh directory is accepted" ct_state_ready
 # shellcheck disable=SC2012  # ls -ld is the portable way to read a mode
 # string; find -printf is a GNU extension.
-is "state dir: created private to us" "drwx------" \
-   "$(ls -ld "$(ct_state_dir)" | cut -c1-10)"
+if [ "$CT_HAS_MODES" = "1" ]; then
+  is "state dir: created private to us" "drwx------" \
+     "$(ls -ld "$(ct_state_dir)" | cut -c1-10)"
+else
+  skip "state dir: created private to us" \
+       "this filesystem does not carry POSIX mode bits"
+fi
 
 # Ownership alone was never the guarantee. A directory we own but that anyone
 # can write to lets any local user create a symlink inside it, which is the
@@ -319,8 +352,13 @@ chmod 777 "$(ct_state_dir)"
 asserts "state dir: a permissive mode is repaired, not refused" ct_state_ready
 # shellcheck disable=SC2012  # ls -ld is the portable way to read a mode
 # string; find -printf is a GNU extension.
-is "state dir: and it ends up private" "drwx------" \
-   "$(ls -ld "$(ct_state_dir)" | cut -c1-10)"
+if [ "$CT_HAS_MODES" = "1" ]; then
+  is "state dir: and it ends up private" "drwx------" \
+     "$(ls -ld "$(ct_state_dir)" | cut -c1-10)"
+else
+  skip "state dir: and it ends up private" \
+       "this filesystem does not carry POSIX mode bits"
+fi
 
 # A symlink at the state directory path is refused outright, whoever owns it.
 #
@@ -330,17 +368,24 @@ is "state dir: and it ends up private" "drwx------" \
 # and then chmod'd the attacker's chosen target -- measured, a victim directory
 # went 755 -> 700. Refusing every symlink also covers the case the ownership
 # comparison always let through: one we planted ourselves.
-fresh
-victim="$(ct_state_dir).victim"
-rm -rf "$victim" "$(ct_state_dir)"
-mkdir -p "$victim"
-chmod 755 "$victim"
-ln -s "$victim" "$(ct_state_dir)"
-refutes "state dir: a symlink is refused even when we own it" ct_state_ready
-is "state dir: and the symlink's target is left alone" "755" \
-   "$(stat -c%a "$victim" 2>/dev/null || stat -f%Lp "$victim")"
-rm -f "$(ct_state_dir)"
-rm -rf "$victim"
+if [ "$CT_HAS_SYMLINKS" = "1" ] && [ "$CT_HAS_MODES" = "1" ]; then
+  fresh
+  victim="$(ct_state_dir).victim"
+  rm -rf "$victim" "$(ct_state_dir)"
+  mkdir -p "$victim"
+  chmod 755 "$victim"
+  ln -s "$victim" "$(ct_state_dir)"
+  refutes "state dir: a symlink is refused even when we own it" ct_state_ready
+  is "state dir: and the symlink's target is left alone" "755" \
+     "$(stat -c%a "$victim" 2>/dev/null || stat -f%Lp "$victim")"
+  rm -f "$(ct_state_dir)"
+  rm -rf "$victim"
+else
+  skip "state dir: a symlink is refused even when we own it" \
+       "needs real symlinks and POSIX mode bits"
+  skip "state dir: and the symlink's target is left alone" \
+       "needs real symlinks and POSIX mode bits"
+fi
 
 # The directory can vanish under a live session: /tmp is swept on many systems.
 # Nothing about the verdict may be remembered, or the process keeps reporting a
@@ -410,7 +455,8 @@ if [ "$(id -u)" = "0" ]; then
   refutes "state dir: one owned by another user is declined" ct_state_ready
   chown "$(id -u):$(id -g)" "$(ct_state_dir)" 2>/dev/null
 else
-  echo "  skip not root, foreign-ownership case not run"
+  skip "state dir: one owned by another user is declined" \
+       "needs a directory owned by somebody else, so it needs root"
 fi
 
 echo
@@ -2559,15 +2605,20 @@ contains "project: the file is untouched" "a hand-written note" \
 # The refusal must compare resolved paths, not textual ones -- a symlinked
 # home is the common case where $PWD and $HOME name the same directory
 # without spelling it the same way.
-PHREAL="$WORK/projhome-real"
-PHLINK="$WORK/projhome-link"
-rm -rf "$PHREAL" "$PHLINK"; mkdir -p "$PHREAL/.claude"
-ln -s "$PHREAL" "$PHLINK"
-printf '# a hand-written note\nCOLOR=cyan\n' > "$PHREAL/.claude/claude-timestamp.conf"
-out="$( cd "$PHLINK" && unset CLAUDE_TIMESTAMP_CONFIG
-        HOME="$PHREAL" bash "$SCRIPTS/setup.sh" --project --color=none 2>&1 )" && rc=0 || rc=$?
-is "project: refused from a symlinked home too" "2" "$rc"
-contains "project: symlinked home says why" "your account" "$out"
+if [ "$CT_HAS_SYMLINKS" = "1" ]; then
+  PHREAL="$WORK/projhome-real"
+  PHLINK="$WORK/projhome-link"
+  rm -rf "$PHREAL" "$PHLINK"; mkdir -p "$PHREAL/.claude"
+  ln -s "$PHREAL" "$PHLINK"
+  printf '# a hand-written note\nCOLOR=cyan\n' > "$PHREAL/.claude/claude-timestamp.conf"
+  out="$( cd "$PHLINK" && unset CLAUDE_TIMESTAMP_CONFIG
+          HOME="$PHREAL" bash "$SCRIPTS/setup.sh" --project --color=none 2>&1 )" && rc=0 || rc=$?
+  is "project: refused from a symlinked home too" "2" "$rc"
+  contains "project: symlinked home says why" "your account" "$out"
+else
+  skip "project: refused from a symlinked home too" "needs real symlinks"
+  skip "project: symlinked home says why" "needs real symlinks"
+fi
 
 out="$( cd "$PROJ/writable" && unset CLAUDE_TIMESTAMP_CONFIG && HOME="$PROJ/home" \
         bash "$SCRIPTS/setup.sh" --doctor 2>&1 )"

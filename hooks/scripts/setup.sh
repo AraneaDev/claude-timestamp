@@ -330,7 +330,17 @@ doctor() {
   echo "  color           $CT_COLOR$([ -n "${NO_COLOR:-}" ] && echo " (overridden: NO_COLOR is set)")"
   echo "  marker          $CT_MARKER_TEMPLATE"
   echo "  part colours    time ${CT_TIME_COLOR:-<inherit>}, elapsed ${CT_ELAPSED_COLOR:-<inherit>}, tool ${CT_TOOL_COLOR:-<inherit>}"
-  echo "  entrypoint      ${CLAUDE_CODE_ENTRYPOINT:-<unset>}$(case "${CLAUDE_CODE_ENTRYPOINT-cli}" in cli) ;; *) { [ -n "${NO_COLOR:-}" ] || [ -n "${FORCE_COLOR:-}" ]; } || echo " (colour suppressed: not a terminal session)" ;; esac)"
+  # Computed before the echo rather than inside it. bash 3.2, which is what
+  # macOS ships, cannot parse a `case` inside $( ): the first unparenthesised
+  # `)` in a pattern closes the substitution instead of ending the pattern, and
+  # the whole file then fails to parse. Every flag in this script died on it.
+  local entry_note=""
+  case "${CLAUDE_CODE_ENTRYPOINT-cli}" in
+    cli) ;;
+    *) { [ -n "${NO_COLOR:-}" ] || [ -n "${FORCE_COLOR:-}" ]; } ||
+         entry_note=" (colour suppressed: not a terminal session)" ;;
+  esac
+  echo "  entrypoint      ${CLAUDE_CODE_ENTRYPOINT:-<unset>}$entry_note"
   echo "  elapsed         $CT_ELAPSED"
   echo "  slow after      $([ "$CT_SLOW_AFTER" -gt 0 ] 2>/dev/null && echo "${CT_SLOW_AFTER}s in $CT_SLOW_COLOR" || echo "off")"
   echo "  idle marker     $([ "$CT_IDLE_AFTER" -gt 0 ] 2>/dev/null && echo "after ${CT_IDLE_AFTER}s" || echo "off")"
