@@ -387,7 +387,18 @@ echo "fenced code blocks carry a language"
 # fix in bulk later. `text` is the right answer for terminal output.
 fence_bad=""
 for f in README.md CONTRIBUTING.md; do
-  n="$(awk '/^```/{c++; if (c%2==1 && $0=="```") b++} END{print b+0}' "$f")"
+  # A fence may be indented up to three spaces, may carry trailing whitespace,
+  # and may use more than three backticks. Matching only a bare ``` at column 1
+  # lets all three through untagged.
+  n="$(awk '
+    {
+      line = $0
+      sub(/^[ ]{0,3}/, "", line)
+      sub(/[[:space:]]+$/, "", line)
+      if (line ~ /^`+$/ && length(line) >= 3) { c++; if (c % 2 == 1) b++ }
+      else if (line ~ /^`{3,}[^`]/) { c++ }
+    }
+    END { print b + 0 }' "$f")"
   [ "$n" -eq 0 ] || fence_bad="$fence_bad $f:$n"
 done
 if [ -n "$fence_bad" ]; then

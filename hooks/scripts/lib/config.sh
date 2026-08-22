@@ -715,7 +715,7 @@ ct_facts_path() {
 # Append one finished session and drop anything past the retention limit.
 # Fields: when, seconds, turns, waited, idle, failed tools.
 ct_history_append() {
-  local file limit tmp lock have_lock=0 tries
+  local file limit tmp lock dead have_lock=0 tries
   file="$(ct_history_path)"
   mkdir -p "$(dirname "$file")" 2>/dev/null || return 0
 
@@ -739,7 +739,7 @@ ct_history_append() {
   # rather than per message.
   lock="$file.lock"
   tries=0
-  while [ "$tries" -lt 5 ]; do
+  while [ "$tries" -lt 25 ]; do
     if mkdir "$lock" 2>/dev/null; then have_lock=1; break; fi
     # A lock left behind by a process that died between the mkdir and the
     # rmdir is not a competitor. Nothing ever clears it, so every later call
@@ -747,17 +747,35 @@ ct_history_append() {
     # silently stops working for the life of the installation and the file
     # grows without bound. Nothing holds this longer than a `tail` takes, so
     # one older than a minute is debris.
+    #
+    # Reclaim by renaming rather than by removing in place. `mv` succeeds for
+    # exactly one racer, so two processes that both judge the lock stale
+    # cannot both delete it and then both believe they hold the one they went
+    # on to create. Whoever wins the rename owns the debris and clears it; the
+    # loser's mv fails and it simply retries the mkdir.
     if [ -n "$(find "$lock" -maxdepth 0 -mmin +1 2>/dev/null)" ]; then
-      rmdir "$lock" 2>/dev/null || true
-      if mkdir "$lock" 2>/dev/null; then have_lock=1; break; fi
+      dead="$lock.dead.$$.${RANDOM:-0}"
+      if mv "$lock" "$dead" 2>/dev/null; then
+        rmdir "$dead" 2>/dev/null || rm -rf "$dead" 2>/dev/null || true
+      fi
+      # Counted like any other attempt. A `continue` that skipped this would
+      # spin forever if the rename kept failing while the lock stayed stale,
+      # and a hook that hangs is worse than a history file that is one line
+      # over its limit.
+      tries=$((tries + 1))
+      continue
     fi
     tries=$((tries + 1))
     sleep 0.02 2>/dev/null || true
   done
 
-  # The append happens whether or not the lock was won. Losing the lock costs
-  # this record its protection from a concurrent trim; refusing to append
-  # would cost the record itself, which is worse.
+  # The append happens whether or not the lock was won, and that is a
+  # deliberate trade rather than an oversight. Waiting indefinitely would hang
+  # a hook; giving up would drop the session's only record. Appending
+  # unprotected risks one line to a trim that is already in flight, and only
+  # after half a second of contention on an operation that takes about a
+  # millisecond. So: with the lock, no append can be lost. Without it, this
+  # one might be. What cannot happen is the record never being written.
   printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
     "$(ct_now iso)" "${1:-0}" "${2:-0}" "${3:-0}" "${4:-0}" "${5:-0}" >> "$file" 2>/dev/null || {
       if [ "$have_lock" -eq 1 ]; then rmdir "$lock" 2>/dev/null || true; fi
