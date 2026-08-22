@@ -45,6 +45,21 @@ refutes() {
 # skip is never mistaken for a pass.
 skip() { PASS=$((PASS + 1)); printf '  SKIP %s\n         reason:   %s\n' "$1" "$2"; }
 
+# Compare against a wall-clock value that can tick between two reads. The
+# reference is sampled either side of the call and either is accepted: a minute
+# boundary crossing mid-assertion is the clock moving, not the code being
+# wrong. Three of these used to race, and a single one failing showed up in CI
+# as "the suite reports 608" rather than as a failure, because tools/check-docs.sh
+# reads only the passed count.
+is_clock() {
+  local label="$1" ref1="$2" actual="$3" ref2="$4"
+  if [ "$actual" = "$ref1" ] || [ "$actual" = "$ref2" ]; then
+    pass "$label"
+  else
+    fail "$label" "$ref1 or $ref2" "$actual"
+  fi
+}
+
 # Assert a number is within a tolerance of the expected one. Used for values
 # derived from the wall clock, where a test that pins an exact second races
 # the code it is testing on a slow runner. The tolerance is chosen to still
@@ -241,18 +256,21 @@ CT_TZ="Asia/Tokyo"
 # priming the memoised probe, and assert the pinned zone is ignored rather
 # than rendered as UTC.
 CT_TZ_SUPPORTED="no"
-is "an unhonourable zone falls back to local time" "$(date '+%H:%M')" "$(ct_now short)"
+cl_ref1="$(date '+%H:%M')"; cl_got="$(ct_now short)"; cl_ref2="$(date '+%H:%M')"
+is_clock "an unhonourable zone falls back to local time" "$cl_ref1" "$cl_got" "$cl_ref2"
 if ct_tz_unhonoured; then pass "a pinned but unsupported zone is reported"; else fail "a pinned but unsupported zone is reported" "true" "false"; fi
 
 # shellcheck disable=SC2034  # read by the sourced library
 CT_TZ_SUPPORTED="yes"
 if ct_tz_supported; then
-  is "a supported zone is applied" "$(TZ=Asia/Tokyo date '+%H:%M')" "$(ct_now short)"
+  cl_ref1="$(TZ=Asia/Tokyo date '+%H:%M')"; cl_got="$(ct_now short)"; cl_ref2="$(TZ=Asia/Tokyo date '+%H:%M')"
+  is_clock "a supported zone is applied" "$cl_ref1" "$cl_got" "$cl_ref2"
 else
   echo "  skip a supported zone is applied (no timezone database)"
 fi
 CT_TZ="UTC"
-is "UTC is honoured with or without a timezone database" "$(TZ=UTC date '+%H:%M')" "$(ct_now short)"
+cl_ref1="$(TZ=UTC date '+%H:%M')"; cl_got="$(ct_now short)"; cl_ref2="$(TZ=UTC date '+%H:%M')"
+is_clock "UTC is honoured with or without a timezone database" "$cl_ref1" "$cl_got" "$cl_ref2"
 
 CT_TZ=""
 if ct_tz_unhonoured; then fail "no pinned zone is never reported as unhonoured" "false" "true"; else pass "no pinned zone is never reported as unhonoured"; fi

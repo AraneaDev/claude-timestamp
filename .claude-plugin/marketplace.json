@@ -9,7 +9,7 @@
     {
       "name": "claude-timestamp",
       "source": "./",
-      "description": "Shows the local time and turn duration on every message, and tells Claude when each prompt was sent."
+      "description": "Local time and turn duration on every message, the tool behind a slow turn, and a summary of where each session's time went."
     }
   ]
 }

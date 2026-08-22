@@ -2,7 +2,7 @@
   "name": "claude-timestamp",
   "displayName": "Claude Timestamp",
   "version": "0.0.6",
-  "description": "Shows the local time on every message and tells Claude when each prompt was sent, so you can scan a conversation, see how long each turn took, and reference earlier blocks.",
+  "description": "Stamps every message with the local time and how long the turn took, names the tool behind a slow turn, and reports where a session's time actually went. Claude receives the send time of each prompt, so it can reason about when things happened.",
   "author": {
     "name": "AraneaDev",
     "url": "https://github.com/AraneaDev"
@@ -14,9 +14,11 @@
     "timestamps",
     "time",
     "clock",
-    "hooks",
     "elapsed",
+    "tool-timing",
+    "session-summary",
     "session-tracking",
+    "hooks",
     "productivity"
   ]
 }

@@ -432,10 +432,19 @@ else
 fi
 
 echo "assertion count"
-actual="$(bash tests/run.sh 2>/dev/null | sed -n 's/^\([0-9]*\) passed.*/\1/p' | tail -1)"
+# Read BOTH numbers. A failing assertion lowers the passed count, so reading
+# only "N passed" reports a broken suite as a stale README and sends whoever
+# is looking to the wrong file. That happened: one flaky clock assertion showed
+# up here as "the suite reports 608" and nothing said a test had failed.
+tail_line="$(bash tests/run.sh 2>/dev/null | sed -n 's/^\([0-9]*\) passed, \([0-9]*\) failed.*/\1 \2/p' | tail -1)"
+actual="${tail_line%% *}"
+failed="${tail_line##* }"
 claimed="$(sed -n 's/.*# \([0-9]*\) assertions.*/\1/p' README.md | head -1)"
-if [ -z "$actual" ]; then
+if [ -z "$tail_line" ]; then
   note "could not read a count out of the test run"
+  status=1
+elif [ "$failed" != "0" ]; then
+  note "the suite is failing: $failed assertion(s). Fix the suite before reading anything into the count."
   status=1
 elif [ "$actual" != "$claimed" ]; then
   note "README says $claimed assertions, the suite reports $actual"
@@ -462,6 +471,10 @@ echo "test count badge"
 badge_count="$(sed -n 's/.*badge\/tests-\([0-9]*\)%20passing.*/\1/p' README.md | head -1)"
 if [ -z "$badge_count" ]; then
   note "no test-count badge found"
+elif [ "$failed" != "0" ]; then
+  # Already reported above. Comparing a badge against a count depressed by a
+  # failure would name the badge as the problem twice over.
+  note "not compared: the suite is failing"
 elif [ "$badge_count" != "$actual" ]; then
   note "the badge says $badge_count tests, the suite reports $actual"
   status=1
