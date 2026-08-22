@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.7](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.6...v0.0.7) (2026-08-22)
+
+
+### Documentation
+
+* describe what the plugin grew into ([#28](https://github.com/AraneaDev/claude-timestamp/issues/28)) ([9a12659](https://github.com/AraneaDev/claude-timestamp/commit/9a126596d075807290fa9a604fea4a366a68d871))
+
 ## [0.0.6](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.5...v0.0.6) (2026-08-22)
 
 Closes all 21 findings from a whole-codebase logic, security and performance
