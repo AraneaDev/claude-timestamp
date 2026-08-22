@@ -62,7 +62,12 @@ done
 # already-cheap path is not something this plugin is optimising away.
 if [ "$_ct_timing_wanted" -eq 0 ]; then
   for _ct_f in "$_CT_STATE_DIR"/*; do
-    case "$_ct_f" in
+    # Match the ENTRY name, not the whole path. $_ct_f is absolute, and a
+    # $TMPDIR with a dot anywhere in it -- macOS hands out
+    # /var/folders/xy/....../T by default -- makes `*.*` match every entry, so
+    # the scan skips every session and tool timing never turns on for a
+    # session that predates the staged flag.
+    case "${_ct_f##*/}" in
       *.*) continue ;;
     esac
     [ -e "$_ct_f" ] || continue

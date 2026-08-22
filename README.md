@@ -6,7 +6,7 @@
 
 [![Release](https://img.shields.io/github/v/release/AraneaDev/claude-timestamp)](https://github.com/AraneaDev/claude-timestamp/releases)
 [![CI](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml/badge.svg)](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-608%20passing-2b8a3e)](tests/run.sh)
+[![Tests](https://img.shields.io/badge/tests-609%20passing-2b8a3e)](tests/run.sh)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-364fc7)](#platform-notes)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
@@ -45,7 +45,7 @@ There is nothing to set up. The defaults work as soon as it is installed, and
   never cover the same seconds, so the two add up to no more than the session
   itself. Optionally which tools were slowest and how many calls failed.
 
-```
+```text
 claude-timestamp: session lasted 1h30m over 12 turns, 24m18s of it waiting, 35m00s away.
 slowest tools: Bash 41.2s (18 calls), WebFetch 8.1s (1 call), Read 2.0s (37 calls). 2 failed
 ```
@@ -68,7 +68,7 @@ enters the transcript and never reaches the model.
 `jq`, and `bash`. That is the whole list. If `jq` is missing the plugin says so
 once and then does nothing, rather than failing quietly.
 
-```
+```text
 macOS           brew install jq
 Debian/Ubuntu   sudo apt-get install jq
 Windows         winget install jqlang.jq
@@ -108,7 +108,7 @@ when every part inside it is empty:
 Every line below was produced by running the renderer, not written by hand.
 The first column is the setting, the second is what appears on screen.
 
-```
+```text
 MARKER=                                          renders as
 
 [{%date }%time{ %elapsed}{ · %tool}]             [13:22:13 +2m14s · Bash 1m58s]
@@ -278,7 +278,7 @@ A value the plugin cannot use is replaced by its default rather than silently
 doing nothing, and it is named at the start of the next session and by
 `--doctor`:
 
-```
+```text
 claude-timestamp: some settings could not be used.
   COLOR=banana is not valid, using dim
   SLOW_AFTER=soon is not valid, using 60
@@ -399,7 +399,7 @@ no database.
 ## Development
 
 ```bash
-bash tests/run.sh                                    # 608 assertions, no framework
+bash tests/run.sh                                    # 609 assertions, no framework
 shellcheck -S style -e SC1091 hooks/scripts/**/*.sh  # clean
 bash tools/check-docs.sh                             # README against the code
 ```

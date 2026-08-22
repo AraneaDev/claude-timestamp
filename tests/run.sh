@@ -2356,6 +2356,24 @@ if command -v jq >/dev/null 2>&1; then
             | bash "$SCRIPTS/post-tool-use.sh" >/dev/null
           cat "$(ct_state_file tt).tools" 2>/dev/null )"
   contains "tool timing: follows the payload's project, not the process's cwd" "Bash 1.500 ok" "$out"
+
+  # The legacy fallback scan looks for a session with no staged flag. It
+  # matched the WHOLE PATH against *.*, so any TMPDIR with a dot in it -- macOS
+  # hands out /var/folders/xy/....../T -- made every entry look like a dotted
+  # sidecar file, the scan found no sessions, and tool timing silently never
+  # turned on for a session that predates the flag.
+  DT="$WORK/dotted.v1.2"
+  rm -rf "$DT"; mkdir -p "$DT/home/.claude" "$DT/tmp"
+  printf 'TOOL_TIMING=on\n' > "$DT/home/.claude/claude-timestamp.conf"
+  out="$( unset CLAUDE_TIMESTAMP_CONFIG
+          HOME="$DT/home"; export HOME
+          TMPDIR="$DT/tmp"; export TMPDIR
+          dotdir="$TMPDIR/claude-timestamp-$(id -u)"
+          mkdir -p "$dotdir"; printf '%s' "$(date +%s)" > "$dotdir/legacy"
+          printf '{"session_id":"legacy","tool_name":"Bash","hook_event_name":"PostToolUse","duration_ms":1500}' \
+            | bash "$SCRIPTS/post-tool-use.sh" >/dev/null 2>&1
+          cat "$dotdir/legacy.tools" 2>/dev/null )"
+  contains "tool timing: the legacy scan survives a dot in TMPDIR" "Bash 1.500 ok" "$out"
 fi
 
 echo

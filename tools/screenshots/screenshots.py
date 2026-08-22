@@ -42,7 +42,7 @@ handles extremely well and a lossy setting would only blur; save_image and
 save_animation are the two functions every shot's output passes through, so a
 future shot cannot quietly stay PNG.
 """
-import fcntl, json, os, pickle, pty, select, struct, subprocess, sys, termios, time
+import fcntl, json, os, pickle, pty, select, struct, stat, subprocess, sys, termios, time
 from pathlib import Path
 
 import pyte
@@ -52,6 +52,38 @@ ROOT = Path(__file__).resolve().parents[2]
 ASSETS = ROOT / "assets"
 SCRIPTS = ROOT / "hooks" / "scripts"
 WORK = Path(os.environ.get("TMPDIR", "/tmp")) / "claude-timestamp-shots"
+
+
+def _secure_work():
+    """Make WORK exist, be ours, and be private, or refuse to run.
+
+    The path is predictable and sits in a directory anyone can write to, and
+    the shots stage a HOME, a config and a state tree underneath it. Somebody
+    who gets there first can plant a symlink and have a shot write through it.
+
+    Not mkdtemp(): the path is deliberately stable across runs. `claude`
+    trusts a working directory once it has seen it, and the picker shot
+    depends on that trust surviving, so a fresh directory every run would
+    reintroduce the workspace-trust dialog its docstring warns about.
+
+    So: create it privately if it is not there, and if it is, insist it is a
+    real directory that we own before writing anything into it. lstat, not
+    stat, because a symlink is the case being refused.
+    """
+    try:
+        st = os.lstat(WORK)
+    except FileNotFoundError:
+        WORK.parent.mkdir(parents=True, exist_ok=True)
+        WORK.mkdir(mode=0o700)
+        return
+    if stat.S_ISLNK(st.st_mode):
+        raise SystemExit(f"{WORK} is a symlink; refusing to write through it.")
+    if not stat.S_ISDIR(st.st_mode):
+        raise SystemExit(f"{WORK} exists and is not a directory.")
+    if st.st_uid != os.geteuid():
+        raise SystemExit(f"{WORK} is owned by uid {st.st_uid}, not by you.")
+    if st.st_mode & 0o077:
+        os.chmod(WORK, 0o700)
 
 # GitHub's dark canvas, so the images sit naturally in a README.
 PALETTE = {
@@ -893,6 +925,8 @@ SHOTS = {"hero": shot_hero, "picker": shot_picker, "wizard": shot_wizard,
 if __name__ == "__main__":
     which = sys.argv[1] if len(sys.argv) > 1 else "all"
     names = list(SHOTS) if which == "all" else [which]
+    # Before any shot stages a HOME, a config or a state tree under WORK.
+    _secure_work()
     for n in names:
         if n not in SHOTS:
             raise SystemExit(f"unknown shot: {n}. Pick from: {', '.join(SHOTS)}, all")

@@ -353,15 +353,47 @@ echo "config values are written the same way by both writers"
 # and TZ did not. There is no runtime test for this, because valid_tz blocks
 # every TZ value that would show the difference -- so the invariant lives here,
 # where it can actually fail.
+# Each writer is checked in its own body. Scanning the whole file would let a
+# correct line in write_config satisfy the check while write_project_config
+# wrote the same key raw.
 cv_missing=""
+cv_wc="$(awk '/^write_config\(\) \{/,/^\}/' hooks/scripts/setup.sh)"
+cv_wp="$(awk '/^write_project_config\(\) \{/,/^\}/' hooks/scripts/setup.sh)"
 for key in TZ MARKER DISPLAY_FORMAT CONTEXT_FORMAT; do
   # shellcheck disable=SC2016  # a literal grep pattern, not a subshell
-  grep -q "^$key=\$(conf_value " hooks/scripts/setup.sh || cv_missing="$cv_missing $key"
+  printf '%s\n' "$cv_wc" | grep -E "^$key=\\\$\(conf_value " >/dev/null ||
+    cv_missing="$cv_missing write_config:$key"
 done
+# write_project_config names its keys at run time, so there is one emit line to
+# check rather than four: it must render through conf_value, and it must not
+# also carry a raw "${key}=${value}" form that would bypass it. The carried
+# branch is exempt -- it re-emits text conf_value already quoted once.
+# shellcheck disable=SC2016  # literal source text to find, not an expansion
+printf '%s\n' "$cv_wp" | grep -F 'conf_value "$value"' >/dev/null ||
+  cv_missing="$cv_missing write_project_config:no-conf_value"
+# shellcheck disable=SC2016  # literal source text to find, not an expansion
+if [ "$(printf '%s\n' "$cv_wp" | grep -cF '${key}=${value}')" -gt 1 ]; then
+  cv_missing="$cv_missing write_project_config:raw-emit"
+fi
 if [ -n "$cv_missing" ]; then
   gate conf-value-symmetry 0 "free-text keys interpolated without conf_value:$cv_missing"
 else
   gate conf-value-symmetry 1 "every free-text config value is written through conf_value"
+fi
+
+echo "fenced code blocks carry a language"
+# A bare ``` renders without highlighting and trips MD040 in any Markdown
+# linter a contributor happens to run. Cheap to keep consistent, annoying to
+# fix in bulk later. `text` is the right answer for terminal output.
+fence_bad=""
+for f in README.md CONTRIBUTING.md; do
+  n="$(awk '/^```/{c++; if (c%2==1 && $0=="```") b++} END{print b+0}' "$f")"
+  [ "$n" -eq 0 ] || fence_bad="$fence_bad $f:$n"
+done
+if [ -n "$fence_bad" ]; then
+  gate fenced-language 0 "fenced blocks with no language:$fence_bad"
+else
+  gate fenced-language 1 "every fenced code block names a language"
 fi
 
 echo "prose style"

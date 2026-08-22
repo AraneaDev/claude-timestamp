@@ -715,56 +715,67 @@ ct_facts_path() {
 # Append one finished session and drop anything past the retention limit.
 # Fields: when, seconds, turns, waited, idle, failed tools.
 ct_history_append() {
-  local file limit tmp lock
+  local file limit tmp lock have_lock=0 tries
   file="$(ct_history_path)"
   mkdir -p "$(dirname "$file")" 2>/dev/null || return 0
-
-  printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
-    "$(ct_now iso)" "${1:-0}" "${2:-0}" "${3:-0}" "${4:-0}" "${5:-0}" >> "$file" 2>/dev/null || return 0
 
   limit="${CT_HISTORY_LIMIT:-200}"
   case "$limit" in ''|*[!0-9]*) limit=200 ;; esac
   [ "$limit" -lt 1 ] && limit=1
 
+  # One lock covers the append AND the trim, because the two race with each
+  # other, not just trim against trim.
+  #
+  # The trim is a read followed by a replace: `tail` copies the last $limit
+  # lines out, then `mv` puts them back. A line appended between those two
+  # steps lands in the file the `mv` is about to overwrite, so it is gone. An
+  # earlier version of this locked only the trim, which serialised trims
+  # against each other and left that window wide open -- the comment claimed a
+  # guarantee the code did not provide.
+  #
+  # mkdir is the lock: atomic on every filesystem this runs on, no extra tool.
+  # Acquisition retries briefly rather than giving up at once, because the
+  # holder only ever needs as long as a `tail`, and this runs once per session
+  # rather than per message.
+  lock="$file.lock"
+  tries=0
+  while [ "$tries" -lt 5 ]; do
+    if mkdir "$lock" 2>/dev/null; then have_lock=1; break; fi
+    # A lock left behind by a process that died between the mkdir and the
+    # rmdir is not a competitor. Nothing ever clears it, so every later call
+    # would find it, fail to acquire, and skip the trim -- HISTORY_LIMIT
+    # silently stops working for the life of the installation and the file
+    # grows without bound. Nothing holds this longer than a `tail` takes, so
+    # one older than a minute is debris.
+    if [ -n "$(find "$lock" -maxdepth 0 -mmin +1 2>/dev/null)" ]; then
+      rmdir "$lock" 2>/dev/null || true
+      if mkdir "$lock" 2>/dev/null; then have_lock=1; break; fi
+    fi
+    tries=$((tries + 1))
+    sleep 0.02 2>/dev/null || true
+  done
+
+  # The append happens whether or not the lock was won. Losing the lock costs
+  # this record its protection from a concurrent trim; refusing to append
+  # would cost the record itself, which is worse.
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$(ct_now iso)" "${1:-0}" "${2:-0}" "${3:-0}" "${4:-0}" "${5:-0}" >> "$file" 2>/dev/null || {
+      if [ "$have_lock" -eq 1 ]; then rmdir "$lock" 2>/dev/null || true; fi
+      return 0
+    }
+
   # Rewrite only when the file has actually outgrown the limit, so the common
   # case is a plain append.
-  #
-  # The append itself is one short line and needs no lock: it is a single
-  # write to a file opened O_APPEND. The trim does need one, because it is a
-  # read followed by a replace, and a session ending in the same second would
-  # otherwise have its line dropped by the copy that started first. mkdir is
-  # the lock because it is atomic on every filesystem this runs on and needs
-  # no extra tool.
-  if [ "$(wc -l < "$file" 2>/dev/null || echo 0)" -gt "$limit" ]; then
-    lock="$file.lock"
-    if ! mkdir "$lock" 2>/dev/null; then
-      # Losing the race to a live competitor is fine: it is trimming right
-      # now, so skipping is the same outcome.
-      #
-      # A lock left behind by a process that died between the mkdir and the
-      # rmdir is not the same outcome at all. Nothing ever clears it, so every
-      # later append finds the file over its limit, fails to acquire, and skips
-      # -- HISTORY_LIMIT silently stops working for the life of the
-      # installation and the file grows without bound. Nothing should hold this
-      # lock for longer than a `tail` takes, so one older than a minute is
-      # debris rather than a competitor. Clearing it costs a retry; leaving it
-      # costs the setting.
-      if [ -n "$(find "$lock" -maxdepth 0 -mmin +1 2>/dev/null)" ]; then
-        rmdir "$lock" 2>/dev/null || true
-        mkdir "$lock" 2>/dev/null || lock=""
-      else
-        lock=""
-      fi
-    fi
-    if [ -n "$lock" ]; then
+  if [ "$have_lock" -eq 1 ]; then
+    if [ "$(wc -l < "$file" 2>/dev/null || echo 0)" -gt "$limit" ]; then
       tmp="$file.$$"
       if tail -n "$limit" "$file" > "$tmp" 2>/dev/null; then
         mv "$tmp" "$file" 2>/dev/null || rm -f "$tmp"
       else
         rm -f "$tmp"
       fi
-      rmdir "$lock" 2>/dev/null
     fi
+    rmdir "$lock" 2>/dev/null || true
   fi
   return 0
 }
