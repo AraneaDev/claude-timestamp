@@ -823,7 +823,11 @@ def shot_session():
     conf = work / "config.conf"
     conf.write_text(SESSION_CONFIG)
     tmp = work / "tmp"
-    state_dir = tmp / "claude-timestamp"
+    # Mirrors ct_state_dir_var in hooks/scripts/lib/state.sh, which is per-uid:
+    # "${TMPDIR:-/tmp}/claude-timestamp-${UID:-0}". Planting state under the
+    # old shared name leaves session-end.sh with nothing to summarise, and it
+    # then prints nothing at all rather than failing loudly.
+    state_dir = tmp / f"claude-timestamp-{os.getuid()}"
     state_dir.mkdir(parents=True, exist_ok=True)
 
     env = dict(os.environ)
@@ -835,11 +839,18 @@ def shot_session():
     base = state_dir / sid
     now = int(time.time())
 
-    # A gap since the last message, well past IDLE_AFTER, so the divider
-    # shows. No turn is left open (base itself is never written), so the
-    # marker on this message carries a time and nothing else -- exactly what
+    # The away figure is measured and staged by user-prompt-submit.sh, which is
+    # the only hook that sees both ends of the gap; message-display.sh draws it
+    # and clears it so a break is marked exactly once. Planting ".last" alone
+    # no longer produces a divider -- that was the pre-remediation mechanism,
+    # where the display hook derived the gap itself and double-counted the
+    # model's own latency into it. Plant ".away" the way the prompt hook does.
+    #
+    # No turn is left open (base itself is never written), so the marker on
+    # this message carries a time and nothing else -- exactly what
     # message-display.sh draws for a message with no turn in progress.
     (state_dir / f"{sid}.last").write_text(str(now - 7200))
+    (state_dir / f"{sid}.away").write_text("7200")
     proc = subprocess.run(
         ["bash", str(SCRIPTS / "message-display.sh")],
         input=json.dumps({
