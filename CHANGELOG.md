@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.6](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.5...v0.0.6) (2026-08-22)
+
+
+### Features
+
+* marker templates with per-part colour, and the audit's 21 findings closed ([b64c15c](https://github.com/AraneaDev/claude-timestamp/commit/b64c15c31cce6de4d713c6b99b0a380851c29ac8))
+
 ## [0.0.5](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.4...v0.0.5) (2026-08-20)
 
 
