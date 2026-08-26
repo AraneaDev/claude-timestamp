@@ -346,7 +346,7 @@ doctor() {
   # Everything else here describes what the plugin intends to draw; this is the
   # only line that reports what it has drawn, which is the difference between
   # an install to repair and a client discarding what it was handed.
-  local drawn_file drawn_at drawn_age
+  local drawn_file drawn_at drawn_age drawn_now
   drawn_file="$(ct_drawn_path)"
   drawn_at=""
   [ -r "$drawn_file" ] && drawn_at="$(cat "$drawn_file" 2>/dev/null)"
@@ -357,11 +357,23 @@ doctor() {
       echo "                  session that has shown none yet is expected here"
       ;;
     *)
-      drawn_age=$(( $(ct_epoch) - drawn_at ))
-      [ "$drawn_age" -lt 0 ] && drawn_age=0
-      # ct_format_duration, not ct_format_elapsed: the latter prefixes a "+"
-      # because it renders a turn's length, and "+3s ago" reads as neither.
-      echo "  marker drawn    $(ct_format_duration "$drawn_age") ago from this client ($(ct_client_key))"
+      # An age needs both ends. ct_epoch reports 0 when `date` cannot be
+      # reached, and subtracting a real time from that gives a large negative
+      # number that the clamp below would report as "0s ago" -- the most
+      # reassuring answer possible at the one moment nothing is known. Say so
+      # instead. The clamp still stands for the case it was written for, a
+      # clock that stepped backwards over a record made moments ago.
+      drawn_now="$(ct_epoch)"
+      if [ "$drawn_now" = "0" ]; then
+        echo "  marker drawn    time unknown: this client has drawn, but the"
+        echo "                  clock cannot be read to say how long ago"
+      else
+        drawn_age=$(( drawn_now - drawn_at ))
+        [ "$drawn_age" -lt 0 ] && drawn_age=0
+        # ct_format_duration, not ct_format_elapsed: the latter prefixes a "+"
+        # because it renders a turn's length, and "+3s ago" reads as neither.
+        echo "  marker drawn    $(ct_format_duration "$drawn_age") ago from this client ($(ct_client_key))"
+      fi
       ;;
   esac
   echo "  elapsed         $CT_ELAPSED"

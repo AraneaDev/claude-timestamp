@@ -2932,6 +2932,22 @@ refutes "drawn: nothing recorded for a later batch" test -r "$(drawn_for cli)"
 
 rm -f "$CLAUDE_TIMESTAMP_DRAWN".*
 
+# doctor must not turn "I cannot read the clock" into "a marker was just
+# drawn". ct_epoch reports 0 when `date` cannot be reached, which makes every
+# age negative, and clamping a negative age to zero would state the most
+# reassuring thing possible at the exact moment nothing is known. The clamp is
+# still right for a clock that stepped backwards, which is why the two cases
+# are told apart rather than merged.
+NO_DATE="$WORK/no-date.sh"
+cat > "$NO_DATE" <<'EOF'
+date() { return 1; }
+EOF
+printf '%s' 1700000000 > "${CLAUDE_TIMESTAMP_DRAWN}.cli"
+out="$(BASH_ENV="$NO_DATE" CLAUDE_CODE_ENTRYPOINT=cli bash "$SCRIPTS/setup.sh" --doctor 2>&1 || true)"
+lacks "doctor: an unreadable clock is not reported as a fresh marker" "0s ago" "$out"
+contains "doctor: an unreadable clock is reported as unknown" "time unknown" "$out"
+rm -f "$CLAUDE_TIMESTAMP_DRAWN".*
+
 echo
 echo "enabled switch"
 
