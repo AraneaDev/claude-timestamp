@@ -1689,17 +1689,25 @@ if command -v jq >/dev/null 2>&1; then
   # that cannot use jq to record that jq is missing has to hand-build the file
   # instead, so the absence of a facts file stops meaning two different things.
   #
-  # PATH is a shim rather than /nonexistent here, because writing the file at
-  # all needs `date`, `mv` and `rm`. Emptying PATH tests that the hook survives
-  # having nothing; this tests what it records when only jq is gone.
-  NOJQ_BIN="$WORK/nojq-bin"
-  mkdir -p "$NOJQ_BIN"
-  for tool in date mv rm; do
-    ln -sf "$(command -v "$tool")" "$NOJQ_BIN/$tool"
-  done
+  # `command` is shadowed for this one subprocess rather than PATH being
+  # emptied, because writing the file needs `date`, `mv` and `rm`, and a PATH
+  # built to hold those and not jq is not portable: Git Bash has no working
+  # symlinks, and a PATH stripped to one directory loses the DLLs its
+  # utilities load. Shadowing hides jq alone and leaves the rest of the
+  # machine as it is. Emptying PATH, just above, tests the other thing: that
+  # the hook survives having nothing at all.
+  NO_JQ="$WORK/no-jq.sh"
+  cat > "$NO_JQ" <<'EOF'
+command() {
+  case "$*" in
+    "-v jq") return 1 ;;
+    *) builtin command "$@" ;;
+  esac
+}
+EOF
   rm -f "$CLAUDE_TIMESTAMP_FACTS"
   printf '{"session_id":"x"}' \
-    | PATH="$NOJQ_BIN" CLAUDE_CODE_ENTRYPOINT=claude-desktop "$BASH" "$SCRIPTS/session-start.sh" >/dev/null 2>&1 || true
+    | BASH_ENV="$NO_JQ" CLAUDE_CODE_ENTRYPOINT=claude-desktop bash "$SCRIPTS/session-start.sh" >/dev/null 2>&1 || true
   asserts "facts: a missing jq is recorded, not merely announced" \
     jq -e '.clients["claude-desktop"].jq == false' "$CLAUDE_TIMESTAMP_FACTS"
   rm -f "$CLAUDE_TIMESTAMP_FACTS"

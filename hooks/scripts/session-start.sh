@@ -64,13 +64,13 @@ if ! command -v jq >/dev/null 2>&1; then
   # needs jq. Another client's entry is restored the next time that client
   # starts a session, and losing it meanwhile costs less than not recording
   # the only client we can currently see anything about.
-  # Checked before the redirect opens anything: without `mv` there is no way to
-  # put the file in place, and without `rm` no way to clear the temp file away
-  # again, so a PATH stripped of both would leave litter behind for a write
-  # that was never going to land.
+  # Both checked before the redirect opens anything: without `mv` there is no
+  # way to put the file in place, and without `rm` no way to clear the temp
+  # file away again. Opening it first and finding out afterwards leaves litter
+  # behind for a write that was never going to land.
   ct_facts="${CLAUDE_TIMESTAMP_FACTS:-${HOME:-}/.claude/claude-timestamp.facts.json}"
   ct_tmp="$ct_facts.$$"
-  if command -v mv >/dev/null 2>&1 && printf '{"facts_version":2,"clients":{"%s":{"jq":false,"written_at":%s}}}\n' \
+  if command -v mv >/dev/null 2>&1 && command -v rm >/dev/null 2>&1 && printf '{"facts_version":2,"clients":{"%s":{"jq":false,"written_at":%s}}}\n' \
        "$(ct_client_key)" "$(ct_epoch)" > "$ct_tmp" 2>/dev/null; then
     mv "$ct_tmp" "$ct_facts" 2>/dev/null || rm -f "$ct_tmp" 2>/dev/null
   else
