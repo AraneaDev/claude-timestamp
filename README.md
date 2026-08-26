@@ -7,7 +7,7 @@
 
 [![Release](https://img.shields.io/github/v/release/AraneaDev/claude-timestamp)](https://github.com/AraneaDev/claude-timestamp/releases)
 [![CI](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml/badge.svg)](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-609%20passing-2b8a3e)](tests/run.sh)
+[![Tests](https://img.shields.io/badge/tests-614%20passing-2b8a3e)](tests/run.sh)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-364fc7)](#platform-notes)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
@@ -75,6 +75,10 @@ Debian/Ubuntu   sudo apt-get install jq
 Windows         winget install jqlang.jq
 ```
 
+If you use Claude Code in WSL and the desktop app on Windows, those count as two
+machines here and each needs its own copy. See [Windows: WSL and the desktop app
+are separate installs](#windows-wsl-and-the-desktop-app-are-separate-installs).
+
 ## Install
 
 ```bash
@@ -84,6 +88,57 @@ claude plugin install claude-timestamp@aranea-claude-tools
 
 Hooks are bound when a session starts, so start a new session before markers
 appear. An already-running session will not pick the plugin up.
+
+### Where it works
+
+This is a Claude Code plugin, and it runs wherever Claude Code itself runs: the
+terminal, the IDE extensions, and the **Code** tab of the desktop app. The
+**Chat** and **Cowork** tabs are not Claude Code. They have no hooks and no
+display event to attach a marker to, so nothing here can reach them. Cloud
+sessions on the web read hooks from the repository and from managed settings
+rather than from your `~/.claude`, so a personal install does not apply there
+either.
+
+### Windows: WSL and the desktop app are separate installs
+
+Claude Code in WSL and the desktop app on Windows do not share a home directory.
+WSL has `~/.claude`, Windows has `C:\Users\<you>\.claude`. Install the plugin
+on one side and the other side has nothing installed, and the same goes for `jq`
+and for the settings you picked with `/timestamps`. On macOS and Linux there is
+one home directory, so one install covers everything.
+
+Install both, on each side you actually use.
+
+In WSL:
+
+```bash
+sudo apt-get install jq
+claude plugin marketplace add AraneaDev/claude-timestamp
+claude plugin install claude-timestamp@aranea-claude-tools
+```
+
+On Windows:
+
+```powershell
+winget install jqlang.jq
+claude plugin marketplace add AraneaDev/claude-timestamp
+claude plugin install claude-timestamp@aranea-claude-tools
+```
+
+The marketplace has to be added from the command line. The desktop app's plugin
+browser lists what your configured marketplaces already offer and cannot add
+one, so those two commands are what makes the plugin appear there at all. With
+no separate Windows install of the CLI, ask Claude to run them for you inside a
+**Local** session in the Code tab, which puts them on the Windows side.
+
+Restart the desktop app after installing `jq`. It reads Windows user and system
+environment variables when it launches and never reads your PowerShell profile,
+so a `PATH` that winget changed underneath a running app does not reach it.
+Until it does, every hook exits without drawing anything.
+
+Pick **Local** for the session environment. Plugins do not load in the desktop
+app's WSL sessions, which is Anthropic's limitation rather than this plugin's.
+`bash` itself comes from Git for Windows, which the Code tab already requires.
 
 ## Configure
 
@@ -400,7 +455,7 @@ no database.
 ## Development
 
 ```bash
-bash tests/run.sh                                    # 609 assertions, no framework
+bash tests/run.sh                                    # 614 assertions, no framework
 shellcheck -S style -e SC1091 hooks/scripts/**/*.sh  # clean
 bash tools/check-docs.sh                             # README against the code
 ```
