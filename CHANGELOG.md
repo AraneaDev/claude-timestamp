@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.8](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.7...v0.0.8) (2026-08-26)
+
+
+### Features
+
+* record which client ran, and whether a marker was drawn ([e81d077](https://github.com/AraneaDev/claude-timestamp/commit/e81d077fd37e4f9d9faced5d90e3203ed1a86fe5))
+
 ## [0.0.7](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.6...v0.0.7) (2026-08-22)
 
 
