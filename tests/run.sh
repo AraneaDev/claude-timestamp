@@ -1950,8 +1950,31 @@ else
   fail "history: concurrent appends leave the file at the limit, give or take one skipped trim" \
        "5 or 6 lines" "$lines"
 fi
-is "history: no concurrent append was lost" "6" \
-   "$(cut -f2 "$CLAUDE_TIMESTAMP_HISTORY" | sort -n | tail -1)"
+# This used to assert that the append labelled 6 survived, which is not a
+# property this system has, for two separate reasons.
+#
+# The six writers run concurrently, so they finish in whatever order the
+# scheduler hands out. The trim keeps the last lines in file order, which is
+# completion order and not label order, so the one labelled 6 is trimmed away
+# legitimately whenever it happens to finish early. That is true even with a
+# lock that works perfectly.
+#
+# On top of that, a writer that waits out the lock appends unprotected, which
+# ct_history_append says plainly: with the lock no append can be lost, without
+# it this one might be. On an idle machine that never showed up; under CPU
+# load it cost an append in 6 runs out of 40. Naming a particular survivor is
+# a red build waiting for a busy runner.
+#
+# So assert the property the design does have: whatever survived the trim is
+# intact and distinct. The line count either side of this covers how many
+# survived; this covers whether concurrent writers corrupted each other, which
+# is what a broken lock would actually look like.
+survivors="$(cut -f2 "$CLAUDE_TIMESTAMP_HISTORY")"
+is "history: no surviving append was written over another" \
+   "$(printf '%s\n' "$survivors" | wc -l | tr -d ' ')" \
+   "$(printf '%s\n' "$survivors" | sort -u | wc -l | tr -d ' ')"
+is "history: every surviving append is one that was made" "0" \
+   "$(printf '%s\n' "$survivors" | grep -cvE '^[1-6]$' || true)"
 
 # A lock left behind by a process that died between mkdir and rmdir must not
 # silently defeat HISTORY_LIMIT for the rest of the installation's life.
