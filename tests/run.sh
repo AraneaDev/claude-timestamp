@@ -140,6 +140,7 @@ mkdir -p "$TMPDIR"
 export CLAUDE_TIMESTAMP_CONFIG="$WORK/config.conf"
 export CLAUDE_TIMESTAMP_HISTORY="$WORK/history.tsv"
 export CLAUDE_TIMESTAMP_FACTS="$WORK/facts.json"
+export CLAUDE_TIMESTAMP_DRAWN="$WORK/drawn"
 
 source "$SCRIPTS/lib/config.sh"
 source "$SCRIPTS/lib/state.sh"
@@ -1077,8 +1078,13 @@ echo "stale PreToolUse binding"
 # someone deleting the shim before every supported version has stopped
 # binding PreToolUse; retire the test along with the shim, together.
 asserts "the PreToolUse compatibility shim still exists" test -e "$SCRIPTS/pre-tool-use.sh"
-shim_out="$(printf '{"session_id":"s","tool_use_id":"t1","tool_name":"Bash","hook_event_name":"PreToolUse","tool_input":{"command":"ls -la"}}' \
-  | bash "$SCRIPTS/pre-tool-use.sh" 2>"$WORK/shim.err")"
+# Redirected from a file rather than piped in. The shim exits without ever
+# reading stdin, so a writer on the other end of a pipe can lose the race and
+# die of SIGPIPE, and pipefail then reports the writer's 141 as the pipeline's
+# status. That says nothing about the shim, which is what this measures.
+printf '{"session_id":"s","tool_use_id":"t1","tool_name":"Bash","hook_event_name":"PreToolUse","tool_input":{"command":"ls -la"}}' \
+  > "$WORK/shim.in"
+shim_out="$(bash "$SCRIPTS/pre-tool-use.sh" < "$WORK/shim.in" 2>"$WORK/shim.err")"
 shim_rc=$?
 is "the shim exits 0 on a realistic PreToolUse payload" "0" "$shim_rc"
 is "the shim prints nothing on stdout"                  "" "$shim_out"
@@ -1678,6 +1684,46 @@ if command -v jq >/dev/null 2>&1; then
   is "message display stays silent without jq" "" "$out"
   out="$(printf '{"session_id":"x"}' | PATH=/nonexistent "$BASH" "$SCRIPTS/user-prompt-submit.sh" 2>/dev/null || true)"
   is "prompt submit stays silent without jq" "" "$out"
+
+  # Saying it on screen is not enough: the message is easy to miss, and on a
+  # client that swallows it there is nothing left to look at. The one branch
+  # that cannot use jq to record that jq is missing has to hand-build the file
+  # instead, so the absence of a facts file stops meaning two different things.
+  #
+  # `command` is shadowed for this one subprocess rather than PATH being
+  # emptied, because writing the file needs `date`, `mv` and `rm`, and a PATH
+  # built to hold those and not jq is not portable: Git Bash has no working
+  # symlinks, and a PATH stripped to one directory loses the DLLs its
+  # utilities load. Shadowing hides jq alone and leaves the rest of the
+  # machine as it is. Emptying PATH, just above, tests the other thing: that
+  # the hook survives having nothing at all.
+  NO_JQ="$WORK/no-jq.sh"
+  cat > "$NO_JQ" <<'EOF'
+command() {
+  case "$*" in
+    "-v jq") return 1 ;;
+    *) builtin command "$@" ;;
+  esac
+}
+EOF
+  rm -f "$CLAUDE_TIMESTAMP_FACTS"
+  printf '{"session_id":"x"}' \
+    | BASH_ENV="$NO_JQ" CLAUDE_CODE_ENTRYPOINT=claude-desktop bash "$SCRIPTS/session-start.sh" >/dev/null 2>&1 || true
+  asserts "facts: a missing jq is recorded, not merely announced" \
+    jq -e '.clients["claude-desktop"].jq == false' "$CLAUDE_TIMESTAMP_FACTS"
+  rm -f "$CLAUDE_TIMESTAMP_FACTS"
+
+  # The writer that has jq creates the directory it writes into. The one that
+  # does not has to as well, or the fact that jq is missing goes unrecorded on
+  # exactly the machine where nothing else can record it either.
+  NESTED_FACTS="$WORK/nested-facts/deeper/facts.json"
+  rm -rf "$WORK/nested-facts"
+  printf '{"session_id":"x"}' \
+    | BASH_ENV="$NO_JQ" CLAUDE_TIMESTAMP_FACTS="$NESTED_FACTS" \
+      CLAUDE_CODE_ENTRYPOINT=claude-desktop bash "$SCRIPTS/session-start.sh" >/dev/null 2>&1 || true
+  asserts "facts: the degraded write creates its own directory" \
+    jq -e '.clients["claude-desktop"].jq == false' "$NESTED_FACTS"
+  rm -rf "$WORK/nested-facts"
 fi
 
 echo
@@ -1904,8 +1950,31 @@ else
   fail "history: concurrent appends leave the file at the limit, give or take one skipped trim" \
        "5 or 6 lines" "$lines"
 fi
-is "history: no concurrent append was lost" "6" \
-   "$(cut -f2 "$CLAUDE_TIMESTAMP_HISTORY" | sort -n | tail -1)"
+# This used to assert that the append labelled 6 survived, which is not a
+# property this system has, for two separate reasons.
+#
+# The six writers run concurrently, so they finish in whatever order the
+# scheduler hands out. The trim keeps the last lines in file order, which is
+# completion order and not label order, so the one labelled 6 is trimmed away
+# legitimately whenever it happens to finish early. That is true even with a
+# lock that works perfectly.
+#
+# On top of that, a writer that waits out the lock appends unprotected, which
+# ct_history_append says plainly: with the lock no append can be lost, without
+# it this one might be. On an idle machine that never showed up; under CPU
+# load it cost an append in 6 runs out of 40. Naming a particular survivor is
+# a red build waiting for a busy runner.
+#
+# So assert the property the design does have: whatever survived the trim is
+# intact and distinct. The line count either side of this covers how many
+# survived; this covers whether concurrent writers corrupted each other, which
+# is what a broken lock would actually look like.
+survivors="$(cut -f2 "$CLAUDE_TIMESTAMP_HISTORY")"
+is "history: no surviving append was written over another" \
+   "$(printf '%s\n' "$survivors" | wc -l | tr -d ' ')" \
+   "$(printf '%s\n' "$survivors" | sort -u | wc -l | tr -d ' ')"
+is "history: every surviving append is one that was made" "0" \
+   "$(printf '%s\n' "$survivors" | grep -cvE '^[1-6]$' || true)"
 
 # A lock left behind by a process that died between mkdir and rmdir must not
 # silently defeat HISTORY_LIMIT for the rest of the installation's life.
@@ -2700,31 +2769,66 @@ echo "facts file"
 
 fresh
 rm -f "$CLAUDE_TIMESTAMP_FACTS"
-printf '{"session_id":"facts"}' | bash "$SCRIPTS/session-start.sh" >/dev/null
+printf '{"session_id":"facts"}' | CLAUDE_CODE_ENTRYPOINT=cli bash "$SCRIPTS/session-start.sh" >/dev/null
 asserts "facts: written at session start" test -r "$CLAUDE_TIMESTAMP_FACTS"
 asserts "facts: valid json" jq -e . "$CLAUDE_TIMESTAMP_FACTS"
-is "facts: reports jq present" "true" "$(jq -r '.jq' "$CLAUDE_TIMESTAMP_FACTS")"
+is "facts: shape is versioned" "2" "$(jq -r '.facts_version' "$CLAUDE_TIMESTAMP_FACTS")"
+is "facts: reports jq present" "true" "$(jq -r '.clients.cli.jq' "$CLAUDE_TIMESTAMP_FACTS")"
 is "facts: version matches version.txt" \
    "$(tr -d '[:space:]' < "$ROOT/version.txt")" \
-   "$(jq -r '.version' "$CLAUDE_TIMESTAMP_FACTS")"
-is "facts: state dir is writable here" "true" "$(jq -r '.state_dir_writable' "$CLAUDE_TIMESTAMP_FACTS")"
+   "$(jq -r '.clients.cli.version' "$CLAUDE_TIMESTAMP_FACTS")"
+is "facts: state dir is writable here" "true" "$(jq -r '.clients.cli.state_dir_writable' "$CLAUDE_TIMESTAMP_FACTS")"
 if ct_tz_supported; then
-  is "facts: timezone database detected" "true" "$(jq -r '.tz_database' "$CLAUDE_TIMESTAMP_FACTS")"
+  is "facts: timezone database detected" "true" "$(jq -r '.clients.cli.tz_database' "$CLAUDE_TIMESTAMP_FACTS")"
 else
-  is "facts: timezone database absent" "false" "$(jq -r '.tz_database' "$CLAUDE_TIMESTAMP_FACTS")"
+  is "facts: timezone database absent" "false" "$(jq -r '.clients.cli.tz_database' "$CLAUDE_TIMESTAMP_FACTS")"
 fi
+
+# The whole point of the write time: a reader has to be able to tell this
+# session's entry from one a terminal left behind weeks ago. Allow a couple of
+# seconds of slack for a slow session start rather than pinning it exactly.
+# `// 0` so a missing field fails this assertion rather than aborting the run
+# under set -u and hiding every check after it.
+age="$(( $(date +%s) - $(jq -r '.clients.cli.written_at // 0' "$CLAUDE_TIMESTAMP_FACTS") ))"
+asserts "facts: carries a fresh write time" test "$age" -ge 0 -a "$age" -le 5
 
 # /timestamps is asked to diagnose "no colour, not a terminal" from facts the
 # hook actually writes, so the entrypoint it inherits from Claude Code has to
-# be one of them.
+# be one of them, and it is the key rather than a field.
 rm -f "$CLAUDE_TIMESTAMP_FACTS"
 printf '{"session_id":"facts"}' | CLAUDE_CODE_ENTRYPOINT=claude-vscode bash "$SCRIPTS/session-start.sh" >/dev/null
-is "facts: carries the entrypoint" "claude-vscode" "$(jq -r '.entrypoint' "$CLAUDE_TIMESTAMP_FACTS")"
+asserts "facts: keyed by entrypoint" \
+  jq -e '.clients | has("claude-vscode")' "$CLAUDE_TIMESTAMP_FACTS"
+
+# An older Claude Code predates the variable, so there is no name to key on.
+# It still needs an entry rather than being dropped on the floor.
+rm -f "$CLAUDE_TIMESTAMP_FACTS"
+printf '{"session_id":"facts"}' | env -u CLAUDE_CODE_ENTRYPOINT bash "$SCRIPTS/session-start.sh" >/dev/null
+asserts "facts: an unnamed entrypoint is keyed as unknown" \
+  jq -e '.clients | has("unknown")' "$CLAUDE_TIMESTAMP_FACTS"
+
+# The reason the file is keyed at all: a terminal and a desktop session share
+# one home directory on macOS, and reading the wrong client's entry is worse
+# than reading none.
+rm -f "$CLAUDE_TIMESTAMP_FACTS"
+printf '{"session_id":"facts"}' | CLAUDE_CODE_ENTRYPOINT=cli bash "$SCRIPTS/session-start.sh" >/dev/null
+printf '{"session_id":"facts"}' | CLAUDE_CODE_ENTRYPOINT=claude-desktop bash "$SCRIPTS/session-start.sh" >/dev/null
+asserts "facts: a second client does not erase the first" \
+  jq -e '(.clients | has("cli")) and (.clients | has("claude-desktop"))' "$CLAUDE_TIMESTAMP_FACTS"
 
 # A stale file must be replaced rather than appended to or left alone.
 printf 'not json at all' > "$CLAUDE_TIMESTAMP_FACTS"
 printf '{"session_id":"facts"}' | bash "$SCRIPTS/session-start.sh" >/dev/null
 asserts "facts: a stale file is replaced" jq -e . "$CLAUDE_TIMESTAMP_FACTS"
+
+# A file whose entries were written to some other version of this shape must be
+# dropped rather than carried across and relabelled as this one. Without the
+# version check the entries would survive, wearing a facts_version that
+# promises a shape they were never written to.
+printf '{"facts_version":1,"clients":{"ancient":{"whatever":true}}}' > "$CLAUDE_TIMESTAMP_FACTS"
+printf '{"session_id":"facts"}' | CLAUDE_CODE_ENTRYPOINT=cli bash "$SCRIPTS/session-start.sh" >/dev/null
+refutes "facts: entries from another shape version are not carried over" \
+  jq -e '.clients | has("ancient")' "$CLAUDE_TIMESTAMP_FACTS"
 
 # Written by rename, so a concurrent reader cannot see a half-written file.
 is "facts: no temp file left behind" "" "$(find "$WORK" -name 'facts.json.*' 2>/dev/null)"
@@ -2776,7 +2880,73 @@ is "facts: a root-resolution failure still exits 0" "0" "$status"
 contains "facts: a root-resolution failure still emits the first-run banner" "/timestamps" "$out"
 asserts "facts: a root-resolution failure still writes a valid facts file" jq -e . "$CLAUDE_TIMESTAMP_FACTS"
 is "facts: a root-resolution failure falls back to an unknown version" \
-   "unknown" "$(jq -r '.version' "$CLAUDE_TIMESTAMP_FACTS")"
+   "unknown" "$(jq -r '.clients[].version' "$CLAUDE_TIMESTAMP_FACTS")"
+
+echo
+echo "a marker that was actually drawn"
+
+# The facts file proves the hook runner reached this plugin. It cannot prove
+# the marker got as far as the screen, and those need opposite fixes: one is an
+# install to repair, the other is a client discarding displayContent, which is
+# nothing this plugin can do anything about. So record the drawing itself.
+fresh
+drawn_for() { printf '%s.%s' "$CLAUDE_TIMESTAMP_DRAWN" "${1:-cli}"; }
+rm -f "$CLAUDE_TIMESTAMP_DRAWN".*
+
+printf '{"session_id":"d1","index":0,"delta":"hi"}' \
+  | CLAUDE_CODE_ENTRYPOINT=claude-desktop bash "$SCRIPTS/message-display.sh" >/dev/null
+asserts "drawn: recorded when a marker is emitted" test -r "$(drawn_for claude-desktop)"
+
+# Keyed like the facts file, so a healthy terminal cannot stand in for a
+# desktop session that has drawn nothing.
+refutes "drawn: not recorded against another client" test -r "$(drawn_for cli)"
+
+age="$(( $(date +%s) - $(cat "$(drawn_for claude-desktop)" 2>/dev/null || echo 0) ))"
+asserts "drawn: carries a fresh time" test "$age" -ge 0 -a "$age" -le 5
+
+# Every reason the hook declines to draw must leave no trace, or the record
+# claims a marker reached the screen when none did.
+rm -f "$CLAUDE_TIMESTAMP_DRAWN".*
+printf '{"session_id":"d2","index":0,"delta":"hi"}' \
+  | CLAUDE_CODE_ENTRYPOINT=cli bash "$SCRIPTS/message-display.sh" >/dev/null 2>&1
+asserts "drawn: recorded for a plain message" test -r "$(drawn_for cli)"
+
+fresh 'ENABLED=off'
+rm -f "$CLAUDE_TIMESTAMP_DRAWN".*
+printf '{"session_id":"d3","index":0,"delta":"hi"}' \
+  | CLAUDE_CODE_ENTRYPOINT=cli bash "$SCRIPTS/message-display.sh" >/dev/null 2>&1
+refutes "drawn: nothing recorded when the plugin is off" test -r "$(drawn_for cli)"
+
+fresh 'SUBAGENTS=off'
+rm -f "$CLAUDE_TIMESTAMP_DRAWN".*
+printf '{"session_id":"d4","agent_id":"sub","index":0,"delta":"hi"}' \
+  | CLAUDE_CODE_ENTRYPOINT=cli bash "$SCRIPTS/message-display.sh" >/dev/null 2>&1
+refutes "drawn: nothing recorded for a skipped subagent" test -r "$(drawn_for cli)"
+
+# A later flush of the same message draws nothing, so it must record nothing.
+fresh
+rm -f "$CLAUDE_TIMESTAMP_DRAWN".*
+printf '{"session_id":"d5","index":3,"delta":"more"}' \
+  | CLAUDE_CODE_ENTRYPOINT=cli bash "$SCRIPTS/message-display.sh" >/dev/null 2>&1
+refutes "drawn: nothing recorded for a later batch" test -r "$(drawn_for cli)"
+
+rm -f "$CLAUDE_TIMESTAMP_DRAWN".*
+
+# doctor must not turn "I cannot read the clock" into "a marker was just
+# drawn". ct_epoch reports 0 when `date` cannot be reached, which makes every
+# age negative, and clamping a negative age to zero would state the most
+# reassuring thing possible at the exact moment nothing is known. The clamp is
+# still right for a clock that stepped backwards, which is why the two cases
+# are told apart rather than merged.
+NO_DATE="$WORK/no-date.sh"
+cat > "$NO_DATE" <<'EOF'
+date() { return 1; }
+EOF
+printf '%s' 1700000000 > "${CLAUDE_TIMESTAMP_DRAWN}.cli"
+out="$(BASH_ENV="$NO_DATE" CLAUDE_CODE_ENTRYPOINT=cli bash "$SCRIPTS/setup.sh" --doctor 2>&1 || true)"
+lacks "doctor: an unreadable clock is not reported as a fresh marker" "0s ago" "$out"
+contains "doctor: an unreadable clock is reported as unknown" "time unknown" "$out"
+rm -f "$CLAUDE_TIMESTAMP_DRAWN".*
 
 echo
 echo "enabled switch"

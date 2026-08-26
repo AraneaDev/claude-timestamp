@@ -15,17 +15,77 @@
 # the executable bit surviving clones, zips, or Windows checkouts.
 set -euo pipefail
 
+# lib/config.sh is sourced here, above the jq check, because the jq-missing
+# branch below needs ct_client_key and ct_epoch from it. The directory comes
+# from a parameter expansion rather than `dirname`, so this costs no external
+# command and works on a PATH with nothing on it: that branch has to run when
+# the machine is at its least capable. Nothing in config.sh runs a command at
+# source time, so sourcing it early is free.
+#
+# Guarded, and with a fallback, because losing the missing-jq warning would be
+# a poor trade for tidier code: that warning is the only thing a user without
+# jq ever sees. The fallback is deliberately the narrowest thing that keeps
+# that branch honest rather than a second copy of the real helpers.
+CT_DIR="${BASH_SOURCE[0]%/*}"
+[ "$CT_DIR" = "${BASH_SOURCE[0]}" ] && CT_DIR="."
+if [ -r "$CT_DIR/lib/config.sh" ]; then
+  # shellcheck source=lib/config.sh
+  source "$CT_DIR/lib/config.sh"
+fi
+if ! declare -F ct_client_key >/dev/null 2>&1; then
+  ct_client_key() { printf 'unknown'; }
+  ct_epoch() { printf '0'; }
+fi
+
 # jq is missing: the other hooks all fail safe and do nothing, so timestamps
 # would silently never appear. Say so once, and build the JSON by hand since
 # the tool we would use to build it is the thing that is missing.
+#
+# Saying it is not enough on its own. The message goes to the user, and a user
+# who missed it (or a client that swallowed it) leaves nobody able to tell this
+# apart from the plugin never having been installed here. So record it too,
+# which is the one fact this branch can still write down.
 if ! command -v jq >/dev/null 2>&1; then
   msg="claude-timestamp: 'jq' is not installed, so timestamps are off. Install it - macOS: brew install jq - Debian/Ubuntu: sudo apt-get install jq - Windows: winget install jqlang.jq - then restart Claude Code."
   printf '{"systemMessage": "%s"}\n' "$msg"
+
+  # The path expression is the one in ct_facts_path, repeated rather than
+  # sourced for the reason ct_client_key explains. If one moves, move both.
+  #
+  # This entry replaces the whole file rather than merging into it: merging
+  # needs jq. Another client's entry is restored the next time that client
+  # starts a session, and losing it meanwhile costs less than not recording
+  # the only client we can currently see anything about.
+  # Both checked before the redirect opens anything: without `mv` there is no
+  # way to put the file in place, and without `rm` no way to clear the temp
+  # file away again. Opening it first and finding out afterwards leaves litter
+  # behind for a write that was never going to land.
+  ct_facts="${CLAUDE_TIMESTAMP_FACTS:-${HOME:-}/.claude/claude-timestamp.facts.json}"
+  ct_tmp="$ct_facts.$$"
+
+  # The writer below creates the directory it writes into, and this one has to
+  # as well, or a fresh machine records nothing on the one run where nothing
+  # else can record anything either. The parent comes from a parameter
+  # expansion rather than `dirname`, for the reason ct_client_key explains; a
+  # path with no slash in it expands to itself, so it is skipped rather than
+  # having the file's own name passed to mkdir.
+  if command -v mkdir >/dev/null 2>&1; then
+    case "$ct_facts" in
+      */*) mkdir -p "${ct_facts%/*}" 2>/dev/null || true ;;
+    esac
+  fi
+  if command -v mv >/dev/null 2>&1 && command -v rm >/dev/null 2>&1 && printf '{"facts_version":2,"clients":{"%s":{"jq":false,"written_at":%s}}}\n' \
+       "$(ct_client_key)" "$(ct_epoch)" > "$ct_tmp" 2>/dev/null; then
+    mv "$ct_tmp" "$ct_facts" 2>/dev/null || rm -f "$ct_tmp" 2>/dev/null
+  else
+    rm -f "$ct_tmp" 2>/dev/null
+  fi
   exit 0
 fi
 
+# config.sh is already sourced above; only state.sh is still outstanding, and
+# it needs jq to be present, which by here it is.
 CT_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib"
-source "$CT_LIB/config.sh"
 source "$CT_LIB/state.sh"
 
 cwd="$(cat | jq -r '.cwd // empty' 2>/dev/null || true)"
@@ -40,9 +100,16 @@ ct_load_config "$cwd"
 # Publish what cannot be worked out by reading files. This runs after
 # ct_load_config because ct_tz_supported memoises into the same shell.
 #
-# jq is always true here: the hook returns early when jq is missing, so the
-# file's absence carries that case. Recording it anyway means a reader gets one
-# shape rather than having to infer a negative from a missing file.
+# jq is always true here: the branch above owns the false case and writes it
+# down. The file's absence now means one thing only -- no session of this
+# plugin has ever started on this machine -- which is the difference between
+# "not installed here" and "installed but hobbled", and the two want opposite
+# fixes.
+#
+# Entries are keyed by client because one home directory can serve several. A
+# terminal and the desktop app's Code tab share ~/.claude on macOS, and a flat
+# file meant the last session to start described every client, so reading it
+# after a failing desktop session could hand you the terminal's healthy answer.
 ct_write_facts() {
   local file tmp root version writable=false probe
   file="$(ct_facts_path)"
@@ -63,15 +130,46 @@ ct_write_facts() {
     rm -f "$probe" 2>/dev/null
   fi
 
+  # Read what other clients left before overwriting them. Anything that is not
+  # a v2 file -- absent, unreadable, not JSON, the old flat shape from before
+  # this was keyed, or a clients object written to some other version of this
+  # shape -- starts again from empty, which is also how a corrupted file gets
+  # replaced rather than half-preserved.
+  #
+  # The version is checked rather than assumed, so that facts_version means
+  # something to the reader as well as the writer. Without it, entries from a
+  # shape this code has never seen would be carried across and relabelled as
+  # this one, promising a layout they were never written to.
+  local prior='{}'
+  if [ -r "$file" ]; then
+    prior="$(jq -c 'if type == "object" and .facts_version == 2
+                       and (.clients | type) == "object"
+                    then . else {} end' "$file" 2>/dev/null)" || prior='{}'
+    [ -n "$prior" ] || prior='{}'
+  fi
+
   # Temp file and rename, so a session starting while another reads this never
-  # exposes a half-written file.
+  # exposes a half-written file. Two sessions starting at the same instant can
+  # still cost one entry, since each read its own copy before writing; the
+  # loser is restored by that client's next session start.
   tmp="$file.$$"
   if jq -n \
+      --argjson prior "$prior" \
+      --arg key "$(ct_client_key)" \
       --arg version "$version" \
       --argjson tz_database "$(ct_tz_supported && printf 'true' || printf 'false')" \
       --argjson state_dir_writable "$writable" \
-      --arg entrypoint "${CLAUDE_CODE_ENTRYPOINT:-}" \
-      '{jq: true, tz_database: $tz_database, state_dir_writable: $state_dir_writable, version: $version, entrypoint: $entrypoint}' \
+      --argjson written_at "$(ct_epoch)" \
+      '$prior + {facts_version: 2}
+       | .clients = ((.clients // {}) + {
+           ($key): {
+             jq: true,
+             tz_database: $tz_database,
+             state_dir_writable: $state_dir_writable,
+             version: $version,
+             written_at: $written_at
+           }
+         })' \
       > "$tmp" 2>/dev/null; then
     mv "$tmp" "$file" 2>/dev/null || rm -f "$tmp" 2>/dev/null
   else

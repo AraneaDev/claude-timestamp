@@ -712,6 +712,71 @@ ct_facts_path() {
   printf '%s' "${CLAUDE_TIMESTAMP_FACTS:-${HOME}/.claude/claude-timestamp.facts.json}"
 }
 
+# Which client this session is, as a key the per-client records can be grouped
+# under. Anything outside the character set Claude Code actually uses becomes
+# "unknown", which covers a Claude Code too old to name itself as well as a
+# name that has no business being part of a filename or a JSON key.
+ct_client_key() {
+  local key="${CLAUDE_CODE_ENTRYPOINT:-}"
+  case "$key" in
+    "" | *[!A-Za-z0-9_-]*) printf 'unknown' ;;
+    *) printf '%s' "$key" ;;
+  esac
+}
+
+# Seconds since the epoch, or 0 when `date` cannot be reached. A reader treats
+# 0 as "no idea when", which is the truth in that case and reads as ancient
+# rather than as fresh.
+ct_epoch() {
+  local now=""
+  now="$(date +%s 2>/dev/null)" || now=""
+  case "$now" in
+    "" | *[!0-9]*) printf '0' ;;
+    *) printf '%s' "$now" ;;
+  esac
+}
+
+# When this client last put a marker on screen.
+#
+# The facts file proves the hook runner found this plugin and ran it. It cannot
+# prove the marker reached the screen, and the two want opposite fixes: one is
+# an install to repair, the other is a client discarding displayContent, which
+# is not something this plugin can fix at all. Without this record those two
+# are indistinguishable from the outside, which is the gap that made a silent
+# desktop session so slow to explain.
+#
+# One file per client rather than one shared file, so a terminal drawing
+# happily cannot stand in for a desktop session that has drawn nothing. It
+# lives beside the facts file rather than in the state directory, because the
+# state directory is cleared at session end and this is worth asking about
+# afterwards.
+#
+# CLAUDE_TIMESTAMP_DRAWN exists so the test suite can point somewhere else; it
+# is not a user-facing setting.
+ct_drawn_path() {
+  printf '%s.%s' \
+    "${CLAUDE_TIMESTAMP_DRAWN:-${HOME}/.claude/claude-timestamp.drawn}" \
+    "$(ct_client_key)"
+}
+
+# Record that a marker was emitted, now.
+#
+# Written straight rather than through a temp file and a rename, matching
+# ct_note_message: the payload is a handful of digits, and a reader that
+# catches a torn write sees something that is not all digits and treats it as
+# absent, which is the same answer it would have given a moment earlier.
+#
+# Never fails the hook. A marker that was drawn but not recorded is a worse
+# diagnostic than one that was recorded, and a hook that died trying to write a
+# diagnostic would be worse than both.
+ct_note_drawn() {
+  local file
+  file="$(ct_drawn_path)"
+  case "$file" in */*) mkdir -p "${file%/*}" 2>/dev/null || return 0 ;; esac
+  printf '%s' "$(ct_epoch)" > "$file" 2>/dev/null || true
+  return 0
+}
+
 # Append one finished session and drop anything past the retention limit.
 # Fields: when, seconds, turns, waited, idle, failed tools.
 ct_history_append() {
