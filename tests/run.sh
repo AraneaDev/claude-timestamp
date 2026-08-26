@@ -1077,8 +1077,13 @@ echo "stale PreToolUse binding"
 # someone deleting the shim before every supported version has stopped
 # binding PreToolUse; retire the test along with the shim, together.
 asserts "the PreToolUse compatibility shim still exists" test -e "$SCRIPTS/pre-tool-use.sh"
-shim_out="$(printf '{"session_id":"s","tool_use_id":"t1","tool_name":"Bash","hook_event_name":"PreToolUse","tool_input":{"command":"ls -la"}}' \
-  | bash "$SCRIPTS/pre-tool-use.sh" 2>"$WORK/shim.err")"
+# Redirected from a file rather than piped in. The shim exits without ever
+# reading stdin, so a writer on the other end of a pipe can lose the race and
+# die of SIGPIPE, and pipefail then reports the writer's 141 as the pipeline's
+# status. That says nothing about the shim, which is what this measures.
+printf '{"session_id":"s","tool_use_id":"t1","tool_name":"Bash","hook_event_name":"PreToolUse","tool_input":{"command":"ls -la"}}' \
+  > "$WORK/shim.in"
+shim_out="$(bash "$SCRIPTS/pre-tool-use.sh" < "$WORK/shim.in" 2>"$WORK/shim.err")"
 shim_rc=$?
 is "the shim exits 0 on a realistic PreToolUse payload" "0" "$shim_rc"
 is "the shim prints nothing on stdout"                  "" "$shim_out"
@@ -1678,6 +1683,26 @@ if command -v jq >/dev/null 2>&1; then
   is "message display stays silent without jq" "" "$out"
   out="$(printf '{"session_id":"x"}' | PATH=/nonexistent "$BASH" "$SCRIPTS/user-prompt-submit.sh" 2>/dev/null || true)"
   is "prompt submit stays silent without jq" "" "$out"
+
+  # Saying it on screen is not enough: the message is easy to miss, and on a
+  # client that swallows it there is nothing left to look at. The one branch
+  # that cannot use jq to record that jq is missing has to hand-build the file
+  # instead, so the absence of a facts file stops meaning two different things.
+  #
+  # PATH is a shim rather than /nonexistent here, because writing the file at
+  # all needs `date`, `mv` and `rm`. Emptying PATH tests that the hook survives
+  # having nothing; this tests what it records when only jq is gone.
+  NOJQ_BIN="$WORK/nojq-bin"
+  mkdir -p "$NOJQ_BIN"
+  for tool in date mv rm; do
+    ln -sf "$(command -v "$tool")" "$NOJQ_BIN/$tool"
+  done
+  rm -f "$CLAUDE_TIMESTAMP_FACTS"
+  printf '{"session_id":"x"}' \
+    | PATH="$NOJQ_BIN" CLAUDE_CODE_ENTRYPOINT=claude-desktop "$BASH" "$SCRIPTS/session-start.sh" >/dev/null 2>&1 || true
+  asserts "facts: a missing jq is recorded, not merely announced" \
+    jq -e '.clients["claude-desktop"].jq == false' "$CLAUDE_TIMESTAMP_FACTS"
+  rm -f "$CLAUDE_TIMESTAMP_FACTS"
 fi
 
 echo
@@ -2700,26 +2725,52 @@ echo "facts file"
 
 fresh
 rm -f "$CLAUDE_TIMESTAMP_FACTS"
-printf '{"session_id":"facts"}' | bash "$SCRIPTS/session-start.sh" >/dev/null
+printf '{"session_id":"facts"}' | CLAUDE_CODE_ENTRYPOINT=cli bash "$SCRIPTS/session-start.sh" >/dev/null
 asserts "facts: written at session start" test -r "$CLAUDE_TIMESTAMP_FACTS"
 asserts "facts: valid json" jq -e . "$CLAUDE_TIMESTAMP_FACTS"
-is "facts: reports jq present" "true" "$(jq -r '.jq' "$CLAUDE_TIMESTAMP_FACTS")"
+is "facts: shape is versioned" "2" "$(jq -r '.facts_version' "$CLAUDE_TIMESTAMP_FACTS")"
+is "facts: reports jq present" "true" "$(jq -r '.clients.cli.jq' "$CLAUDE_TIMESTAMP_FACTS")"
 is "facts: version matches version.txt" \
    "$(tr -d '[:space:]' < "$ROOT/version.txt")" \
-   "$(jq -r '.version' "$CLAUDE_TIMESTAMP_FACTS")"
-is "facts: state dir is writable here" "true" "$(jq -r '.state_dir_writable' "$CLAUDE_TIMESTAMP_FACTS")"
+   "$(jq -r '.clients.cli.version' "$CLAUDE_TIMESTAMP_FACTS")"
+is "facts: state dir is writable here" "true" "$(jq -r '.clients.cli.state_dir_writable' "$CLAUDE_TIMESTAMP_FACTS")"
 if ct_tz_supported; then
-  is "facts: timezone database detected" "true" "$(jq -r '.tz_database' "$CLAUDE_TIMESTAMP_FACTS")"
+  is "facts: timezone database detected" "true" "$(jq -r '.clients.cli.tz_database' "$CLAUDE_TIMESTAMP_FACTS")"
 else
-  is "facts: timezone database absent" "false" "$(jq -r '.tz_database' "$CLAUDE_TIMESTAMP_FACTS")"
+  is "facts: timezone database absent" "false" "$(jq -r '.clients.cli.tz_database' "$CLAUDE_TIMESTAMP_FACTS")"
 fi
+
+# The whole point of the write time: a reader has to be able to tell this
+# session's entry from one a terminal left behind weeks ago. Allow a couple of
+# seconds of slack for a slow session start rather than pinning it exactly.
+# `// 0` so a missing field fails this assertion rather than aborting the run
+# under set -u and hiding every check after it.
+age="$(( $(date +%s) - $(jq -r '.clients.cli.written_at // 0' "$CLAUDE_TIMESTAMP_FACTS") ))"
+asserts "facts: carries a fresh write time" test "$age" -ge 0 -a "$age" -le 5
 
 # /timestamps is asked to diagnose "no colour, not a terminal" from facts the
 # hook actually writes, so the entrypoint it inherits from Claude Code has to
-# be one of them.
+# be one of them, and it is the key rather than a field.
 rm -f "$CLAUDE_TIMESTAMP_FACTS"
 printf '{"session_id":"facts"}' | CLAUDE_CODE_ENTRYPOINT=claude-vscode bash "$SCRIPTS/session-start.sh" >/dev/null
-is "facts: carries the entrypoint" "claude-vscode" "$(jq -r '.entrypoint' "$CLAUDE_TIMESTAMP_FACTS")"
+asserts "facts: keyed by entrypoint" \
+  jq -e '.clients | has("claude-vscode")' "$CLAUDE_TIMESTAMP_FACTS"
+
+# An older Claude Code predates the variable, so there is no name to key on.
+# It still needs an entry rather than being dropped on the floor.
+rm -f "$CLAUDE_TIMESTAMP_FACTS"
+printf '{"session_id":"facts"}' | env -u CLAUDE_CODE_ENTRYPOINT bash "$SCRIPTS/session-start.sh" >/dev/null
+asserts "facts: an unnamed entrypoint is keyed as unknown" \
+  jq -e '.clients | has("unknown")' "$CLAUDE_TIMESTAMP_FACTS"
+
+# The reason the file is keyed at all: a terminal and a desktop session share
+# one home directory on macOS, and reading the wrong client's entry is worse
+# than reading none.
+rm -f "$CLAUDE_TIMESTAMP_FACTS"
+printf '{"session_id":"facts"}' | CLAUDE_CODE_ENTRYPOINT=cli bash "$SCRIPTS/session-start.sh" >/dev/null
+printf '{"session_id":"facts"}' | CLAUDE_CODE_ENTRYPOINT=claude-desktop bash "$SCRIPTS/session-start.sh" >/dev/null
+asserts "facts: a second client does not erase the first" \
+  jq -e '(.clients | has("cli")) and (.clients | has("claude-desktop"))' "$CLAUDE_TIMESTAMP_FACTS"
 
 # A stale file must be replaced rather than appended to or left alone.
 printf 'not json at all' > "$CLAUDE_TIMESTAMP_FACTS"
@@ -2776,7 +2827,7 @@ is "facts: a root-resolution failure still exits 0" "0" "$status"
 contains "facts: a root-resolution failure still emits the first-run banner" "/timestamps" "$out"
 asserts "facts: a root-resolution failure still writes a valid facts file" jq -e . "$CLAUDE_TIMESTAMP_FACTS"
 is "facts: a root-resolution failure falls back to an unknown version" \
-   "unknown" "$(jq -r '.version' "$CLAUDE_TIMESTAMP_FACTS")"
+   "unknown" "$(jq -r '.clients[].version' "$CLAUDE_TIMESTAMP_FACTS")"
 
 echo
 echo "enabled switch"

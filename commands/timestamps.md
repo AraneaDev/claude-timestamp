@@ -30,13 +30,21 @@ $ARGUMENTS
 
 2. `~/.claude/claude-timestamp.facts.json` holds what you cannot work out by
    reading files: whether this machine has a timezone database, whether the
-   state directory is writable, and which plugin version is installed. It is
-   rewritten at every session start, so it describes this machine as it is now.
+   state directory is writable, whether `jq` is present, and which plugin
+   version is installed.
 
-   If it is missing, either no session has started since this version was
-   installed, or `jq` is not installed. The files cannot tell you which, and
-   the last section says what to do about that. Do not guess at the facts the
-   file would have held.
+   Facts are grouped under `clients`, keyed by the Claude Code client that
+   wrote them: `cli`, `claude-vscode`, `claude-desktop`, or `unknown` for a
+   Claude Code too old to name itself. One home directory can serve several
+   clients at once, so read the entry for the client you are being asked
+   about, not whichever one happens to be first. Each entry carries a
+   `written_at` in seconds since the epoch; compare it against `date +%s` to
+   see whether it describes this session or one from weeks ago.
+
+   If the file is missing, no session of this plugin has ever started on this
+   machine. If it exists but has no entry for the client you are in, that
+   client has never loaded the plugin, which usually means it is not installed
+   there.
 
 3. `~/.claude/claude-timestamp.conf` is the user's settings. A key that is
    absent means the default from `schema.json`, so an absent key is not a
@@ -302,13 +310,21 @@ they ask what is stored.
 Read the facts file and the config files, and check them against
 `schema.json`:
 
-- A facts file that exists proves `jq` works: the hook that writes it exits
-  before writing anything when `jq` is missing.
-- No facts file: either no session has started since this version was
-  installed, or `jq` is missing. Nothing on disk separates those two, so do not
-  go looking for a way to tell. Say it is one of the two and let the user
-  settle it: when `jq` is missing the plugin says so out loud at the start of
-  every session, so they will know whether they have seen that.
+- Read the entry under `clients` for the client you are in, and check its
+  `written_at` against `date +%s` before trusting anything it says. A stale
+  entry describes a session that ended long ago.
+- `jq` is false in this client's entry: nothing can be drawn at all. Every
+  other hook exits without a word when `jq` is missing, so this is the whole
+  explanation, and the fix is to install `jq` where this client can see it and
+  restart. On Windows the desktop app reads user and system environment
+  variables at launch and never a PowerShell profile, so a `PATH` changed
+  under a running app does not reach it.
+- No entry for this client, though the file exists and other clients are in
+  it: the plugin has never run here. It is installed for another client, not
+  this one. Claude Code in WSL and the desktop app on Windows keep separate
+  home directories, so each needs its own install.
+- No facts file at all: no session of this plugin has ever started on this
+  machine.
 - `state_dir_writable` is false: the plugin cannot record turn starts, so
   elapsed times and the summary will be missing.
 - `tz_database` is false and `TZ` is pinned to an IANA name: the plugin is
@@ -316,13 +332,13 @@ Read the facts file and the config files, and check them against
 - A value `schema.json` rejects: the plugin is using the default instead.
 - `ENABLED=off`: everything is switched off, which is easy to forget having
   done.
-- The marker has no colour: check the facts file's `entrypoint`. `cli` is the
-  only value that gets colour, because colour is only emitted for a real
-  terminal session; anything else, such as `claude-vscode`, is a client that
-  does not interpret ANSI, so the plugin sends plain text there on purpose. An
-  empty `entrypoint` almost always means an older Claude Code that predates
-  this variable, which still gets colour, so look at the terminal itself if
-  colour is missing there. `FORCE_COLOR=1` turns colour on regardless of
+- The marker has no colour: check which key in `clients` the entry sits under.
+  `cli` is the only one that gets colour, because colour is only emitted for a
+  real terminal session; anything else, such as `claude-vscode` or
+  `claude-desktop`, is a client that does not interpret ANSI, so the plugin
+  sends plain text there on purpose. An `unknown` key almost always means an
+  older Claude Code that predates the variable naming the client, which still
+  gets colour, so look at the terminal itself if colour is missing there. `FORCE_COLOR=1` turns colour on regardless of
   `entrypoint`; `NO_COLOR` still wins over everything, including
   `FORCE_COLOR`.
 
