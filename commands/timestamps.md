@@ -50,11 +50,17 @@ $ARGUMENTS
    client has never loaded the plugin, which usually means it is not installed
    there.
 
-3. `~/.claude/claude-timestamp.conf` is the user's settings. A key that is
+3. `~/.claude/claude-timestamp.drawn.<client>` holds the epoch second at which
+   that client last put a marker on screen, written by the hook that draws it.
+   The facts file proves the hook runner found this plugin; this proves a
+   marker actually got as far as being emitted. A client that has drawn nothing
+   has no file. Compare it against `date +%s` the same way.
+
+4. `~/.claude/claude-timestamp.conf` is the user's settings. A key that is
    absent means the default from `schema.json`, so an absent key is not a
    problem to fix.
 
-4. A project may override settings in `.claude/claude-timestamp.conf`. Walk up
+5. A project may override settings in `.claude/claude-timestamp.conf`. Walk up
    from the current directory looking for one, stopping at the home directory,
    because the file directly under home is the user's own config rather than a
    project's. Walking up means reading `<directory>/.claude/claude-timestamp.conf`
@@ -329,6 +335,17 @@ Read the facts file and the config files, and check them against
   home directories, so each needs its own install.
 - No facts file at all: no session of this plugin has ever started on this
   machine.
+- The facts entry for this client is fresh and `jq` is true, a marker was drawn
+  seconds ago, and still nothing appears on screen: the plugin did its job and
+  the client discarded what it was handed. Nothing in this plugin or its
+  settings can fix that, so do not send the user hunting through config. Say
+  which client it is and that the marker was emitted and not shown, which is
+  worth reporting to Anthropic rather than working around.
+- The facts entry is fresh but no marker has ever been drawn from this client:
+  the hooks are bound and running, and the display hook has not drawn. Check
+  `ENABLED`, `SUBAGENTS` if this is a subagent, and whether any assistant
+  message has been displayed in this session at all, since the marker is drawn
+  as messages render rather than at session start.
 - `state_dir_writable` is false: the plugin cannot record turn starts, so
   elapsed times and the summary will be missing.
 - `tz_database` is false and `TZ` is pinned to an IANA name: the plugin is

@@ -140,6 +140,7 @@ mkdir -p "$TMPDIR"
 export CLAUDE_TIMESTAMP_CONFIG="$WORK/config.conf"
 export CLAUDE_TIMESTAMP_HISTORY="$WORK/history.tsv"
 export CLAUDE_TIMESTAMP_FACTS="$WORK/facts.json"
+export CLAUDE_TIMESTAMP_DRAWN="$WORK/drawn"
 
 source "$SCRIPTS/lib/config.sh"
 source "$SCRIPTS/lib/state.sh"
@@ -2857,6 +2858,56 @@ contains "facts: a root-resolution failure still emits the first-run banner" "/t
 asserts "facts: a root-resolution failure still writes a valid facts file" jq -e . "$CLAUDE_TIMESTAMP_FACTS"
 is "facts: a root-resolution failure falls back to an unknown version" \
    "unknown" "$(jq -r '.clients[].version' "$CLAUDE_TIMESTAMP_FACTS")"
+
+echo
+echo "a marker that was actually drawn"
+
+# The facts file proves the hook runner reached this plugin. It cannot prove
+# the marker got as far as the screen, and those need opposite fixes: one is an
+# install to repair, the other is a client discarding displayContent, which is
+# nothing this plugin can do anything about. So record the drawing itself.
+fresh
+drawn_for() { printf '%s.%s' "$CLAUDE_TIMESTAMP_DRAWN" "${1:-cli}"; }
+rm -f "$CLAUDE_TIMESTAMP_DRAWN".*
+
+printf '{"session_id":"d1","index":0,"delta":"hi"}' \
+  | CLAUDE_CODE_ENTRYPOINT=claude-desktop bash "$SCRIPTS/message-display.sh" >/dev/null
+asserts "drawn: recorded when a marker is emitted" test -r "$(drawn_for claude-desktop)"
+
+# Keyed like the facts file, so a healthy terminal cannot stand in for a
+# desktop session that has drawn nothing.
+refutes "drawn: not recorded against another client" test -r "$(drawn_for cli)"
+
+age="$(( $(date +%s) - $(cat "$(drawn_for claude-desktop)" 2>/dev/null || echo 0) ))"
+asserts "drawn: carries a fresh time" test "$age" -ge 0 -a "$age" -le 5
+
+# Every reason the hook declines to draw must leave no trace, or the record
+# claims a marker reached the screen when none did.
+rm -f "$CLAUDE_TIMESTAMP_DRAWN".*
+printf '{"session_id":"d2","index":0,"delta":"hi"}' \
+  | CLAUDE_CODE_ENTRYPOINT=cli bash "$SCRIPTS/message-display.sh" >/dev/null 2>&1
+asserts "drawn: recorded for a plain message" test -r "$(drawn_for cli)"
+
+fresh 'ENABLED=off'
+rm -f "$CLAUDE_TIMESTAMP_DRAWN".*
+printf '{"session_id":"d3","index":0,"delta":"hi"}' \
+  | CLAUDE_CODE_ENTRYPOINT=cli bash "$SCRIPTS/message-display.sh" >/dev/null 2>&1
+refutes "drawn: nothing recorded when the plugin is off" test -r "$(drawn_for cli)"
+
+fresh 'SUBAGENTS=off'
+rm -f "$CLAUDE_TIMESTAMP_DRAWN".*
+printf '{"session_id":"d4","agent_id":"sub","index":0,"delta":"hi"}' \
+  | CLAUDE_CODE_ENTRYPOINT=cli bash "$SCRIPTS/message-display.sh" >/dev/null 2>&1
+refutes "drawn: nothing recorded for a skipped subagent" test -r "$(drawn_for cli)"
+
+# A later flush of the same message draws nothing, so it must record nothing.
+fresh
+rm -f "$CLAUDE_TIMESTAMP_DRAWN".*
+printf '{"session_id":"d5","index":3,"delta":"more"}' \
+  | CLAUDE_CODE_ENTRYPOINT=cli bash "$SCRIPTS/message-display.sh" >/dev/null 2>&1
+refutes "drawn: nothing recorded for a later batch" test -r "$(drawn_for cli)"
+
+rm -f "$CLAUDE_TIMESTAMP_DRAWN".*
 
 echo
 echo "enabled switch"

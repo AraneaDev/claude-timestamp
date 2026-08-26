@@ -15,35 +15,27 @@
 # the executable bit surviving clones, zips, or Windows checkouts.
 set -euo pipefail
 
-# Which client this session is, as a key the facts file can be grouped under.
+# lib/config.sh is sourced here, above the jq check, because the jq-missing
+# branch below needs ct_client_key and ct_epoch from it. The directory comes
+# from a parameter expansion rather than `dirname`, so this costs no external
+# command and works on a PATH with nothing on it: that branch has to run when
+# the machine is at its least capable. Nothing in config.sh runs a command at
+# source time, so sourcing it early is free.
 #
-# Defined here rather than in lib/config.sh because the jq-missing branch below
-# needs it and cannot source anything: resolving the lib directory costs a
-# `dirname`, and that branch has to survive a PATH with nothing on it at all.
-#
-# Anything outside the character set Claude Code actually uses becomes
-# "unknown". The jq path would escape a stray quote safely, but the branch that
-# has no jq builds its JSON with printf and would emit a broken file, so both
-# paths take the same narrow set and stay honest about the difference.
-ct_client_key() {
-  local key="${CLAUDE_CODE_ENTRYPOINT:-}"
-  case "$key" in
-    "" | *[!A-Za-z0-9_-]*) printf 'unknown' ;;
-    *) printf '%s' "$key" ;;
-  esac
-}
-
-# Seconds since the epoch, or 0 when `date` cannot be reached. A reader treats
-# 0 as "no idea when", which is the truth in that case and reads as ancient
-# rather than as fresh.
-ct_epoch() {
-  local now=""
-  now="$(date +%s 2>/dev/null)" || now=""
-  case "$now" in
-    "" | *[!0-9]*) printf '0' ;;
-    *) printf '%s' "$now" ;;
-  esac
-}
+# Guarded, and with a fallback, because losing the missing-jq warning would be
+# a poor trade for tidier code: that warning is the only thing a user without
+# jq ever sees. The fallback is deliberately the narrowest thing that keeps
+# that branch honest rather than a second copy of the real helpers.
+CT_DIR="${BASH_SOURCE[0]%/*}"
+[ "$CT_DIR" = "${BASH_SOURCE[0]}" ] && CT_DIR="."
+if [ -r "$CT_DIR/lib/config.sh" ]; then
+  # shellcheck source=lib/config.sh
+  source "$CT_DIR/lib/config.sh"
+fi
+if ! declare -F ct_client_key >/dev/null 2>&1; then
+  ct_client_key() { printf 'unknown'; }
+  ct_epoch() { printf '0'; }
+fi
 
 # jq is missing: the other hooks all fail safe and do nothing, so timestamps
 # would silently never appear. Say so once, and build the JSON by hand since
@@ -91,8 +83,9 @@ if ! command -v jq >/dev/null 2>&1; then
   exit 0
 fi
 
+# config.sh is already sourced above; only state.sh is still outstanding, and
+# it needs jq to be present, which by here it is.
 CT_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib"
-source "$CT_LIB/config.sh"
 source "$CT_LIB/state.sh"
 
 cwd="$(cat | jq -r '.cwd // empty' 2>/dev/null || true)"

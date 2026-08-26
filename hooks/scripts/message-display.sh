@@ -170,6 +170,12 @@ if [ -n "$state_file" ]; then
   ct_note_message "$session_id" "$now"
 fi
 
+# Recorded here rather than earlier, so it says a marker was emitted rather
+# than that the hook considered emitting one. Every reason to draw nothing --
+# no jq, ENABLED=off, a subagent under SUBAGENTS=off, a later batch of the same
+# message -- has already left the script above this line.
+ct_note_drawn
+
 printf '%s' "$input" | jq --arg prefix "${divider}${marker}" '{
   hookSpecificOutput: {
     hookEventName: "MessageDisplay",
