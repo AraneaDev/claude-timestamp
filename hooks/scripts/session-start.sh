@@ -70,6 +70,18 @@ if ! command -v jq >/dev/null 2>&1; then
   # behind for a write that was never going to land.
   ct_facts="${CLAUDE_TIMESTAMP_FACTS:-${HOME:-}/.claude/claude-timestamp.facts.json}"
   ct_tmp="$ct_facts.$$"
+
+  # The writer below creates the directory it writes into, and this one has to
+  # as well, or a fresh machine records nothing on the one run where nothing
+  # else can record anything either. The parent comes from a parameter
+  # expansion rather than `dirname`, for the reason ct_client_key explains; a
+  # path with no slash in it expands to itself, so it is skipped rather than
+  # having the file's own name passed to mkdir.
+  if command -v mkdir >/dev/null 2>&1; then
+    case "$ct_facts" in
+      */*) mkdir -p "${ct_facts%/*}" 2>/dev/null || true ;;
+    esac
+  fi
   if command -v mv >/dev/null 2>&1 && command -v rm >/dev/null 2>&1 && printf '{"facts_version":2,"clients":{"%s":{"jq":false,"written_at":%s}}}\n' \
        "$(ct_client_key)" "$(ct_epoch)" > "$ct_tmp" 2>/dev/null; then
     mv "$ct_tmp" "$ct_facts" 2>/dev/null || rm -f "$ct_tmp" 2>/dev/null
@@ -126,12 +138,19 @@ ct_write_facts() {
   fi
 
   # Read what other clients left before overwriting them. Anything that is not
-  # a v2 file -- absent, unreadable, not JSON, or the old flat shape from
-  # before this was keyed -- starts again from empty, which is also how a
-  # corrupted file gets replaced rather than half-preserved.
+  # a v2 file -- absent, unreadable, not JSON, the old flat shape from before
+  # this was keyed, or a clients object written to some other version of this
+  # shape -- starts again from empty, which is also how a corrupted file gets
+  # replaced rather than half-preserved.
+  #
+  # The version is checked rather than assumed, so that facts_version means
+  # something to the reader as well as the writer. Without it, entries from a
+  # shape this code has never seen would be carried across and relabelled as
+  # this one, promising a layout they were never written to.
   local prior='{}'
   if [ -r "$file" ]; then
-    prior="$(jq -c 'if type == "object" and (.clients | type) == "object"
+    prior="$(jq -c 'if type == "object" and .facts_version == 2
+                       and (.clients | type) == "object"
                     then . else {} end' "$file" 2>/dev/null)" || prior='{}'
     [ -n "$prior" ] || prior='{}'
   fi

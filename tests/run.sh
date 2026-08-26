@@ -1711,6 +1711,18 @@ EOF
   asserts "facts: a missing jq is recorded, not merely announced" \
     jq -e '.clients["claude-desktop"].jq == false' "$CLAUDE_TIMESTAMP_FACTS"
   rm -f "$CLAUDE_TIMESTAMP_FACTS"
+
+  # The writer that has jq creates the directory it writes into. The one that
+  # does not has to as well, or the fact that jq is missing goes unrecorded on
+  # exactly the machine where nothing else can record it either.
+  NESTED_FACTS="$WORK/nested-facts/deeper/facts.json"
+  rm -rf "$WORK/nested-facts"
+  printf '{"session_id":"x"}' \
+    | BASH_ENV="$NO_JQ" CLAUDE_TIMESTAMP_FACTS="$NESTED_FACTS" \
+      CLAUDE_CODE_ENTRYPOINT=claude-desktop bash "$SCRIPTS/session-start.sh" >/dev/null 2>&1 || true
+  asserts "facts: the degraded write creates its own directory" \
+    jq -e '.clients["claude-desktop"].jq == false' "$NESTED_FACTS"
+  rm -rf "$WORK/nested-facts"
 fi
 
 echo
@@ -2784,6 +2796,15 @@ asserts "facts: a second client does not erase the first" \
 printf 'not json at all' > "$CLAUDE_TIMESTAMP_FACTS"
 printf '{"session_id":"facts"}' | bash "$SCRIPTS/session-start.sh" >/dev/null
 asserts "facts: a stale file is replaced" jq -e . "$CLAUDE_TIMESTAMP_FACTS"
+
+# A file whose entries were written to some other version of this shape must be
+# dropped rather than carried across and relabelled as this one. Without the
+# version check the entries would survive, wearing a facts_version that
+# promises a shape they were never written to.
+printf '{"facts_version":1,"clients":{"ancient":{"whatever":true}}}' > "$CLAUDE_TIMESTAMP_FACTS"
+printf '{"session_id":"facts"}' | CLAUDE_CODE_ENTRYPOINT=cli bash "$SCRIPTS/session-start.sh" >/dev/null
+refutes "facts: entries from another shape version are not carried over" \
+  jq -e '.clients | has("ancient")' "$CLAUDE_TIMESTAMP_FACTS"
 
 # Written by rename, so a concurrent reader cannot see a half-written file.
 is "facts: no temp file left behind" "" "$(find "$WORK" -name 'facts.json.*' 2>/dev/null)"

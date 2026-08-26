@@ -7,7 +7,7 @@
 
 [![Release](https://img.shields.io/github/v/release/AraneaDev/claude-timestamp)](https://github.com/AraneaDev/claude-timestamp/releases)
 [![CI](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml/badge.svg)](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-614%20passing-2b8a3e)](tests/run.sh)
+[![Tests](https://img.shields.io/badge/tests-616%20passing-2b8a3e)](tests/run.sh)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-364fc7)](#platform-notes)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
@@ -109,7 +109,7 @@ one home directory, so one install covers everything.
 
 Install both, on each side you actually use.
 
-In WSL:
+In WSL, on Debian or Ubuntu:
 
 ```bash
 sudo apt-get install jq
@@ -125,11 +125,17 @@ claude plugin marketplace add AraneaDev/claude-timestamp
 claude plugin install claude-timestamp@aranea-claude-tools
 ```
 
-The marketplace has to be added from the command line. The desktop app's plugin
-browser lists what your configured marketplaces already offer and cannot add
-one, so those two commands are what makes the plugin appear there at all. With
-no separate Windows install of the CLI, ask Claude to run them for you inside a
-**Local** session in the Code tab, which puts them on the Windows side.
+The desktop app's plugin browser lists what your configured marketplaces
+already offer and cannot add one, so the marketplace step is what makes the
+plugin appear there at all. The commands above need the standalone CLI, which
+is a separate installation from the desktop app. Without it, type the same two
+steps as slash commands in a **Local** session in the Code tab, which needs
+nothing else installed:
+
+```text
+/plugin marketplace add AraneaDev/claude-timestamp
+/plugin install claude-timestamp@aranea-claude-tools
+```
 
 Restart the desktop app after installing `jq`. It reads Windows user and system
 environment variables when it launches and never reads your PowerShell profile,
@@ -455,7 +461,7 @@ no database.
 ## Development
 
 ```bash
-bash tests/run.sh                                    # 614 assertions, no framework
+bash tests/run.sh                                    # 616 assertions, no framework
 shellcheck -S style -e SC1091 hooks/scripts/**/*.sh  # clean
 bash tools/check-docs.sh                             # README against the code
 ```

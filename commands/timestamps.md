@@ -34,8 +34,12 @@ $ARGUMENTS
    version is installed.
 
    Facts are grouped under `clients`, keyed by the Claude Code client that
-   wrote them: `cli`, `claude-vscode`, `claude-desktop`, or `unknown` for a
-   Claude Code too old to name itself. One home directory can serve several
+   wrote them. Any client name Claude Code reports is kept as its own key, so
+   `cli`, `claude-vscode` and `claude-desktop` are examples rather than the
+   whole list, and `sdk-cli` or a name newer than this file would each appear
+   under themselves. `unknown` covers a Claude Code too old to name itself, and
+   anything whose name is not plain letters, digits, dashes or underscores.
+   One home directory can serve several
    clients at once, so read the entry for the client you are being asked
    about, not whichever one happens to be first. Each entry carries a
    `written_at` in seconds since the epoch; compare it against `date +%s` to
