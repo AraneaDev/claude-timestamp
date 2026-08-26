@@ -1,7 +1,7 @@
 {
   "name": "claude-timestamp",
   "displayName": "Claude Timestamp",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "description": "Stamps every message with the local time and how long the turn took, names the tool behind a slow turn, and reports where a session's time actually went. Claude receives the send time of each prompt, so it can reason about when things happened.",
   "author": {
     "name": "AraneaDev",
