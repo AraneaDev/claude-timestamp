@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.9](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.8...v0.0.9) (2026-08-27)
+
+
+### Tests
+
+* measure the hook, not the harness, in the turn-accounting timings ([1ce5d21](https://github.com/AraneaDev/claude-timestamp/commit/1ce5d212a01027d30c74713dd41c4a8e57a847a3))
+
 ## [0.0.8](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.7...v0.0.8) (2026-08-26)
 
 
