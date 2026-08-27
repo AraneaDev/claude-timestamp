@@ -82,7 +82,7 @@ are separate installs](#windows-wsl-and-the-desktop-app-are-separate-installs).
 ## Install
 
 ```bash
-claude plugin marketplace add AraneaDev/claude-timestamp
+claude plugin marketplace add AraneaDev/aranea-claude-tools
 claude plugin install claude-timestamp@aranea-claude-tools
 ```
 
@@ -113,7 +113,7 @@ In WSL, on Debian or Ubuntu:
 
 ```bash
 sudo apt-get install jq
-claude plugin marketplace add AraneaDev/claude-timestamp
+claude plugin marketplace add AraneaDev/aranea-claude-tools
 claude plugin install claude-timestamp@aranea-claude-tools
 ```
 
@@ -121,7 +121,7 @@ On Windows:
 
 ```powershell
 winget install jqlang.jq
-claude plugin marketplace add AraneaDev/claude-timestamp
+claude plugin marketplace add AraneaDev/aranea-claude-tools
 claude plugin install claude-timestamp@aranea-claude-tools
 ```
 
@@ -133,7 +133,7 @@ steps as slash commands in a **Local** session in the Code tab, which needs
 nothing else installed:
 
 ```text
-/plugin marketplace add AraneaDev/claude-timestamp
+/plugin marketplace add AraneaDev/aranea-claude-tools
 /plugin install claude-timestamp@aranea-claude-tools
 ```
 
