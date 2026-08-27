@@ -872,7 +872,12 @@ if command -v jq >/dev/null 2>&1; then
   is "messages do not accumulate waiting" "0" "$(ct_read_counter "$base.wait")"
   is "extra messages do not add turns" "1" "$(ct_read_counter "$base.turns")"
 
-  # Stop closes it, once, for the whole turn.
+  # Stop closes it, once, for the whole turn. The turn start is re-stamped
+  # immediately before the call: the assertions above spawn several processes,
+  # and on a slow runner that harness time lands inside the interval stop.sh
+  # measures, which is what made these four fail on Windows and nowhere else.
+  # Re-stamping measures the hook, not the test.
+  printf '%s' "$(( $(date +%s) - 25 ))" > "$base"
   printf '{"session_id":"acct","hook_event_name":"Stop"}' | bash "$SCRIPTS/stop.sh"
   is_near "Stop records the whole turn as waiting" 25 "$(ct_read_counter "$base.wait")" 2
   printf '{"session_id":"acct","hook_event_name":"Stop"}' | bash "$SCRIPTS/stop.sh"
