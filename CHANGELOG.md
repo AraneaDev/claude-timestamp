@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.10](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.9...v0.0.10) (2026-08-27)
+
+
+### Documentation
+
+* link the README to the project page ([939230b](https://github.com/AraneaDev/claude-timestamp/commit/939230b106e1d48683ef4ce65e2b966a6c4d3420))
+
 ## [0.0.9](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.8...v0.0.9) (2026-08-27)
 
 
