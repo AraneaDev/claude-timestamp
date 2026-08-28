@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.12](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.11...v0.0.12) (2026-08-28)
+
+
+### Continuous integration
+
+* move off the actions still running on Node 20 ([394afba](https://github.com/AraneaDev/claude-timestamp/commit/394afbae929cecbda15515b79ee4328769a822f4))
+
 ## [0.0.11](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.10...v0.0.11) (2026-08-28)
 
 
