@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.11](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.10...v0.0.11) (2026-08-28)
+
+
+### Documentation
+
+* point at the site's marketplace ([0b9a3a7](https://github.com/AraneaDev/claude-timestamp/commit/0b9a3a7cda877c7e5377ae25c64b39f88cb02b3b))
+
 ## [0.0.10](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.9...v0.0.10) (2026-08-27)
 
 
