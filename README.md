@@ -83,8 +83,8 @@ are separate installs](#windows-wsl-and-the-desktop-app-are-separate-installs).
 ## Install
 
 ```bash
-claude plugin marketplace add AraneaDev/aranea-claude-tools
-claude plugin install claude-timestamp@aranea-claude-tools
+claude plugin marketplace add https://aranea-development.nl/plugins/marketplace.json
+claude plugin install claude-timestamp@aranea
 ```
 
 Hooks are bound when a session starts, so start a new session before markers
@@ -114,16 +114,16 @@ In WSL, on Debian or Ubuntu:
 
 ```bash
 sudo apt-get install jq
-claude plugin marketplace add AraneaDev/aranea-claude-tools
-claude plugin install claude-timestamp@aranea-claude-tools
+claude plugin marketplace add https://aranea-development.nl/plugins/marketplace.json
+claude plugin install claude-timestamp@aranea
 ```
 
 On Windows:
 
 ```powershell
 winget install jqlang.jq
-claude plugin marketplace add AraneaDev/aranea-claude-tools
-claude plugin install claude-timestamp@aranea-claude-tools
+claude plugin marketplace add https://aranea-development.nl/plugins/marketplace.json
+claude plugin install claude-timestamp@aranea
 ```
 
 The desktop app's plugin browser lists what your configured marketplaces
@@ -134,8 +134,8 @@ steps as slash commands in a **Local** session in the Code tab, which needs
 nothing else installed:
 
 ```text
-/plugin marketplace add AraneaDev/aranea-claude-tools
-/plugin install claude-timestamp@aranea-claude-tools
+/plugin marketplace add https://aranea-development.nl/plugins/marketplace.json
+/plugin install claude-timestamp@aranea
 ```
 
 Restart the desktop app after installing `jq`. It reads Windows user and system
