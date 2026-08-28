@@ -22,7 +22,7 @@ jobs:
         # and on Windows that means Git Bash.
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install jq
         run: |
@@ -61,7 +61,7 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Ensure shellcheck is available
         # The Ubuntu runner image already ships shellcheck, so the usual
@@ -126,7 +126,7 @@ jobs:
     # down, a count stops matching, an image gets renamed. All cheap to check.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install jq
         run: command -v jq >/dev/null || (sudo apt-get update && sudo apt-get install -y jq)
@@ -137,7 +137,7 @@ jobs:
   manifests:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Validate JSON
         run: |
