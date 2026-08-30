@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.13](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.12...v0.0.13) (2026-08-30)
+
+
+### Documentation
+
+* name the SSH clone failure in the install section ([#41](https://github.com/AraneaDev/claude-timestamp/issues/41)) ([4d7a432](https://github.com/AraneaDev/claude-timestamp/commit/4d7a4326009ba265fff06b65966836048734ab56))
+
 ## [0.0.12](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.11...v0.0.12) (2026-08-28)
 
 
