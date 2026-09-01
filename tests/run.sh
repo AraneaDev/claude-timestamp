@@ -688,6 +688,28 @@ if command -v jq >/dev/null 2>&1; then
   out="$(printf '{"session_id":"test-session","index":3,"delta":"more text"}' | bash "$SCRIPTS/message-display.sh")"
   is "message-display emits nothing for later batches" "" "$out"
 
+  # A fenced block only opens when its fence starts a line. With the marker in
+  # front of it the fence is mid-line, markdown stops seeing a fence, and the
+  # reader gets three literal backticks over an unformatted block. Any command
+  # whose whole reply is a code block hits this, and several do.
+  # shellcheck disable=SC2016  # the backticks are a markdown fence inside JSON
+  out="$(printf '{"session_id":"test-session","index":0,"delta":"```text\\nrow\\n```"}' | bash "$SCRIPTS/message-display.sh")"
+  fenced="$(printf '%s' "$out" | jq -r '.hookSpecificOutput.displayContent')"
+  is "a leading code fence still starts its own line" "\`\`\`text" \
+    "$(printf '%s\n' "$fenced" | sed -n '2p')"
+
+  # The tilde fence is the other half of the same rule, and three spaces of
+  # indent still opens one.
+  out="$(printf '{"session_id":"test-session","index":0,"delta":"   ~~~\\nrow\\n~~~"}' | bash "$SCRIPTS/message-display.sh")"
+  is "an indented tilde fence is treated the same" "   ~~~" \
+    "$(printf '%s\n' "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.displayContent')" | sed -n '2p')"
+
+  # The break must not cost every ordinary message a line. Prose keeps the
+  # marker where it has always been, on the same line as the text.
+  out="$(printf '{"session_id":"test-session","index":0,"delta":"Just prose."}' | bash "$SCRIPTS/message-display.sh")"
+  is "prose keeps the marker on its own line" "1" \
+    "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.displayContent' | wc -l | tr -d ' ')"
+
   # Whitespace around the colon is legal JSON, and the guard that decides
   # whether to look closer must not be fooled by it.
   out="$(printf '{"session_id":"test-session", "index" : 0 , "delta":"spaced"}' | bash "$SCRIPTS/message-display.sh")"

@@ -176,9 +176,20 @@ fi
 # message -- has already left the script above this line.
 ct_note_drawn
 
+# A fenced code block only opens when its fence starts a line. Putting the
+# marker in front of one leaves the fence mid-line, markdown stops seeing a
+# fence at all, and the reader gets three literal backticks and an unformatted
+# block. So a message that opens with a fence gets the marker on its own line
+# above it, which is what the gap divider already does for its own reasons.
+#
+# Up to three leading spaces still opens a fence, so the test allows them.
 printf '%s' "$input" | jq --arg prefix "${divider}${marker}" '{
   hookSpecificOutput: {
     hookEventName: "MessageDisplay",
-    displayContent: ($prefix + .delta)
+    displayContent: (
+      if ((.delta // "") | test("^ {0,3}(```|~~~)")) then $prefix + "\n" + .delta
+      else $prefix + .delta
+      end
+    )
   }
 }'
