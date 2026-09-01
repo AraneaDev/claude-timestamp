@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.15](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.14...v0.0.15) (2026-09-01)
+
+
+### Fixes
+
+* keep a leading code fence at the start of its line ([#46](https://github.com/AraneaDev/claude-timestamp/issues/46)) ([07f11ca](https://github.com/AraneaDev/claude-timestamp/commit/07f11ca5439b623606f4d325d2ca16d48c32035a))
+
 ## [0.0.14](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.13...v0.0.14) (2026-09-01)
 
 
