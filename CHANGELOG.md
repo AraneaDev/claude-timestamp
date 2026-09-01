@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.0.14](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.13...v0.0.14) (2026-09-01)
+
+
+### Documentation
+
+* link the project site from the readme ([#45](https://github.com/AraneaDev/claude-timestamp/issues/45)) ([17c7d16](https://github.com/AraneaDev/claude-timestamp/commit/17c7d166b390faec55cb1dbb2c0ca69db97f26af))
+* point the badge at the renamed /tools section ([#43](https://github.com/AraneaDev/claude-timestamp/issues/43)) ([d176409](https://github.com/AraneaDev/claude-timestamp/commit/d176409cfb1fcd02cfac37e7b014081e6f2d4326))
+
 ## [0.0.13](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.12...v0.0.13) (2026-08-30)
 
 
