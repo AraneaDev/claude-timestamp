@@ -212,6 +212,233 @@ fresh 'MARKER=%time'
 ct_render_marker "$CT_MARKER_TEMPLATE" 13:22:13 '' '' ''
 is "config: rendering does not clobber the template" "%time" "$CT_MARKER_TEMPLATE"
 
+# --- the parser itself ------------------------------------------------------
+#
+# _ct_read_config_file is called directly here rather than through
+# ct_load_config, because ct_load_config runs the validator afterwards and an
+# unusable value is replaced by its default before an assertion could see what
+# the parser actually stored. The cases that are about what a user ends up
+# with call ct_validate_config explicitly, so both halves stay visible.
+PARSE="$WORK/parse.conf"
+
+# Every CT_* variable and its value, one line each, so a parse can be compared
+# against the state it started from. LC_ALL=C so the ordering does not depend
+# on the locale the suite happens to run under.
+parse_dump() {
+  local n
+  for n in ${!CT_@}; do printf '%s=%s\n' "$n" "${!n}"; done | LC_ALL=C sort
+}
+
+# The names of the variables that a parse created or gave a new value. Lines
+# present in the second dump and not the first are exactly those, which is why
+# the comparison is on name=value pairs rather than on names alone: a name-set
+# comparison cannot see a variable that already existed being written to.
+parse_changed() {
+  local out
+  out="$(LC_ALL=C comm -13 <(printf '%s\n' "$1") <(printf '%s\n' "$2") \
+         | sed 's/=.*//' | tr '\n' ' ')"
+  printf '%s' "${out% }"
+}
+
+# Every key the whitelist names, in one file. A key that quietly stops being
+# read fails here rather than in whichever feature happens to use it.
+fresh
+cat > "$PARSE" <<'CONF'
+ENABLED=off
+TZ=Asia/Tokyo
+DISPLAY_FORMAT=short
+CONTEXT_FORMAT=iso
+COLOR=cyan
+MARKER=%time
+TIME_COLOR=green
+ELAPSED_COLOR=blue
+TOOL_COLOR=magenta
+ELAPSED=off
+DATE_ROLLOVER=off
+SLOW_AFTER=5
+SLOW_COLOR=red
+IDLE_AFTER=7
+SUMMARY=off
+SUBAGENTS=off
+TOOL_TIMING=on
+HISTORY=off
+HISTORY_LIMIT=9
+INJECT_CONTEXT=false
+CONF
+parse_before="$(parse_dump)"
+_ct_read_config_file "$PARSE"
+parse_after="$(parse_dump)"
+is "parse: ENABLED"        "off"        "$CT_ENABLED"
+is "parse: TZ"             "Asia/Tokyo" "$CT_TZ"
+is "parse: DISPLAY_FORMAT" "short"      "$CT_DISPLAY_FORMAT"
+is "parse: CONTEXT_FORMAT" "iso"        "$CT_CONTEXT_FORMAT"
+is "parse: COLOR"          "cyan"       "$CT_COLOR"
+# The one key whose variable is not its own name, because the renderer already
+# owns CT_MARKER for the rendered result.
+is "parse: MARKER lands in the template variable" "%time" "$CT_MARKER_TEMPLATE"
+is "parse: TIME_COLOR"     "green"      "$CT_TIME_COLOR"
+is "parse: ELAPSED_COLOR"  "blue"       "$CT_ELAPSED_COLOR"
+is "parse: TOOL_COLOR"     "magenta"    "$CT_TOOL_COLOR"
+is "parse: ELAPSED"        "off"        "$CT_ELAPSED"
+is "parse: DATE_ROLLOVER"  "off"        "$CT_DATE_ROLLOVER"
+is "parse: SLOW_AFTER"     "5"          "$CT_SLOW_AFTER"
+is "parse: SLOW_COLOR"     "red"        "$CT_SLOW_COLOR"
+is "parse: IDLE_AFTER"     "7"          "$CT_IDLE_AFTER"
+is "parse: SUMMARY"        "off"        "$CT_SUMMARY"
+is "parse: SUBAGENTS"      "off"        "$CT_SUBAGENTS"
+is "parse: TOOL_TIMING"    "on"         "$CT_TOOL_TIMING"
+is "parse: HISTORY"        "off"        "$CT_HISTORY"
+is "parse: HISTORY_LIMIT"  "9"          "$CT_HISTORY_LIMIT"
+is "parse: INJECT_CONTEXT" "false"      "$CT_INJECT_CONTEXT"
+# Twenty keys in, exactly those twenty variables touched and nothing else. The
+# twenty assertions above say each key reached the right variable; this one
+# says no other CT_* variable moved on the way -- a reader that also wrote the
+# key's own name, or that let MARKER land in CT_MARKER as well as in the
+# template, shows up here as an extra name in the list.
+is "parse: exactly the twenty whitelisted variables are written" \
+  "CT_COLOR CT_CONTEXT_FORMAT CT_DATE_ROLLOVER CT_DISPLAY_FORMAT CT_ELAPSED CT_ELAPSED_COLOR CT_ENABLED CT_HISTORY CT_HISTORY_LIMIT CT_IDLE_AFTER CT_INJECT_CONTEXT CT_MARKER_TEMPLATE CT_SLOW_AFTER CT_SLOW_COLOR CT_SUBAGENTS CT_SUMMARY CT_TIME_COLOR CT_TOOL_COLOR CT_TOOL_TIMING CT_TZ" \
+  "$(parse_changed "$parse_before" "$parse_after")"
+
+# A value may itself contain '=', so the split is on the first one only.
+fresh
+printf 'TOOL_TIMING=on=off\n' > "$PARSE"
+_ct_read_config_file "$PARSE"
+is "parse: the value splits on the first = only" "on=off" "$CT_TOOL_TIMING"
+
+fresh
+printf 'COLOR = cyan\nDISPLAY_FORMAT =    \n' > "$PARSE"
+_ct_read_config_file "$PARSE"
+is "parse: spaces either side of = are trimmed" "cyan" "$CT_COLOR"
+is "parse: a value of only spaces trims to empty" "" "$CT_DISPLAY_FORMAT"
+
+# Quote stripping needs a matched pair. A lone opening quote is part of the
+# value, which is what makes it reach the validator as the nonsense it is
+# rather than being silently repaired into something plausible.
+fresh
+printf 'COLOR="cyan\nTZ=%s\n' "'UTC" > "$PARSE"
+_ct_read_config_file "$PARSE"
+is "parse: an unmatched double quote stays in the value" '"cyan' "$CT_COLOR"
+is "parse: an unmatched single quote stays in the value" "'UTC" "$CT_TZ"
+ct_validate_config
+is "parse: the unmatched quote makes the colour invalid" "dim" "$CT_COLOR"
+contains "parse: and the problem names the value as written" \
+  'COLOR="cyan is not valid' "$CT_CONFIG_PROBLEMS"
+
+# A matched pair around nothing is how a config file says "empty", which two
+# settings read as opposite answers: no colour name at all is a typo, no part
+# colour means inherit the base one.
+fresh
+printf 'COLOR=""\nTIME_COLOR=%s\n' "''" > "$PARSE"
+_ct_read_config_file "$PARSE"
+is "parse: an empty double-quoted value strips to empty" "" "$CT_COLOR"
+is "parse: an empty single-quoted value strips to empty" "" "$CT_TIME_COLOR"
+ct_validate_config
+is "parse: an empty COLOR is invalid and falls back" "dim" "$CT_COLOR"
+is "parse: an empty TIME_COLOR means inherit, not invalid" "" "$CT_TIME_COLOR"
+
+# Written literally: this case is about the bytes in the file. One CR-ended
+# line with no newline after it is both awkward shapes at once.
+#
+# What this pins is the outcome the contract states -- a CRLF config reads the
+# same as a LF one -- rather than the `%$'\r'` line specifically. Measured with
+# that line removed, this and the CRLF case above both still pass, because CR
+# is in [[:space:]] and the trailing-whitespace trim takes it off the value
+# anyway. The explicit strip is belt and braces for a shape the trim happens to
+# cover; there is no input that reaches only it, so there is nothing further to
+# assert here.
+fresh
+printf 'COLOR=cyan\r' > "$PARSE"
+_ct_read_config_file "$PARSE"
+is "parse: a CR-ended final line with no newline is still read" "cyan" "$CT_COLOR"
+
+# The =-less guard is the load-bearing half of this one: without it the line
+# "COLOR" parses as key and value both "COLOR" and the setting changes.
+#
+# The leading-'#' guard, measured, is not observable from out here at all. A
+# comment that mentions a setting still carries its '#' into the key -- '#' is
+# not whitespace, so no trim removes it -- and "# COLOR" is not on the
+# whitelist. Removing the guard entirely changes nothing this function can be
+# asked about. It stays as a cheap early exit, and this case asserts the
+# outcome the contract names rather than pretending to pin it.
+fresh
+printf '\n   \n# COLOR=banana\nmalformed line with no equals\nCOLOR\n' > "$PARSE"
+_ct_read_config_file "$PARSE"
+is "parse: blank, whitespace, comment and =-less lines are skipped" "dim" "$CT_COLOR"
+
+# The comment guard is anchored at the first character, so an indented '#' is
+# not a comment. The line has an '=' in it and is parsed as the key '# COLOR',
+# which is not on the whitelist, so the setting it mentions is still left
+# alone. Same outcome, different reason, and worth pinning: a reader that
+# matched the key loosely -- on a substring, or after stripping the punctuation
+# out of it -- would set COLOR to banana off a line that is only talking about
+# it. (A reader that trimmed before testing for '#' would skip the line as a
+# comment and land on the same answer, so that variant is not what this
+# detects; the loose match is.)
+fresh
+printf '   # COLOR=banana\n' > "$PARSE"
+_ct_read_config_file "$PARSE"
+is "parse: an indented comment does not set the key it names" "dim" "$CT_COLOR"
+
+# An empty key matches no arm of the case statement, so nothing is assigned
+# and nothing new appears.
+fresh
+parse_before="$(parse_dump)"
+printf '=orphan\n' > "$PARSE"
+_ct_read_config_file "$PARSE"
+is "parse: a line with an empty key changes nothing" \
+  "dim 24h on" "$CT_COLOR $CT_DISPLAY_FORMAT $CT_ELAPSED"
+is "parse: a line with an empty key touches no variable at all" \
+  "" "$(parse_changed "$parse_before" "$(parse_dump)")"
+
+# Unknown keys are ignored rather than being an error, so a file written by a
+# newer version stays readable by an older one. What matters is that the keys
+# around them still land: a reader that gave up on the first unknown key would
+# read the file down to THEME and no further.
+fresh
+parse_before="$(parse_dump)"
+printf 'COLOR=cyan\nUNKNOWN_KEY=whatever\nTHEME=x\nELAPSED=off\n' > "$PARSE"
+_ct_read_config_file "$PARSE"
+is "parse: an unknown key leaves the key before it alone" "cyan" "$CT_COLOR"
+is "parse: an unknown key leaves the key after it alone"  "off"  "$CT_ELAPSED"
+# Ignored means ignored, not stored under a name nobody reads. A reader that
+# assigned by name would leave CT_UNKNOWN_KEY and CT_THEME behind here.
+is "parse: an unknown key is not stored under a variable of its own" \
+  "CT_COLOR CT_ELAPSED" "$(parse_changed "$parse_before" "$(parse_dump)")"
+
+# Parsed, never sourced. The ct_load_config case above proves no file gets
+# created; these prove what was stored instead, which is the other half of the
+# same claim -- a reader that ran the command and stored its empty output
+# would pass a check that only looked for the file.
+fresh
+rm -rf "$WORK/victim" "$WORK/pwned-tick"
+mkdir -p "$WORK/victim"
+# shellcheck disable=SC2016  # the literal backticks are exactly what is tested
+printf 'MARKER=`touch %s/pwned-tick`\nTZ=UTC;rm -rf %s/victim\n' "$WORK" "$WORK" > "$PARSE"
+_ct_read_config_file "$PARSE"
+is "parse: a backticked value is stored as literal text" \
+  '`touch '"$WORK"'/pwned-tick`' "$CT_MARKER_TEMPLATE"
+is "parse: a value carrying a shell separator is stored whole" \
+  "UTC;rm -rf $WORK/victim" "$CT_TZ"
+if [ -e "$WORK/pwned-tick" ]; then
+  fail "parse: no command in the file is run" "no file created" "the backticks ran"
+else
+  pass "parse: no command in the file is run"
+fi
+asserts "parse: a value naming a directory does not delete it" test -d "$WORK/victim"
+rm -rf "$WORK/victim"
+
+# ct_load_config calls this twice, the user file and then the project file,
+# and the project layer is only worth having if the second call overrides the
+# keys it names and nothing else.
+fresh
+printf 'COLOR=cyan\nTZ=Asia/Tokyo\nELAPSED=off\n' > "$PARSE"
+printf 'COLOR=green\n' > "$WORK/parse-over.conf"
+_ct_read_config_file "$PARSE"
+_ct_read_config_file "$WORK/parse-over.conf"
+is "parse: a second file overrides the key it sets" "green" "$CT_COLOR"
+is "parse: a second file leaves a key it does not set" "Asia/Tokyo" "$CT_TZ"
+is "parse: including one already moved off its default" "off" "$CT_ELAPSED"
+
 echo
 echo "format presets"
 
@@ -1084,6 +1311,136 @@ if command -v jq >/dev/null 2>&1; then
   printf '{"session_id":"acct","hook_event_name":"Stop"}' | bash "$SCRIPTS/stop.sh"
   is "ENABLED=off records no waiting" "0" "$(ct_read_counter "$base.wait")"
 
+  # --- the subagent guard ---------------------------------------------------
+  #
+  # Stop closes the USER's turn, and a subagent completing is not the end of
+  # one. A payload carrying an agent_id is therefore a complete no-op: exit 0,
+  # nothing on stdout, and the turn left exactly as it was for the Stop that
+  # really does end it. Anything less and a session full of subagents reports
+  # the user waiting through turns that were never theirs.
+
+  fresh
+  ct_clear_state "acct"; mkdir -p "$(ct_state_dir)"
+  started="$(( $(date +%s) - 30 ))"
+  printf '%s' "$started" > "$base"
+  out="$(printf '{"session_id":"acct","agent_id":"sub-1","hook_event_name":"Stop"}' \
+         | bash "$SCRIPTS/stop.sh")"
+  rc=$?
+  is "a subagent Stop exits 0"          "0" "$rc"
+  is "a subagent Stop emits nothing"    ""  "$out"
+  is "a subagent Stop records no waiting" "0" "$(ct_read_counter "$base.wait")"
+  refutes "a subagent Stop leaves the turn open" test -e "$base.closed"
+  is "a subagent Stop does not move the turn's start" "$started" "$(ct_read_counter "$base")"
+
+  # ...and the turn it declined to close is still closable afterwards, which
+  # is the whole point of leaving it open rather than merely of writing less.
+  printf '{"session_id":"acct","hook_event_name":"Stop"}' | bash "$SCRIPTS/stop.sh"
+  is_near "the real Stop still closes the turn the subagent left alone" 30 \
+     "$(ct_read_counter "$base.wait")" 2
+
+  # An explicitly empty agent_id is the main conversation, not a subagent.
+  # The three fields are packed into one \x1f-joined string precisely so an
+  # empty one cannot be collapsed away, and this is the half of that which
+  # would break if the guard tested the wrong emptiness.
+  fresh
+  ct_clear_state "acct"; mkdir -p "$(ct_state_dir)"
+  printf '%s' "$(( $(date +%s) - 30 ))" > "$base"
+  printf '{"session_id":"acct","agent_id":"","hook_event_name":"Stop"}' \
+    | bash "$SCRIPTS/stop.sh"
+  is_near "an empty agent_id closes the turn" 30 "$(ct_read_counter "$base.wait")" 2
+  asserts "an empty agent_id marks the turn closed" test -e "$base.closed"
+
+  # No agent_id key at all takes the `// ""` default, which must land in the
+  # same slot an empty string would: a join order that put it anywhere else
+  # would leave a session id or a cwd sitting in agent_id, and every main
+  # conversation would then stop being measured.
+  fresh
+  ct_clear_state "acct"; mkdir -p "$(ct_state_dir)"
+  printf '%s' "$(( $(date +%s) - 30 ))" > "$base"
+  printf '{"session_id":"acct","hook_event_name":"Stop"}' | bash "$SCRIPTS/stop.sh"
+  is_near "an absent agent_id closes the turn" 30 "$(ct_read_counter "$base.wait")" 2
+
+  # The field-order defect message-display.sh already carried: split on IFS
+  # whitespace, an empty middle field collapses and shifts the next one into
+  # its place. Here that would empty agent_id and close a subagent's turn.
+  fresh
+  ct_clear_state "acct"; mkdir -p "$(ct_state_dir)"
+  printf '%s' "$(( $(date +%s) - 30 ))" > "$base"
+  out="$(printf '{"session_id":"acct","cwd":"","agent_id":"sub-1"}' \
+         | bash "$SCRIPTS/stop.sh")"
+  is "an empty cwd does not shift agent_id out of position" "0" \
+     "$(ct_read_counter "$base.wait")"
+  is "a subagent behind an empty cwd still emits nothing" "" "$out"
+  refutes "a subagent behind an empty cwd leaves the turn open" test -e "$base.closed"
+
+  # The same shift in the other direction: a populated cwd with an empty
+  # agent_id after it. The cwd must still reach ct_load_config, so the project
+  # layer under it decides whether the turn is recorded.
+  SUBG="$WORK/subguard"
+  rm -rf "$SUBG"
+  mkdir -p "$SUBG/home/.claude" "$SUBG/home/on-repo/.claude" \
+           "$SUBG/home/off-repo/.claude" "$SUBG/home/plain"
+  printf 'ENABLED=off\n' > "$SUBG/home/.claude/claude-timestamp.conf"
+  printf 'ENABLED=on\n'  > "$SUBG/home/on-repo/.claude/claude-timestamp.conf"
+  printf 'ENABLED=off\n' > "$SUBG/home/off-repo/.claude/claude-timestamp.conf"
+
+  stop_in() {
+    # $1 = cwd reported in the payload, $2 = agent_id. CLAUDE_TIMESTAMP_CONFIG
+    # names one exact file and disables the project layer, so it has to go.
+    ( unset CLAUDE_TIMESTAMP_CONFIG
+      HOME="$SUBG/home"
+      printf '{"session_id":"acct","cwd":"%s","agent_id":"%s"}' "$1" "$2" \
+        | bash "$SCRIPTS/stop.sh" )
+  }
+
+  fresh
+  ct_clear_state "acct"; mkdir -p "$(ct_state_dir)"
+  printf '%s' "$(( $(date +%s) - 30 ))" > "$base"
+  stop_in "$SUBG/home/on-repo" ""
+  is_near "a populated cwd with an empty agent_id closes the turn" 30 \
+     "$(ct_read_counter "$base.wait")" 2
+
+  # The control for the assertion above: the account config says off, so the
+  # turn was closed only because the project file at that cwd was found. A cwd
+  # with no project layer falls back and records nothing.
+  fresh
+  ct_clear_state "acct"; mkdir -p "$(ct_state_dir)"
+  printf '%s' "$(( $(date +%s) - 30 ))" > "$base"
+  stop_in "$SUBG/home/plain" ""
+  is "a cwd with no project layer falls back to the account config" "0" \
+     "$(ct_read_counter "$base.wait")"
+
+  # The guard sits above ct_load_config, so no configuration can be what makes
+  # it hold. Under a project file that switches the plugin ON -- the one
+  # setting that would otherwise have the hook write -- a subagent payload
+  # still writes nothing.
+  fresh
+  ct_clear_state "acct"; mkdir -p "$(ct_state_dir)"
+  printf '%s' "$(( $(date +%s) - 30 ))" > "$base"
+  out="$(stop_in "$SUBG/home/on-repo" "sub-1")"
+  is "a subagent is skipped under a project config that enables the hook" "0" \
+     "$(ct_read_counter "$base.wait")"
+  is "and says nothing while doing it" "" "$out"
+  refutes "and leaves the turn open" test -e "$base.closed"
+
+  # And under a project file that switches it OFF, where the config would have
+  # stopped the write anyway: the state is untouched either way.
+  fresh
+  ct_clear_state "acct"; mkdir -p "$(ct_state_dir)"
+  printf '%s' "$(( $(date +%s) - 30 ))" > "$base"
+  # Every name in the state directory is one this test wrote, so ls reads them
+  # safely; find -printf, the usual replacement, is GNU-only and the suite runs
+  # on BSD and Git Bash too.
+  # shellcheck disable=SC2012
+  state_ls() { ls "$(ct_state_dir)" | sort | tr '\n' ' '; }
+  before="$(state_ls)"
+  out="$(stop_in "$SUBG/home/off-repo" "sub-1")"
+  is "a subagent under ENABLED=off writes no new state file" "$before" \
+     "$(state_ls)"
+  is "a subagent under ENABLED=off emits nothing" "" "$out"
+  is "a subagent under ENABLED=off records no waiting" "0" \
+     "$(ct_read_counter "$base.wait")"
+
   fresh
   ct_clear_state "acct"
 
@@ -1379,6 +1736,153 @@ out="$( CLAUDE_TIMESTAMP_CONFIG="$WORK/inject.conf" \
 is "setup: refuses a marker containing a newline" "2" "$rc"
 is "setup: and writes nothing" "0" \
    "$( [ -e "$WORK/inject.conf" ] && wc -l < "$WORK/inject.conf" | tr -d ' ' || echo 0 )"
+
+echo
+echo "invalid value messages"
+
+# _ct_say_invalid owns the failure message for every validator named in
+# CT_FLAG_TABLE, which is what makes the flag path and the wizard say the same
+# thing about the same bad value. One arm per validator, pinned here, because
+# an arm that stops naming the setting or stops echoing the offending value
+# leaves the /timestamps command relaying a sentence the user cannot act on.
+#
+# Every case reads stderr with `2>&1 >/dev/null`, so an assertion here is about
+# what the user is told and never about what a successful write would have
+# printed. That stdout is left empty is a separate claim, asserted on its own
+# below: stdout carries the preview of a successful write, and a refusal mixed
+# into it is one the caller cannot tell apart from success.
+fresh
+# shellcheck disable=SC2069  # the order is the point: stderr to the capture, stdout to /dev/null
+invalid() {
+  CLAUDE_TIMESTAMP_CONFIG="$WORK/invalid.conf" \
+    bash "$SCRIPTS/setup.sh" "$@" 2>&1 >/dev/null
+}
+
+is "invalid: ct_is_onoff names the flag, the rule and the value" \
+   "--enabled must be 'on' or 'off', got 'maybe'." \
+   "$(invalid --enabled=maybe)"
+out="$(CLAUDE_TIMESTAMP_CONFIG="$WORK/invalid.conf" \
+       bash "$SCRIPTS/setup.sh" --enabled=maybe >/dev/null 2>&1)" && rc=0 || rc=$?
+is "invalid: and refusing a value exits 2" "2" "$rc"
+
+# --inject-context is the one flag spelled true/false rather than on/off, so
+# its message must not tell the user to write "on".
+is "invalid: ct_is_bool asks for true/false, not on/off" \
+   "--inject-context must be 'true' or 'false', got 'yes'." \
+   "$(invalid --inject-context=yes)"
+
+is "invalid: ct_is_seconds is labelled by the flag as typed" \
+   "--slow-after must be a whole number of seconds, got 'soon'." \
+   "$(invalid --slow-after=soon)"
+
+# HISTORY_LIMIT has no "0 disables" reading, so its message carries a second
+# line pointing at the switch that does turn history off. Both lines matter:
+# without the first the refusal has no rule in it, without the second the user
+# is left with no way to express what they asked for.
+is "invalid: ct_is_history_limit states the rule" \
+   "--history-limit must be a whole number of 1 or more, got '0'." \
+   "$(invalid --history-limit=0 | sed -n 1p)"
+is "invalid: and points at the switch that keeps no history" \
+   "To keep no history at all, use --history=off." \
+   "$(invalid --history-limit=0 | sed -n 2p)"
+
+# A non-numeric limit fails the same validator, so it must get the same arm.
+# ct_is_history_limit calls ct_is_seconds first, and borrowing that validator's
+# message here would tell the user any whole number will do -- including the 0
+# the row above refuses.
+out="$(invalid --history-limit=abc)"
+contains "invalid: a non-numeric limit takes the history-limit arm" "1 or more" "$out"
+lacks    "invalid: not the seconds arm" "whole number of seconds" "$out"
+
+# The whole colour list, deliberately: ct_is_valid_color is the only other
+# place the accepted names are written down, and a colour added there but not
+# here is a value the flag takes while the refusal says it does not exist.
+is "invalid: ct_is_valid_color lists every colour it accepts" \
+   "Unknown color 'banana'. Pick: none dim gray red green yellow blue magenta cyan." \
+   "$(invalid --color=banana)"
+
+# A part colour accepts one word the plain colours do not, and the message is
+# the only place the user is told so.
+is "invalid: ct_is_valid_part_color also offers the inherit sentinel" \
+   "Unknown colour 'banana'. Pick: none dim gray red green yellow blue magenta cyan, or 'inherit' to follow --color." \
+   "$(invalid --time-color=banana)"
+
+is "invalid: ct_is_valid_format names the presets and the % rule" \
+   "--display must be 24h, short, 12h, iso, or a strftime string containing %, got 'nonsense'." \
+   "$(invalid --display=nonsense)"
+
+# The marker message is three lines because a template has three ways to be
+# wrong: an unknown part, a group holding none of them, and unbalanced braces.
+out="$(invalid --marker='%elapsd')"
+contains "invalid: ct_is_valid_marker says the template is unusable" \
+         "That marker template is not usable." "$out"
+contains "invalid: and names the four parts" \
+         "%time, %elapsed, %tool and %date" "$out"
+contains "invalid: and mentions the braces balancing" \
+         "braces must balance" "$out"
+
+# Two different timezone failures with two different messages. A name of the
+# wrong shape never reaches the zoneinfo lookup, so it gets the arm here...
+out="$(invalid --tz=..)"
+is "invalid: ct_is_valid_tz asks for an IANA name" \
+   "Timezone must be an IANA name like Europe/Amsterdam." "$out"
+lacks "invalid: and does not claim the zone is unknown" "Unknown timezone" "$out"
+
+# ...while a well-shaped name this machine has never heard of gets valid_tz's
+# own message, which quotes the zone back. Needs a timezone database to reach:
+# without one valid_tz refuses earlier, with different advice again.
+if ct_tz_supported && [ -d /usr/share/zoneinfo ]; then
+  contains "invalid: an unknown zone is a different message that quotes it" \
+           "Unknown timezone 'Mars/Olympus'." "$(invalid --tz=Mars/Olympus)"
+else
+  skip "invalid: an unknown zone is a different message that quotes it" \
+       "no timezone database, so the zoneinfo lookup is not reached"
+fi
+
+is "invalid: a refusal writes nothing to stdout" "" \
+   "$(CLAUDE_TIMESTAMP_CONFIG="$WORK/invalid.conf" \
+      bash "$SCRIPTS/setup.sh" --color=banana 2>/dev/null)"
+
+# The wizard passes the config key rather than a flag, and the message follows
+# the label it is given. A user who answered a question was never offered a
+# --slow-after to correct, so naming one would send them looking for a flag
+# they did not type.
+fresh
+wiz="$(printf 'on\nlocal\n24h\non\nsoon\n30\nlater\n600\noff\nnone\n\nfalse\nn\n' \
+        | bash "$SCRIPTS/setup.sh" 2>&1 >/dev/null)"
+contains "invalid: the wizard labels a bad slow-after with the key" \
+         "SLOW_AFTER must be a whole number of seconds, got 'soon'." "$wiz"
+contains "invalid: the wizard labels a bad idle-after with the key" \
+         "IDLE_AFTER must be a whole number of seconds, got 'later'." "$wiz"
+lacks "invalid: and never names a flag the wizard user did not type" \
+      "--slow-after" "$wiz"
+
+# Two claims no flag and no wizard answer can reach.
+#
+# The default arm is unreachable through a flag because every row in
+# CT_FLAG_TABLE names a validator that has an arm of its own -- it exists for
+# the row added tomorrow with one that does not, and silence there would be a
+# refusal with no reason attached.
+#
+# An empty offending value is unreachable the same way: a flag given as `--x=`
+# is resolved by the table's empty policy before any validator sees it, and a
+# blank wizard answer takes the offered default. So both are called directly.
+# setup.sh runs main on its last line and main returns normally once a flag has
+# been written, which is what leaves its functions defined after a source.
+# shellcheck disable=SC2069  # stderr to the capture, stdout discarded, as above
+say_invalid_direct() {
+  CLAUDE_TIMESTAMP_CONFIG="$WORK/say-direct.conf" \
+    bash -c 'source "$1/setup.sh" --color=cyan >/dev/null 2>&1
+             shift
+             _ct_say_invalid "$@"' _ "$SCRIPTS" "$@" 2>&1 >/dev/null
+}
+
+is "invalid: an unrecognised validator still produces a sentence" \
+   "--newflag does not accept 'val'." \
+   "$(say_invalid_direct ct_is_something_new --newflag val)"
+is "invalid: an empty offending value is still quoted" \
+   "SLOW_AFTER must be a whole number of seconds, got ''." \
+   "$(say_invalid_direct ct_is_seconds SLOW_AFTER '')"
 
 echo
 echo "tool timing"
@@ -2041,6 +2545,325 @@ contains "validate: and names it" "TIME_COLOR=banana is not valid" "$CT_CONFIG_P
 
 fresh 'TIME_COLOR=none'
 is "validate: none is a usable part colour" "none" "$CT_TIME_COLOR"
+
+# --- ct_validate_config, arm by arm -----------------------------------------
+#
+# The validator is the reason every other file can read a CT_* variable without
+# checking it first: whatever the config file said, by the time it returns each
+# of the twenty settings holds a usable value and CT_CONFIG_PROBLEMS names the
+# ones that had to be replaced. Only seven of its arms had a case of their own,
+# so an arm wired to the wrong validator, or reaching for the neighbouring
+# row's default, was invisible for most of the file.
+
+# Every setting the file can carry, each set to a legal value that is NOT its
+# default. A value left as written proves the arm passed it through; one that
+# happens to equal the default would prove nothing.
+ct_good_conf=(
+  'ENABLED=off'
+  'TZ=Asia/Tokyo'
+  'DISPLAY_FORMAT=short'
+  'CONTEXT_FORMAT=iso'
+  'COLOR=cyan'
+  'MARKER=%time'
+  'TIME_COLOR=green'
+  'ELAPSED_COLOR=blue'
+  'TOOL_COLOR=magenta'
+  'ELAPSED=off'
+  'DATE_ROLLOVER=off'
+  'SLOW_AFTER=5'
+  'SLOW_COLOR=red'
+  'IDLE_AFTER=7'
+  'SUMMARY=off'
+  'SUBAGENTS=off'
+  'TOOL_TIMING=on'
+  'HISTORY=off'
+  'HISTORY_LIMIT=9'
+  'INJECT_CONTEXT=false'
+)
+fresh "${ct_good_conf[@]}"
+is "validate: a fully legal config is passed through untouched" \
+  "off|Asia/Tokyo|short|iso|cyan|%time|green|blue|magenta|off|off|5|red|7|off|off|on|off|9|false" \
+  "$CT_ENABLED|$CT_TZ|$CT_DISPLAY_FORMAT|$CT_CONTEXT_FORMAT|$CT_COLOR|$CT_MARKER_TEMPLATE|$CT_TIME_COLOR|$CT_ELAPSED_COLOR|$CT_TOOL_COLOR|$CT_ELAPSED|$CT_DATE_ROLLOVER|$CT_SLOW_AFTER|$CT_SLOW_COLOR|$CT_IDLE_AFTER|$CT_SUMMARY|$CT_SUBAGENTS|$CT_TOOL_TIMING|$CT_HISTORY|$CT_HISTORY_LIMIT|$CT_INJECT_CONTEXT"
+is "validate: and a legal config reports nothing" "" "$CT_CONFIG_PROBLEMS"
+
+# The arms nothing pinned. All wrong at once rather than one file each, so an
+# arm that borrowed the row above it shows up as a wrong value here instead of
+# passing on its own.
+fresh 'CONTEXT_FORMAT=wat' 'SLOW_COLOR=banana' 'IDLE_AFTER=oops' 'DATE_ROLLOVER=maybe' \
+      'SUMMARY=maybe' 'SUBAGENTS=maybe' 'TOOL_TIMING=maybe' 'HISTORY=maybe' \
+      'ELAPSED_COLOR=banana' 'TOOL_COLOR=banana'
+is "validate: a bad CONTEXT_FORMAT falls back" "24h"    "$CT_CONTEXT_FORMAT"
+is "validate: a bad SLOW_COLOR falls back"     "yellow" "$CT_SLOW_COLOR"
+is "validate: a bad IDLE_AFTER falls back"     "3600"   "$CT_IDLE_AFTER"
+is "validate: a bad DATE_ROLLOVER falls back"  "on"     "$CT_DATE_ROLLOVER"
+is "validate: a bad SUMMARY falls back"        "on"     "$CT_SUMMARY"
+is "validate: a bad SUBAGENTS falls back"      "on"     "$CT_SUBAGENTS"
+# The one toggle whose default is off, because it costs two forks per tool
+# call. An arm that copied a neighbour's default would switch it on for
+# everyone who typoed the value.
+is "validate: a bad TOOL_TIMING falls back to off, not on" "off" "$CT_TOOL_TIMING"
+is "validate: a bad HISTORY falls back"        "on"     "$CT_HISTORY"
+# A part colour has no colour to fall back to -- the empty string is how it
+# says "inherit COLOR" -- so these two must not be repaired into a real name.
+is "validate: a bad ELAPSED_COLOR falls back to inherit" "" "$CT_ELAPSED_COLOR"
+is "validate: a bad TOOL_COLOR falls back to inherit"    "" "$CT_TOOL_COLOR"
+contains "validate: and the CONTEXT_FORMAT problem names its own key and default" \
+  "CONTEXT_FORMAT=wat is not valid, using 24h" "$CT_CONFIG_PROBLEMS"
+contains "validate: and the SLOW_COLOR problem names its own key and default" \
+  "SLOW_COLOR=banana is not valid, using yellow" "$CT_CONFIG_PROBLEMS"
+contains "validate: and the TOOL_TIMING problem names its own key and default" \
+  "TOOL_TIMING=maybe is not valid, using off" "$CT_CONFIG_PROBLEMS"
+is "validate: ten unusable settings make ten problems" "10" \
+  "$(printf '%s\n' "$CT_CONFIG_PROBLEMS" | grep -c 'is not valid')"
+
+# ct_is_valid_tz is the only thing between a hand-edited file and a zone name
+# that walks out of the zoneinfo directory.
+fresh 'TZ=../etc'
+is "validate: a traversing timezone falls back to local time" "" "$CT_TZ"
+contains "validate: and says which value it dropped" \
+  "TZ=../etc is not valid" "$CT_CONFIG_PROBLEMS"
+
+# A newline cannot arrive from the file -- the parser reads a line at a time --
+# but it can arrive from a caller that assigns CT_TZ itself, which is what the
+# setup flag path does before writing the value back out. Left in, the second
+# line would be read back as a real setting on the next load.
+fresh
+CT_TZ="$(printf 'Europe/Amsterdam\nENABLED=off')"
+ct_validate_config
+is "validate: a timezone carrying a newline falls back to local time" "" "$CT_TZ"
+contains "validate: and the smuggled line is reported rather than kept" \
+  "TZ=Europe/Amsterdam" "$CT_CONFIG_PROBLEMS"
+
+# Every setting unusable at once. A validator that gave up at the first
+# failure, or that filed one setting under another's name, shows up in the
+# count and in the per-key tally rather than as a wrong value nobody reads.
+ct_bad_conf=(
+  'ENABLED=maybe'
+  'TZ=/etc/passwd'
+  'DISPLAY_FORMAT=wat'
+  'CONTEXT_FORMAT=wat'
+  'COLOR=banana'
+  'MARKER=%elapsd'
+  'TIME_COLOR=banana'
+  'ELAPSED_COLOR=banana'
+  'TOOL_COLOR=banana'
+  'ELAPSED=maybe'
+  'DATE_ROLLOVER=maybe'
+  'SLOW_AFTER=soon'
+  'SLOW_COLOR=banana'
+  'IDLE_AFTER=later'
+  'SUMMARY=maybe'
+  'SUBAGENTS=maybe'
+  'TOOL_TIMING=maybe'
+  'HISTORY=maybe'
+  'HISTORY_LIMIT=0'
+  'INJECT_CONTEXT=perhaps'
+)
+fresh "${ct_bad_conf[@]}"
+is "validate: twenty unusable settings make twenty problems" "20" \
+  "$(printf '%s\n' "$CT_CONFIG_PROBLEMS" | grep -c 'is not valid')"
+ct_miscounted=""
+for ct_key in ENABLED TZ DISPLAY_FORMAT CONTEXT_FORMAT COLOR MARKER TIME_COLOR \
+              ELAPSED_COLOR TOOL_COLOR ELAPSED DATE_ROLLOVER SLOW_AFTER \
+              SLOW_COLOR IDLE_AFTER SUMMARY SUBAGENTS TOOL_TIMING HISTORY \
+              HISTORY_LIMIT INJECT_CONTEXT; do
+  ct_seen="$(printf '%s\n' "$CT_CONFIG_PROBLEMS" | grep -c "^  $ct_key=")"
+  [ "$ct_seen" = "1" ] || ct_miscounted="$ct_miscounted $ct_key($ct_seen)"
+done
+is "validate: each setting reported exactly once, under the key the user typed" \
+  "" "$ct_miscounted"
+# Replacing them is the point: nothing downstream tests a CT_* variable before
+# using it, so all twenty have to be usable on the way out.
+is "validate: and every one of them is left holding its own default" \
+  "on||24h|24h|dim|[{%date }%time{ %elapsed}{ · %tool}]||||on|on|60|yellow|3600|on|on|off|on|200|true" \
+  "$CT_ENABLED|$CT_TZ|$CT_DISPLAY_FORMAT|$CT_CONTEXT_FORMAT|$CT_COLOR|$CT_MARKER_TEMPLATE|$CT_TIME_COLOR|$CT_ELAPSED_COLOR|$CT_TOOL_COLOR|$CT_ELAPSED|$CT_DATE_ROLLOVER|$CT_SLOW_AFTER|$CT_SLOW_COLOR|$CT_IDLE_AFTER|$CT_SUMMARY|$CT_SUBAGENTS|$CT_TOOL_TIMING|$CT_HISTORY|$CT_HISTORY_LIMIT|$CT_INJECT_CONTEXT"
+
+# CT_CONFIG_PROBLEMS is rebuilt on each call rather than appended to. One
+# process loads the config more than once -- a hook sourced after session-start
+# reloads it, and the project layer makes a second read routine -- and a list
+# that accumulated would keep reporting a setting after it was fixed.
+ct_problems_first="$CT_CONFIG_PROBLEMS"
+contains "validate: (the load before this one really did report problems)" \
+  "COLOR=banana" "$ct_problems_first"
+fresh 'COLOR=cyan'
+is "validate: a good load does not inherit the previous load's problems" \
+  "" "$CT_CONFIG_PROBLEMS"
+
+# The same claim from inside a single load: a second pass over values the first
+# pass already replaced has nothing left to say.
+fresh 'COLOR=banana' 'SLOW_AFTER=soon'
+contains "validate: the first pass reports the unusable colour" \
+  "COLOR=banana" "$CT_CONFIG_PROBLEMS"
+ct_validate_config
+is "validate: a second pass over the repaired values reports nothing" \
+  "" "$CT_CONFIG_PROBLEMS"
+is "validate: and leaves the repairs it already made alone" \
+  "dim 60" "$CT_COLOR $CT_SLOW_AFTER"
+
+# An empty value is what a half-deleted line looks like. Five settings read it
+# as a real answer -- TZ means machine local time, the three part colours mean
+# inherit COLOR, and an empty MARKER is a deliberate "render no prefix", which
+# is why setup.sh's flag table gives MARKER the `value` empty policy while the
+# part colours get `error`. The other fifteen have no such reading.
+fresh 'ENABLED=' 'TZ=' 'DISPLAY_FORMAT=' 'CONTEXT_FORMAT=' 'COLOR=' 'MARKER=' \
+      'TIME_COLOR=' 'ELAPSED_COLOR=' 'TOOL_COLOR=' 'ELAPSED=' 'DATE_ROLLOVER=' \
+      'SLOW_AFTER=' 'SLOW_COLOR=' 'IDLE_AFTER=' 'SUMMARY=' 'SUBAGENTS=' \
+      'TOOL_TIMING=' 'HISTORY=' 'HISTORY_LIMIT=' 'INJECT_CONTEXT='
+is "validate: an empty value falls back wherever empty means nothing" \
+  "on|24h|24h|dim|on|on|60|yellow|3600|on|on|off|on|200|true" \
+  "$CT_ENABLED|$CT_DISPLAY_FORMAT|$CT_CONTEXT_FORMAT|$CT_COLOR|$CT_ELAPSED|$CT_DATE_ROLLOVER|$CT_SLOW_AFTER|$CT_SLOW_COLOR|$CT_IDLE_AFTER|$CT_SUMMARY|$CT_SUBAGENTS|$CT_TOOL_TIMING|$CT_HISTORY|$CT_HISTORY_LIMIT|$CT_INJECT_CONTEXT"
+is "validate: and stays empty for the five that read empty as an answer" \
+  "" "$CT_TZ$CT_TIME_COLOR$CT_ELAPSED_COLOR$CT_TOOL_COLOR$CT_MARKER_TEMPLATE"
+is "validate: fifteen empties, fifteen problems" "15" \
+  "$(printf '%s\n' "$CT_CONFIG_PROBLEMS" | grep -c 'is not valid')"
+contains "validate: an empty toggle is a problem" \
+  "ENABLED= is not valid, using on" "$CT_CONFIG_PROBLEMS"
+lacks "validate: an empty timezone is not" "TZ= is not valid" "$CT_CONFIG_PROBLEMS"
+lacks "validate: nor an empty part colour"  "TIME_COLOR= is not valid" "$CT_CONFIG_PROBLEMS"
+lacks "validate: nor an empty marker"       "MARKER= is not valid" "$CT_CONFIG_PROBLEMS"
+
+# No hook may be aborted by a typo in the config file. The values are assigned
+# here rather than loaded from a file because the loader has already replaced
+# them by the time it returns, and the claim is about what the validator does
+# while they are still unusable.
+fresh
+CT_ENABLED=maybe
+CT_TZ='../etc'
+CT_DISPLAY_FORMAT=wat
+CT_COLOR=banana
+CT_MARKER_TEMPLATE='%elapsd'
+CT_SLOW_AFTER=soon
+CT_HISTORY_LIMIT=0
+CT_INJECT_CONTEXT=perhaps
+ct_rc=0
+ct_validate_config || ct_rc=$?
+is "validate: an unusable config is still a success" "0" "$ct_rc"
+is "validate: and it repaired every one of them anyway" \
+  "on||24h|dim|60|200|true" \
+  "$CT_ENABLED|$CT_TZ|$CT_DISPLAY_FORMAT|$CT_COLOR|$CT_SLOW_AFTER|$CT_HISTORY_LIMIT|$CT_INJECT_CONTEXT"
+
+# And it says none of it out loud. message-display.sh writes JSON to stdout, so
+# a validator that printed would corrupt the hook's output on every message;
+# session-start.sh and --doctor read CT_CONFIG_PROBLEMS instead, at the one
+# moment somebody is looking.
+printf '%s\n' "${ct_bad_conf[@]}" > "$CLAUDE_TIMESTAMP_CONFIG"
+is "validate: loading the worst config there is prints nothing at all" \
+  "" "$(ct_load_config 2>&1)"
+
+# --- _ct_require ------------------------------------------------------------
+#
+# The one place a rejected setting turns into a sentence the user can act on.
+# Driven directly rather than through ct_load_config, because everything that
+# can go wrong in here -- which value gets named, under which key, and how two
+# of them are joined -- is invisible once twenty calls have run in a row.
+#
+# A name beginning with REQ_ is not a setting, so a case can exercise the
+# CT_<NAME> indirection without disturbing the config around it.
+fresh
+
+CT_CONFIG_PROBLEMS="  a line that was already there"
+CT_COLOR="cyan"
+asserts "require: an accepted value returns 0" _ct_require COLOR ct_is_valid_color dim
+is "require: and leaves the setting untouched" "cyan" "$CT_COLOR"
+is "require: and appends nothing" "  a line that was already there" "$CT_CONFIG_PROBLEMS"
+
+# The check is handed the value currently in CT_<NAME> -- not the name, not the
+# default. A predicate reading the wrong string would accept and reject the
+# wrong configs while every message here still looked right.
+CT_REQ_SPY_SEEN=""
+# shellcheck disable=SC2317  # _ct_require calls this by name, not from here
+ct_req_spy() { CT_REQ_SPY_SEEN="$1"; [ "$1" = "keep" ]; }
+CT_CONFIG_PROBLEMS=""
+CT_REQ_SPY="keep"
+_ct_require REQ_SPY ct_req_spy fallback
+is "require: the check is given the value of CT_<NAME>" "keep" "$CT_REQ_SPY_SEEN"
+is "require: and an accepted value survives" "keep" "$CT_REQ_SPY"
+
+CT_REQ_SPY="drop"
+_ct_require REQ_SPY ct_req_spy fallback
+is "require: a rejected value is replaced by the default" "fallback" "$CT_REQ_SPY"
+is "require: and one line says why" \
+   "  REQ_SPY=drop is not valid, using fallback" "$CT_CONFIG_PROBLEMS"
+
+# Every hook runs under `set -e` and calls ct_load_config as a plain command,
+# whose last statement is one of these. A non-zero return on a rejected value
+# would kill the hook over a typo in a config file.
+CT_CONFIG_PROBLEMS=""
+CT_REQ_SPY="drop"
+asserts "require: rejecting still returns 0, so a hook under set -e survives" \
+        _ct_require REQ_SPY ct_req_spy fallback
+
+# The sentence must quote what the user wrote. Naming the replacement instead
+# -- "COLOR=dim is not valid, using dim" -- is the failure this pins.
+CT_CONFIG_PROBLEMS=""
+CT_COLOR="banana"
+_ct_require COLOR ct_is_valid_color dim
+# Pinned whole, so the two-space indent session-start.sh relies on is part of
+# what this asserts rather than a separate check that cannot fail on its own.
+is "require: the report names the original value, not its replacement" \
+   "  COLOR=banana is not valid, using dim" "$CT_CONFIG_PROBLEMS"
+
+# MARKER_TEMPLATE is stored under a name no config file ever spells, which is
+# the whole reason the fourth parameter exists.
+CT_CONFIG_PROBLEMS=""
+CT_MARKER_TEMPLATE="%elapsd"
+_ct_require MARKER_TEMPLATE ct_is_valid_marker '[%time]' MARKER
+# The whole string, which is also what rules out the internal name leaking into
+# the sentence: "MARKER_TEMPLATE=" cannot be in a line pinned to this.
+is "require: the fourth parameter renames the report" \
+   "  MARKER=%elapsd is not valid, using [%time]" "$CT_CONFIG_PROBLEMS"
+is "require: while the variable written is still the internal one" \
+   "[%time]" "$CT_MARKER_TEMPLATE"
+
+# Two failures joined by exactly one newline, with none in front: the ${VAR:+}
+# guard is what keeps the first line off a blank one, and session-start.sh
+# prints this block verbatim.
+CT_CONFIG_PROBLEMS=""
+CT_COLOR="banana"
+CT_ELAPSED="maybe"
+_ct_require COLOR   ct_is_valid_color dim
+_ct_require ELAPSED ct_is_onoff       on
+is "require: two failures are two lines joined by one newline" \
+   "  COLOR=banana is not valid, using dim
+  ELAPSED=maybe is not valid, using on" "$CT_CONFIG_PROBLEMS"
+
+# It appends rather than resetting. ct_validate_config clears the report once
+# and then calls this twenty times; a reset in here would leave only whichever
+# bad setting happened to come last.
+CT_CONFIG_PROBLEMS="  SLOW_AFTER=abc is not valid, using 60"
+CT_COLOR="banana"
+_ct_require COLOR ct_is_valid_color dim
+# Pinned as the whole string rather than as a `contains` for each line: order is
+# part of the claim, and the earlier line surviving is already inside it. A
+# version that put the new line in FRONT of the earlier one still kept both, so
+# a pair of substring checks passed while session-start.sh printed the twenty
+# settings in the wrong order.
+is "require: and the new line goes after it, not in front" \
+   "  SLOW_AFTER=abc is not valid, using 60
+  COLOR=banana is not valid, using dim" "$CT_CONFIG_PROBLEMS"
+
+# A setting that is empty and refused reads as "KEY=" rather than losing the
+# key or the rule around it.
+CT_CONFIG_PROBLEMS=""
+CT_SLOW_AFTER=""
+_ct_require SLOW_AFTER ct_is_seconds 60
+is "require: an empty value still produces a whole sentence" \
+   "  SLOW_AFTER= is not valid, using 60" "$CT_CONFIG_PROBLEMS"
+
+# A value carrying an '=' or a run of spaces is echoed back byte for byte, so
+# the user can match it against the line they typed.
+CT_CONFIG_PROBLEMS=""
+CT_DISPLAY_FORMAT="a = b  c"
+_ct_require DISPLAY_FORMAT ct_is_valid_format 24h
+is "require: an awkward value is reproduced verbatim" \
+   "  DISPLAY_FORMAT=a = b  c is not valid, using 24h" "$CT_CONFIG_PROBLEMS"
+
+# The spy is a CT_* variable that is not a setting, and parse_dump enumerates
+# that namespace with ${!CT_@}. Cleared so nothing added after this point
+# inherits a name the config reader never writes.
+unset -f ct_req_spy
+unset CT_REQ_SPY CT_REQ_SPY_SEEN
+fresh
 
 echo
 echo "settings apply without a restart"
