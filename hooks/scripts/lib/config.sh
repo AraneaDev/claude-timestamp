@@ -48,14 +48,33 @@ ct_tilde() {
 # config rather than a project one. It also stops at the filesystem root, and
 # after a bounded number of steps so a symlink loop cannot hang a hook.
 ct_find_project_config() {
-  local dir="${1:-}" steps=0
+  local dir="${1:-}" steps=0 home home_real
   CT_PROJECT_SEARCH_CAPPED=""
   [ -n "$dir" ] || return 1
   [ -d "$dir" ] || return 1
   dir="$(cd "$dir" 2>/dev/null && pwd)" || return 1
 
+  # Compared two ways, the same shape write_project_config already uses to
+  # refuse writing a project file into the home directory.
+  #
+  # $HOME can be a symlink: an automounted home, macOS, a container. A
+  # directory reached by its real path then never equals $HOME as written, the
+  # stop below never fires, and the account config is picked up as a project
+  # layer. The settings still come out right -- it is the same file read twice
+  # -- but --doctor, --show and /timestamps then all report a project file
+  # that does not exist, and the slash command is told to say a project pins
+  # the setting and is usually committed and shared.
+  #
+  # The raw value is kept alongside the resolved one for the asymmetric case:
+  # resolving $HOME can fail (permissions, a dangling symlink) while resolving
+  # the search directory succeeds, and comparing a real path against a stale
+  # fallback would then miss a literal match it would otherwise have caught.
+  home="${HOME:-}"
+  home_real="$home"
+  [ -n "$home" ] && { home_real="$(cd "$home" 2>/dev/null && pwd -P)" || home_real="$home"; }
+
   while [ -n "$dir" ] && [ "$dir" != "/" ] && [ "$steps" -lt 40 ]; do
-    if [ -n "${HOME:-}" ] && [ "$dir" = "$HOME" ]; then
+    if [ -n "$home" ] && { [ "$dir" = "$home" ] || [ "$dir" = "$home_real" ]; }; then
       return 1
     fi
     if [ -r "$dir/$CT_PROJECT_CONFIG_NAME" ]; then
