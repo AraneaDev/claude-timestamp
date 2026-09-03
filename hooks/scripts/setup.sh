@@ -1113,6 +1113,26 @@ wizard() {
   fi
   echo
 
+  # The one part of the wizard that is not about what appears on screen. It
+  # defaults to on, so a user who never reads the README has a file
+  # accumulating in their home directory that nothing in the guided setup
+  # mentions. Saying where it goes matters more than the question itself.
+  echo "Finished sessions can be recorded, so the totals survive the session"
+  echo "and --stats can add them up. Timings only, in"
+  echo "  $(ct_tilde "$(ct_history_path)")"
+  ask "Record finished sessions? (on/off)" "$CT_HISTORY"; answer="$_CT_ANSWER"
+  case "$answer" in on|off) CT_HISTORY="$answer" ;; esac
+  # Nested, because PROJECTS only ever changes what a recorded row contains.
+  # Asked with HISTORY off, it would be a question whose answer does nothing.
+  if [ "$CT_HISTORY" = "on" ]; then
+    echo "  The record can name the project each session belonged to, which lets"
+    echo "  --stats break the totals down per project. The directory's name only,"
+    echo "  never the path above it."
+    ask "  Name the project in each record? (on/off)" "$CT_PROJECTS"; answer="$_CT_ANSWER"
+    case "$answer" in on|off) CT_PROJECTS="$answer" ;; esac
+  fi
+  echo
+
   # Color
   echo "Color for the marker."
   local c
