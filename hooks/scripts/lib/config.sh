@@ -861,9 +861,20 @@ ct_tool_digest() {
     END {
       for (t in sum) printf "%018d\t%s\t%d\n", sum[t], t, n[t]
     }' "$file" \
-  | sort -rn \
+  |
+  # `|| true` at the very end of this pipeline: on a log with many distinct
+  # tools, `head -8` below closes the pipe once it has its eight lines, and
+  # `sort` -- which may still have more to write -- gets SIGPIPE for it, even
+  # though every line `head` needed had already been delivered. That makes
+  # the pipeline's exit status nonzero for reasons that have nothing to do
+  # with the output being wrong. This function runs under a caller's
+  # `errexit`/`pipefail` (session-end.sh), so without `|| true`, a large
+  # enough log would abort that caller before it appends to history or clears
+  # session state. The printed output is unaffected either way.
+  sort -rn \
   | head -8 \
-  | awk -F'\t' '{ printf "%s%s:%d:%d", (NR > 1 ? "," : ""), $2, $1 + 0, $3 }'
+  | awk -F'\t' '{ printf "%s%s:%d:%d", (NR > 1 ? "," : ""), $2, $1 + 0, $3 }' \
+  || true
 }
 
 # Machine-level facts, published for whoever configures the plugin from inside

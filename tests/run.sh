@@ -5600,6 +5600,34 @@ hc_run "PROJECTS=on"$'\n'"TOOL_TIMING=on"$'\n'"HISTORY=off" "$hc_repo"
 is "columns: HISTORY=off records nothing at all" \
    "0" "$(wc -c < "$CLAUDE_TIMESTAMP_HISTORY" | tr -d ' ')"
 
+# A tool log with enough distinct tools makes `ct_tool_digest`'s internal
+# `sort -rn | head -8` close its pipe on `sort` before `sort` is done writing,
+# which sends `sort` SIGPIPE. Under session-end.sh's errexit/pipefail, a
+# nonzero exit from that pipeline used to abort the hook right there --
+# before ct_history_append and before ct_clear_state ran -- losing the
+# session's record and stranding its state files. 2000 distinct tools is
+# enough to reproduce it.
+big_sid="hc-big-$$-$RANDOM"
+printf '%s\n' "TOOL_TIMING=on" > "$CLAUDE_TIMESTAMP_CONFIG"
+: > "$CLAUDE_TIMESTAMP_HISTORY"
+big_sf="$(ct_state_file "$big_sid")"
+printf '%s' "$(( $(date +%s) - 100 ))" > "${big_sf}.start"
+printf '1'  > "${big_sf}.turns"
+printf '40' > "${big_sf}.wait"
+printf '0'  > "${big_sf}.idle"
+awk 'BEGIN { for (i = 0; i < 2000; i++) printf "Tool%04d 0.001 ok\n", i }' > "${big_sf}.tools"
+printf '{"session_id":"%s","cwd":"%s"}' "$big_sid" "$hc_repo" \
+  | bash "$SCRIPTS/session-end.sh" >/dev/null 2>&1
+big_status=$?
+is "large log: session-end still exits 0" "0" "$big_status"
+is "large log: the history row is still written" \
+   "1" "$(wc -l < "$CLAUDE_TIMESTAMP_HISTORY" | tr -d ' ')"
+if [ -e "$big_sf" ] || [ -e "${big_sf}.tools" ] || [ -e "${big_sf}.start" ]; then
+  fail "large log: session state is still cleared" "no state files left" "state files remain"
+else
+  pass "large log: session state is still cleared"
+fi
+
 rm -rf "$hc_repo"
 
 echo
