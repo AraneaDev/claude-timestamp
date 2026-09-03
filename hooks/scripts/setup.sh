@@ -329,6 +329,85 @@ EOF
   echo
   echo "  longest         ${maxwhen%%T*}  $(ct_format_duration "$maxd") over $maxturns turns"
   echo "  recorded from   ${first%%T*} to ${last%%T*}"
+
+  # By project. Emitted only when at least one row named one, so an
+  # installation that never turned PROJECTS on sees the output it saw before
+  # the column existed.
+  local rows
+  rows="$(awk -F'\t' '
+    # The same validity test the totals above use, not a looser one. A row
+    # rejected there and accepted here would put seconds into a per-project
+    # figure that the total it sits under does not count, so the breakdown
+    # would exceed the whole.
+    NF < 6 || NF > 8 { next }
+    $2 !~ /^[0-9]+$/ || $3 !~ /^[0-9]+$/ || $4 !~ /^[0-9]+$/ ||
+    $5 !~ /^[0-9]+$/ || $6 !~ /^[0-9]+$/ { next }
+    {
+      # seen tracks whether the column exists on any row, not whether its
+      # value differs from "-": a row that recorded PROJECTS=on and found no
+      # project name still carries the column, explicitly, as "-", and that
+      # must still surface the block (rendered as "(unnamed)") -- only a row
+      # with no field 7 at all, from before PROJECTS existed, should not.
+      has7 = (NF >= 7 && $7 != "")
+      p = has7 ? $7 : "-"
+      if (has7) seen = 1
+      secs[p] += $2; n[p]++
+    }
+    END {
+      if (!seen) exit 0
+      for (p in secs) printf "%018d\t%s\t%d\n", secs[p], p, n[p]
+    }' "$file" | sort -rn)"
+  if [ -n "$rows" ]; then
+    echo
+    echo "  by project"
+    local p_secs p_name p_n label
+    while IFS=$'\t' read -r p_secs p_name p_n; do
+      [ -n "$p_name" ] || continue
+      label="$p_name"
+      [ "$label" = "-" ] && label="(unnamed)"
+      printf '    %-20s %10s  %d session' "$label" \
+        "$(ct_format_duration "$((10#$p_secs))")" "$p_n"
+      [ "$p_n" -eq 1 ] || printf 's'
+      printf '\n'
+    done <<ROWS
+$rows
+ROWS
+  fi
+
+  # Slowest tools, summed across every recorded session. The per-session
+  # summary answers "what made this session slow"; this answers "what has been
+  # costing me", which is the question a hundred rows can answer and one
+  # cannot.
+  rows="$(awk -F'\t' '
+    # Same validity test again, for the same reason.
+    NF < 8 || $8 == "" { next }
+    $2 !~ /^[0-9]+$/ || $3 !~ /^[0-9]+$/ || $4 !~ /^[0-9]+$/ ||
+    $5 !~ /^[0-9]+$/ || $6 !~ /^[0-9]+$/ { next }
+    {
+      c = split($8, entries, ",")
+      for (i = 1; i <= c; i++) {
+        if (split(entries[i], part, ":") != 3) continue
+        if (part[2] !~ /^[0-9]+$/ || part[3] !~ /^[0-9]+$/) continue
+        secs[part[1]] += part[2]; calls[part[1]] += part[3]
+      }
+    }
+    END { for (t in secs) printf "%018d\t%s\t%d\n", secs[t], t, calls[t] }
+    ' "$file" | sort -rn | head -10)"
+  if [ -n "$rows" ]; then
+    echo
+    echo "  slowest tools"
+    local t_secs t_name t_calls
+    while IFS=$'\t' read -r t_secs t_name t_calls; do
+      [ -n "$t_name" ] || continue
+      printf '    %-20s %10s  (%d call' "$t_name" \
+        "$(ct_format_duration "$((10#$t_secs))")" "$t_calls"
+      [ "$t_calls" -eq 1 ] || printf 's'
+      printf ')\n'
+    done <<ROWS
+$rows
+ROWS
+  fi
+
   return 0
 }
 

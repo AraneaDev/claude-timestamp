@@ -3536,6 +3536,43 @@ out="$( CLAUDE_TIMESTAMP_CONFIG="$WORK/hl.conf" \
 is "history limit: setup refuses 0" "2" "$rc"
 contains "history limit: and points at the real off switch" "--history=off" "$out"
 
+echo "stats sections"
+
+{
+  printf '2026-09-01T10:00:00\t3600\t10\t600\t0\t0\talpha\tBash:100:5\n'
+  printf '2026-09-02T10:00:00\t1800\t5\t300\t0\t0\talpha\tBash:50:3,Read:10:9\n'
+  printf '2026-09-03T10:00:00\t900\t2\t100\t0\t0\tbeta\tRead:5:2\n'
+} > "$CLAUDE_TIMESTAMP_HISTORY"
+out="$(bash "$SCRIPTS/setup.sh" --stats 2>&1)"
+contains "sections: a by-project block appears"      "by project" "$out"
+contains "sections: the busiest project leads"       "alpha" "$out"
+contains "sections: with its total and its count"    "1h30m" "$out"
+contains "sections: a slowest-tools block appears"   "slowest tools" "$out"
+contains "sections: summing a tool across sessions"  "2m30s" "$out"
+contains "sections: and its call count"              "8 calls" "$out"
+
+printf '2026-09-01T10:00:00\t3600\t10\t600\t0\t0\t-\tBash:100:5\n' \
+  > "$CLAUDE_TIMESTAMP_HISTORY"
+contains "sections: a dash renders as unnamed" "(unnamed)" \
+         "$(bash "$SCRIPTS/setup.sh" --stats 2>&1)"
+
+printf '2026-09-01T10:00:00\t3600\t10\t600\t0\t0\n' > "$CLAUDE_TIMESTAMP_HISTORY"
+out="$(bash "$SCRIPTS/setup.sh" --stats 2>&1)"
+refutes "sections: no project data means no by-project block" \
+        grep -q "by project" <<< "$out"
+refutes "sections: no tool data means no slowest-tools block" \
+        grep -q "slowest tools" <<< "$out"
+
+# A damaged entry inside field 8 costs its own tools and nothing else. The
+# row's timings are intact and must still be counted.
+printf '2026-09-01T10:00:00\t3600\t10\t600\t0\t0\talpha\tBash:100:5,broken,Read:x:y\n' \
+  > "$CLAUDE_TIMESTAMP_HISTORY"
+out="$(bash "$SCRIPTS/setup.sh" --stats 2>&1)"
+contains "sections: a damaged tool entry leaves the row counted" "sessions        1" "$out"
+refutes  "sections: and does not mark the row unreadable" grep -q "unreadable" <<< "$out"
+contains "sections: the usable tool entry survives"       "1m40s" "$out"
+refutes  "sections: the damaged ones do not appear"       grep -q "broken" <<< "$out"
+
 echo
 echo "project configuration"
 
