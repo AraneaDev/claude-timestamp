@@ -815,6 +815,13 @@ ct_history_path() {
 # "(unnamed)" in --stats, and if it were the only project on record the
 # by-project block would be suppressed entirely, since ct_project_name's own
 # genuine "no project" case is spelled the same way.
+#
+# Not lossless: this maps a checkout literally named "-" onto the same "_"
+# a checkout literally named "_" already produces on its own, and --stats
+# then merges the two under one "_" total. Every mapping from an unbounded
+# name space onto a smaller one collides somewhere; "-" colliding with a
+# literal "_" is the one this function accepts, in exchange for never
+# emitting the sentinel by accident.
 _ct_project_basename() {
   local b="${1//[$'\t\r\n']/_}"
   [ "$b" = "-" ] && b="_"
