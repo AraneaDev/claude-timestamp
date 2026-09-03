@@ -3429,6 +3429,31 @@ lacks    "stats: a zero-length session prints no shell error" "integer expressio
 contains "stats: and is still counted"                        "sessions        1" "$out"
 contains "stats: and its longest line reads as a duration"    "longest         2026-09-03  0s over 1 turns" "$out"
 
+# The same field shift by the other route: a row can carry its six fields and
+# still have an empty date, which the NF check passes and an empty %s then
+# turns into two spaces where the reader expects one. The seeding was empty in
+# the same way, so a maximum that carried no date was re-seeded by every later
+# row and the last duration was reported as the longest.
+fresh 'HISTORY=on'
+printf '\t100\t2\t10\t5\t0\n' >  "$CLAUDE_TIMESTAMP_HISTORY"
+printf '\t50\t1\t5\t2\t0\n'   >> "$CLAUDE_TIMESTAMP_HISTORY"
+out="$(bash "$SCRIPTS/setup.sh" --stats 2>&1)"
+lacks    "stats: an undated row prints no shell error"   "integer expression" "$out"
+contains "stats: and both undated rows are counted"      "sessions        2"  "$out"
+contains "stats: and the totals do not shift a column"   "turns           3"  "$out"
+# The point of the seeding fix: 100 is the longest, not the 50 that came last.
+contains "stats: and the longest is the longest, not the last" "1m40s" "$out"
+
+# A dated row after an undated one must not become the "first" of the range,
+# and the undated maximum must not be re-seeded by a shorter row behind it.
+fresh 'HISTORY=on'
+printf '\t100\t2\t10\t5\t0\n'                    >  "$CLAUDE_TIMESTAMP_HISTORY"
+printf '2026-08-20T10:00:00\t50\t1\t5\t2\t0\n'   >> "$CLAUDE_TIMESTAMP_HISTORY"
+out="$(bash "$SCRIPTS/setup.sh" --stats 2>&1)"
+lacks    "stats: a mixed file prints no shell error"       "integer expression" "$out"
+contains "stats: and still reports the true longest"       "1m40s"              "$out"
+contains "stats: and counts both rows"                     "sessions        2"  "$out"
+
 bash "$SCRIPTS/setup.sh" --history=off --history-limit=50 >/dev/null
 ct_load_config
 is "--history is accepted"       "off" "$CT_HISTORY"
