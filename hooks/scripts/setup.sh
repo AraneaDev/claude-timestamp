@@ -273,12 +273,25 @@ $(awk -F'\t' '
     # and the line came back one field short -- shifting every field after it
     # left, so maxturns became a date, last became "0", and bad came back
     # empty, which put a raw shell error in front of the user.
-    if (maxwhen == "" || $2 + 0 > maxd + 0) { maxd = $2; maxwhen = $1; maxturns = $3 }
-    if (first == "") first = $1
+    # Seeded on the row count rather than on maxwhen still being empty. A row
+    # whose date field is empty leaves maxwhen empty, so that test stayed true
+    # and every later row re-seeded the maximum: a history whose longest
+    # session carried no date reported the final duration as the longest one.
+    if (n == 1 || $2 + 0 > maxd + 0) { maxd = $2; maxwhen = $1; maxturns = $3 }
+    if (n == 1) first = $1
     last = $1
   }
   END {
     if (n == 0) { printf "0 0 0 0 0 0 0 - 0 - - %d\n", bad + 0; exit }
+    # A hand-edited row can carry six fields and still have an empty date, and
+    # an empty %s here would print two spaces where the reader expects one.
+    # read collapses those, shifting every field after it left, which is the
+    # same wrong-totals-and-a-raw-shell-error the NF check above exists to
+    # prevent. "-" is what the no-rows line above already prints in these three
+    # positions, so the reader needs nothing new to understand it.
+    if (maxwhen == "") maxwhen = "-"
+    if (first == "") first = "-"
+    if (last == "") last = "-"
     printf "%d %d %d %d %d %d %d %s %d %s %s %d\n",
       n, total, turns, waited, idle, failed, maxd, maxwhen, maxturns, first, last, bad + 0
   }' "$file")
