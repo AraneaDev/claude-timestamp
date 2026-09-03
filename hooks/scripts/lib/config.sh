@@ -162,6 +162,7 @@ _ct_read_config_file() {
       TOOL_TIMING)    CT_TOOL_TIMING="$value" ;;
       HISTORY)        CT_HISTORY="$value" ;;
       HISTORY_LIMIT)  CT_HISTORY_LIMIT="$value" ;;
+      PROJECTS)       CT_PROJECTS="$value" ;;
       INJECT_CONTEXT) CT_INJECT_CONTEXT="$value" ;;
     esac
   done < "$file"
@@ -190,6 +191,7 @@ ct_load_config() {
   CT_TOOL_TIMING="off"        # adds two forks per tool call, so opt-in
   CT_HISTORY="on"
   CT_HISTORY_LIMIT="200"      # sessions kept; older ones are dropped
+  CT_PROJECTS="off"           # record the project name in the history row
   CT_INJECT_CONTEXT="true"
 
   CT_CONFIG_PROBLEMS=""
@@ -312,6 +314,7 @@ ct_validate_config() {
   _ct_require TOOL_TIMING    ct_is_onoff        off
   _ct_require HISTORY        ct_is_onoff        on
   _ct_require HISTORY_LIMIT  ct_is_history_limit 200
+  _ct_require PROJECTS       ct_is_onoff        off
   _ct_require INJECT_CONTEXT ct_is_bool         true
 }
 

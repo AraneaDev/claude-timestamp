@@ -58,6 +58,8 @@ Flags
   --subagents=on|off          Stamp subagent messages too.
   --history=on|off            Record each finished session for --stats.
   --history-limit=N           How many sessions to keep (default 200).
+  --projects=on|off           Record the project's directory name in each
+                              history row. Off by default. Never a path.
   --tool-timing=on|off        Record what each tool call cost and report the
                               slowest in the session summary. Off by default:
                               it is the only setting that costs anything per
@@ -124,6 +126,7 @@ subagents       SUBAGENTS       CT_SUBAGENTS        ct_is_onoff             -   
 tool-timing     TOOL_TIMING     CT_TOOL_TIMING      ct_is_onoff             -        ignore
 history         HISTORY         CT_HISTORY          ct_is_onoff             -        ignore
 history-limit   HISTORY_LIMIT   CT_HISTORY_LIMIT    ct_is_history_limit     -        ignore
+projects        PROJECTS        CT_PROJECTS         ct_is_onoff             -        ignore
 inject-context  INJECT_CONTEXT  CT_INJECT_CONTEXT   ct_is_bool              -        ignore
 "
 

@@ -1644,7 +1644,7 @@ is "a rejected format cannot smuggle a second setting into the file" "on" "$CT_E
 # to be wrong, so flag twenty-one is covered the day it is added.
 fresh 'ENABLED=on'
 flag_table="$(sed -n '/^CT_FLAG_TABLE="$/,/^"$/p' "$SCRIPTS/setup.sh" | sed '1d;$d')"
-is "every setting has a flag in the table" "20" \
+is "every setting has a flag in the table" "21" \
   "$(printf '%s\n' "$flag_table" | grep -c '^[a-z]')"
 # shellcheck disable=SC2034  # t_rest is read to consume the rest of the row
 while read -r t_flag t_rest; do
@@ -2888,6 +2888,22 @@ is "require: an awkward value is reproduced verbatim" \
 unset -f ct_req_spy
 unset CT_REQ_SPY CT_REQ_SPY_SEEN
 fresh
+
+echo
+echo "projects setting"
+
+: > "$CLAUDE_TIMESTAMP_CONFIG"
+ct_load_config
+is "projects: defaults to off" "off" "$CT_PROJECTS"
+
+printf 'PROJECTS=on\n' > "$CLAUDE_TIMESTAMP_CONFIG"
+ct_load_config
+is "projects: on is read" "on" "$CT_PROJECTS"
+
+printf 'PROJECTS=maybe\n' > "$CLAUDE_TIMESTAMP_CONFIG"
+ct_load_config
+is "projects: an invalid value falls back to the default" "off" "$CT_PROJECTS"
+contains "projects: and says so" "PROJECTS=maybe is not valid" "$CT_CONFIG_PROBLEMS"
 
 echo
 echo "settings apply without a restart"

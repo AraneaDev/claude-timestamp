@@ -363,6 +363,7 @@ cannot run anything.
 | `TOOL_TIMING` | `off` | Record what each tool call cost and name the slowest |
 | `HISTORY` | `on` | Record each finished session, for `/timestamps` and `--stats`. Independent of `SUMMARY` |
 | `HISTORY_LIMIT` | `200` | How many recorded sessions to keep, 1 or more; `HISTORY=off` keeps none |
+| `PROJECTS` | `off` | Record the project's directory name in each history row. Never a path, and off unless you turn it on |
 
 Colour behaviour, including when it is suppressed and how `NO_COLOR` and
 `FORCE_COLOR` override that, is covered above under **Colour, and where it
