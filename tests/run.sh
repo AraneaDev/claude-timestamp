@@ -5840,7 +5840,7 @@ is "digest: and drops the cheaper one instead" \
    "0" "$(ct_tool_digest "$log" | tr ',' '\n' | grep -c '^Zulu:')"
 
 if command -v jq >/dev/null 2>&1; then
-  # The on-screen aggregation in session-end.sh sorts on "%.3f" -- full
+  # The on-screen aggregation in session-end.sh sorts on "%.3f" -- millisecond
   # precision -- and was never affected by this bug, so it is the reference
   # the digest's own ordering is checked against for the very same log. Names
   # chosen so neither an alphabetical nor a reverse-alphabetical tie-break

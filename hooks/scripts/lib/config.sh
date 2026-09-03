@@ -921,7 +921,8 @@ ct_tool_digest() {
       # rest of the line, reverse-alphabetically, which can drop the
       # genuinely costlier tool from the eight-entry cap below in favour of
       # the cheaper one. Scaling to milliseconds keeps every tie the on-screen
-      # aggregation in session-end.sh (which sorts on "%.3f", full precision)
+      # aggregation in session-end.sh (which sorts on "%.3f", millisecond
+      # precision)
       # would also call a tie, while the zero-padded width keeps the plain
       # `sort -rn` correct on GNU and BSD alike. `+ 0.5` rounds rather than
       # truncating a second time, so float error in `sum[t]` cannot shave a
