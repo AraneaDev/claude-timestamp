@@ -313,6 +313,26 @@ is "corrupt counter reads as zero" "0" "$(ct_read_counter "$WORK/counter")"
 printf '42' > "$WORK/counter"
 is "valid counter is read" "42" "$(ct_read_counter "$WORK/counter")"
 
+# State files are written with printf '%s' and carry no trailing newline, so
+# `read` always reports failure even though it has already assigned the value.
+# Under the hooks' own `set -euo pipefail` that would abort the script, and the
+# only reason it does not is that bash clears errexit inside a command
+# substitution. That default is not guaranteed: BASHOPTS carries
+# inherit_errexit in from the environment, and a maintainer can set it with one
+# `shopt`. Then every state read kills its hook at the first counter it touches
+# and the plugin goes silent with nothing reported.
+#
+# On a bash too old to have inherit_errexit (3.2, which macOS ships) an unknown
+# BASHOPTS entry is ignored at startup, so this degrades to an ordinary read
+# rather than failing.
+# shellcheck disable=SC2016  # $1 and $2 are for the inner bash, not this one
+is "a counter is read under inherit_errexit" "42" \
+  "$(env BASHOPTS=inherit_errexit bash -c '
+       set -euo pipefail
+       . "$1/lib/config.sh"; . "$1/lib/state.sh"
+       ct_read_counter "$2"
+     ' _ "$SCRIPTS" "$WORK/counter" 2>/dev/null)"
+
 mkdir -p "$(ct_state_dir)"
 base="$(ct_state_file "clearme")"
 printf '1' > "$base"; printf '2' > "$base.turns"; printf '3' > "$base.wait"
@@ -965,6 +985,18 @@ if command -v jq >/dev/null 2>&1; then
   printf '%s' "$(( now - 20 ))" > "$base.last"
   out="$(printf '{"session_id":"acct"}' | bash "$SCRIPTS/session-end.sh" | jq -r '.systemMessage')"
   contains "session end closes a turn still open" "40s of it waiting" "$out"
+
+  # The whole hook, not just the counter helper: an environment carrying
+  # inherit_errexit must not leave the marker without its duration. Every
+  # state file this plugin writes lacks a trailing newline, so the first read
+  # in the hook is the one that would abort it.
+  ct_clear_state "acct"; mkdir -p "$(ct_state_dir)"
+  printf '%s' "$(( $(date +%s) - 134 ))" > "$base"
+  out="$(printf '{"session_id":"acct","index":0,"delta":"x"}' \
+         | env BASHOPTS=inherit_errexit bash "$SCRIPTS/message-display.sh" 2>/dev/null)"
+  contains "the marker still shows a duration under inherit_errexit" "+2m14s" \
+    "$(strip_ansi "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.displayContent')")"
+  fresh
 
   # The ordering every normal session takes: Stop closes the turn, then
   # SessionEnd runs behind it. In production .last already holds a real value
