@@ -400,8 +400,20 @@ EOF
       [ -n "${CT_STATS_SINCE:-}" ] && printf ' since %s' "$CT_STATS_SINCE"
       printf '.\n'
       local known
-      known="$(awk -F'\t' 'NF >= 7 && $7 != "" && $7 != "-" { print $7 }' "$file" \
-               | sort -u | tr '\n' ' ')"
+      # The same row-validity guard the totals, by-project and slowest-tools
+      # passes above share -- NF in range, each timing field a bounded run of
+      # digits, no whitespace in the date -- so this hint can only ever name
+      # a project that those passes would themselves count. Without it, a
+      # damaged row's field 7 could be offered as a suggestion and then
+      # refused when the reader tried it, since --project filters against
+      # the very same guard.
+      known="$(awk -F'\t' '
+        NF < 6 || NF > 8 { next }
+        $2 !~ /^[0-9]{1,15}$/ || $3 !~ /^[0-9]{1,15}$/ || $4 !~ /^[0-9]{1,15}$/ ||
+        $5 !~ /^[0-9]{1,15}$/ || $6 !~ /^[0-9]{1,15}$/ { next }
+        $1 ~ /[[:space:]]/ { next }
+        NF >= 7 && $7 != "" && $7 != "-" { print $7 }
+      ' "$file" | sort -u | tr '\n' ' ')"
       [ -n "$known" ] && echo "  projects recorded: $known"
       return 0
     fi

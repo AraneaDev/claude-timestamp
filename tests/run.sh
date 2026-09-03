@@ -3775,6 +3775,19 @@ out="$(bash "$SCRIPTS/setup.sh" --stats --project=nope 2>&1)"
 contains "filters: an unmatched project says so"      "No sessions match in nope" "$out"
 contains "filters: and names the ones that do exist"  "alpha" "$out"
 
+# The "projects recorded" hint is a fourth pass over the history and used to
+# apply neither the NF bound nor the timing guard its three siblings share,
+# so a damaged row's field 7 could be offered as a suggestion and then
+# refused when the reader actually tried it with --project.
+{
+  printf '2026-09-01T10:00:00\t3600\t10\t600\t0\t0\treal\n'
+  printf '2026-09-02T10:00:00\t99999999999999999999999\t1\t10\t0\t0\tghost-project\n'
+} > "$CLAUDE_TIMESTAMP_HISTORY"
+out="$(bash "$SCRIPTS/setup.sh" --stats --project=nope 2>&1)"
+contains "filters: the hint names a project a valid row recorded" "real" "$out"
+refutes  "filters: but not one only a damaged row recorded" \
+         grep -q "ghost-project" <<< "$out"
+
 # Three similar flags: bare --project selects project scope for a setting
 # being WRITTEN; --project=NAME filters --stats; --projects=on|off is the
 # setting itself. Combined with a flag that writes a setting, --project=NAME
