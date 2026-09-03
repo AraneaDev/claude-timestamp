@@ -1342,6 +1342,36 @@ echo "tool timing"
 fresh
 is "tool timing is off by default" "off" "$(ct_load_config; printf '%s' "$CT_TOOL_TIMING")"
 
+# The gate every tool call opens with. It is asserted here rather than through
+# the hook because the hook's output is identical either way -- what the gate
+# decides is whether the call pays for a jq parse, and cost is not something an
+# end-to-end assertion can see.
+#
+# A sentinel is re-staged by every prompt and cleared at session end, so one
+# that has not been touched for a day belongs to a session that ended without a
+# SessionEnd: a crash, a killed terminal, a machine that slept. Nothing else
+# clears it and the prune does not come back for a week, so leaving it counted
+# makes one dead session tax every tool call in every other session on the
+# machine for seven days.
+ct_clear_state "gate-live"; ct_clear_state "gate-dead"
+rm -rf "$(ct_state_dir)"; ct_state_ready
+refutes "timing gate: an empty state directory wants nothing" ct_timing_wanted
+
+ct_stage_flag "gate-live" "timing-on" "1"
+asserts "timing gate: a fresh sentinel is counted" ct_timing_wanted
+
+rm -f "$(ct_state_file gate-live).timing-on"
+ct_stage_flag "gate-dead" "timing-on" "1"
+touch -t "$(date -d '2 days ago' +%Y%m%d%H%M 2>/dev/null || date -v-2d +%Y%m%d%H%M)" \
+  "$(ct_state_file gate-dead).timing-on"
+refutes "timing gate: a sentinel from a dead session is not" ct_timing_wanted
+
+# ...and one live session still turns it on for everyone, which is the
+# conservative behaviour the gate is built around.
+ct_stage_flag "gate-live" "timing-on" "1"
+asserts "timing gate: one live session still counts for all" ct_timing_wanted
+ct_clear_state "gate-live"; ct_clear_state "gate-dead"
+
 if command -v jq >/dev/null 2>&1; then
   # Disabled: the hook must write nothing at all.
   fresh 'TOOL_TIMING=off'
