@@ -4270,6 +4270,7 @@ rm -rf "$PROJ/writable-big"; mkdir -p "$PROJ/writable-big/.claude"
 written_big="$PROJ/writable-big/.claude/claude-timestamp.conf"
 is "an unrelated write does not lose a key to a closed pipe on a large config" \
    "1" "$(grep -c '^COLOR=cyan$' "$written_big")"
+is "and still writes the unrelated setting" "1" "$(grep -c '^TZ=UTC$' "$written_big")"
 
 rm -rf "$PROJ/writable-tcinherit"; mkdir -p "$PROJ/writable-tcinherit"
 ( cd "$PROJ/writable-tcinherit" && unset CLAUDE_TIMESTAMP_CONFIG && HOME="$PROJ/home" \
