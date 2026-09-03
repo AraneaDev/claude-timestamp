@@ -767,8 +767,16 @@ ct_history_path() {
 # Only ever the basename. The parent directories are the part of a path that
 # says who you work for and what you call your clients, and none of it belongs
 # in a file that accumulates indefinitely.
+#
+# A directory name may legally contain a tab or a newline -- mkdir does not
+# reject either -- and either one would corrupt the history row this feeds: a
+# newline splits one row into two physical lines, and a tab forges an extra
+# field that can pass the reader's field-count check while carrying shifted
+# data. Neutralised here, at the producer, the same way ct_tool_digest already
+# neutralises its own separators, and through parameter expansion rather than a
+# subprocess, matching the no-subprocess promise above.
 ct_project_name() {
-  local dir="$1" steps=0
+  local dir="$1" steps=0 base
   case "$dir" in
     "" | "/") printf '%s' '-'; return 0 ;;
   esac
@@ -777,7 +785,8 @@ ct_project_name() {
   while [ "${dir}" != "/" ] && [ "${dir%/}" != "$dir" ]; do dir="${dir%/}"; done
   while [ -n "$dir" ] && [ "$dir" != "/" ] && [ "$steps" -lt 40 ]; do
     if [ -d "$dir/.git" ] || [ -f "$dir/.git" ]; then
-      printf '%s' "${dir##*/}"
+      base="${dir##*/}"
+      printf '%s' "${base//[$'\t\r\n']/_}"
       return 0
     fi
     dir="${dir%/*}"
@@ -789,8 +798,8 @@ ct_project_name() {
   while [ "${dir}" != "/" ] && [ "${dir%/}" != "$dir" ]; do dir="${dir%/}"; done
   case "$dir" in
     "" | "/") printf '%s' '-' ;;
-    */*)      printf '%s' "${dir##*/}" ;;
-    *)        printf '%s' "$dir" ;;
+    */*)      base="${dir##*/}"; printf '%s' "${base//[$'\t\r\n']/_}" ;;
+    *)        printf '%s' "${dir//[$'\t\r\n']/_}" ;;
   esac
 }
 
@@ -908,7 +917,8 @@ ct_note_drawn() {
 }
 
 # Append one finished session and drop anything past the retention limit.
-# Fields: when, seconds, turns, waited, idle, failed tools.
+# Fields: when, seconds, turns, waited, idle, failed tools, project, tool
+# digest. The last two are optional.
 ct_history_append() {
   local file limit tmp lock dead have_lock=0 tries
   file="$(ct_history_path)"

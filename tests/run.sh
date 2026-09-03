@@ -5263,6 +5263,20 @@ is "project: an empty cwd is unnamed" \
 is "project: the filesystem root is unnamed" \
    "-" "$(ct_project_name "/")"
 
+# A directory name may legally contain a tab or a newline (mkdir does not
+# reject either), and either would corrupt a history row: a tab forges an
+# extra field, a newline splits the row into two lines. The character sits in
+# the MIDDLE of the basename here, not at the end -- $(...) strips a trailing
+# newline regardless of whether the fix ran, which would let a broken
+# implementation pass this assertion for the wrong reason.
+tab_repo="tab"$'\t'"repo"
+nl_repo="nl"$'\n'"repo"
+mkdir -p "$proj/$tab_repo/.git" "$proj/$nl_repo/.git"
+is "project: a tab in the directory name becomes an underscore" \
+   "tab_repo" "$(ct_project_name "$proj/$tab_repo")"
+is "project: a newline in the directory name becomes an underscore" \
+   "nl_repo" "$(ct_project_name "$proj/$nl_repo")"
+
 # The two fallback cases below need no repository ANYWHERE above the fixture,
 # and that is a property of wherever TMPDIR points rather than of anything this
 # suite controls. Under a TMPDIR inside a checkout the walk correctly finds
