@@ -109,6 +109,18 @@ done < <(sed -n '/^ct_load_config() {/,/^}/{s/^  CT_\([A-Z_]*\)="\([^"]*\)".*/\1
 # shellcheck source=/dev/null
 . hooks/scripts/lib/state.sh
 values_ok=1
+# A key whose values is not an array makes the extraction below fail mid-stream,
+# and a process substitution discards the exit status of what filled it: the
+# loop would see no rows and the check would report success on a broken schema.
+# Reported as a finding first, and the extraction then takes only the arrays,
+# the same shape the preset checks below already use.
+while read -r key; do
+  [ -n "$key" ] || continue
+  note "the values field of $key is not an array"
+  values_ok=0
+  status=1
+done < <(jq -r '.keys | to_entries[] | select(.value.values) |
+                select((.value.values | type) != "array") | .key' schema.json)
 while IFS="$(printf '\t')" read -r key validator value; do
   [ -n "$key" ] || continue
   if ! "$validator" "$value"; then
@@ -117,6 +129,7 @@ while IFS="$(printf '\t')" read -r key validator value; do
     status=1
   fi
 done < <(jq -r '.keys | to_entries[] | select(.value.values) |
+                select((.value.values | type) == "array") |
                 . as $e | .value.values[] |
                 [$e.key, $e.value.validator, .] | @tsv' schema.json)
 [ "$values_ok" -eq 1 ] && note "every listed value passes its validator"
@@ -129,6 +142,18 @@ done < <(jq -r '.keys | to_entries[] | select(.value.values) |
 # is not a colour. Held to the same standard as `values`: listed here means the
 # validator really takes it.
 aliases_ok=1
+# A key whose aliases is not an array makes the extraction below fail mid-stream,
+# and a process substitution discards the exit status of what filled it: the
+# loop would see no rows and the check would report success on a broken schema.
+# Reported as a finding first, and the extraction then takes only the arrays,
+# the same shape the preset checks below already use.
+while read -r key; do
+  [ -n "$key" ] || continue
+  note "the aliases field of $key is not an array"
+  aliases_ok=0
+  status=1
+done < <(jq -r '.keys | to_entries[] | select(.value.aliases) |
+                select((.value.aliases | type) != "array") | .key' schema.json)
 while IFS="$(printf '\t')" read -r key validator value; do
   [ -n "$key" ] || continue
   if ! "$validator" "$value"; then
@@ -137,6 +162,7 @@ while IFS="$(printf '\t')" read -r key validator value; do
     status=1
   fi
 done < <(jq -r '.keys | to_entries[] | select(.value.aliases) |
+                select((.value.aliases | type) == "array") |
                 . as $e | .value.aliases[] |
                 [$e.key, $e.value.validator, .] | @tsv' schema.json)
 [ "$aliases_ok" -eq 1 ] && note "every listed alias passes its validator"
