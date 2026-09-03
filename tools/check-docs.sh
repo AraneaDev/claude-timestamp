@@ -317,6 +317,31 @@ else
     "show_config displays every key CT_FLAG_TABLE names"
 fi
 
+echo "every flag has a help line in usage()"
+# The help-schema gate above checks that a handful of colour flags' help
+# lines name the right placeholders; it has never checked that a flag has a
+# help line at all. A design document for this branch claimed check-docs
+# already covered a new CT_FLAG_TABLE key reaching --help, which is why
+# nobody wrote this gate sooner -- the claim was false. Extract usage()'s
+# own heredoc body and check that each flag table row's flag name is
+# actually named there. The boundary after the flag rules out --history
+# matching inside --history-limit, the same class of false pass the
+# show-config-completeness gate above guards against for variable names.
+us_body="$(sed -n "/cat <<'USAGE'\$/,/^USAGE\$/p" hooks/scripts/setup.sh | sed '1d;$d')"
+us_missing=""
+while read -r ft_flag; do
+  [ -n "$ft_flag" ] || continue
+  printf '%s\n' "$us_body" | grep -qE -- "--${ft_flag}([^A-Za-z0-9_-]|\$)" ||
+    us_missing="$us_missing --$ft_flag"
+done < <(printf '%s\n' "$ft_rows" | awk '{ print $1 }')
+if [ -n "$us_missing" ]; then
+  gate usage-completeness 0 \
+    "usage() never mentions:$us_missing"
+else
+  gate usage-completeness 1 \
+    "usage() has a help line for every flag CT_FLAG_TABLE names"
+fi
+
 echo "lint file list"
 # The shellcheck and bash -n steps name their files by hand, so a new script
 # is linted by nobody until someone remembers to add it. Compare the tracked
