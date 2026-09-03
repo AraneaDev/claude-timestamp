@@ -2444,6 +2444,25 @@ is "the search walks up from a subdirectory"        "cyan 24h found" "$(layered 
 is "a directory with no project config uses yours"  "dim 24h "      "$(layered "$PROJ/plain")"
 is "the search stops at home"                       "dim 24h "      "$(layered "$PROJ/home")"
 
+# $HOME can be a symlink -- an automounted home, macOS, a container -- and a
+# directory reached by its real path then never matches $HOME as written. The
+# stop at home has to survive that. Without it the account config is picked up
+# as a project layer: the settings still resolve, because it is the same file
+# read twice, but --doctor, --show and /timestamps all then report a project
+# file that does not exist, and the slash command is told to say a project
+# pins the setting and is usually committed and shared.
+# write_project_config already resolves both sides for exactly this reason.
+mkdir -p "$PROJ/home/inside"
+ln -sfn "$PROJ/home" "$PROJ/homelink"
+linked() {
+  ( unset CLAUDE_TIMESTAMP_CONFIG
+    HOME="$PROJ/homelink"
+    ct_load_config "$1"
+    printf '%s' "${CT_PROJECT_CONFIG:+found}" )
+}
+is "the search stops at a symlinked home"                "" "$(linked "$PROJ/home")"
+is "and does not treat the account config as a project"  "" "$(linked "$PROJ/home/inside")"
+
 refutes "no project config is reported as not found" ct_find_project_config "$PROJ/plain"
 refutes "a missing directory is not searched"        ct_find_project_config "$PROJ/nowhere"
 refutes "an empty directory argument finds nothing"  ct_find_project_config ""
