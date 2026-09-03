@@ -185,6 +185,79 @@ ct_dominant_tool() {
     }' "$log"
 }
 
+# Does any session on this machine want tool timing?
+#
+# The gate post-tool-use.sh opens with, lifted out of it so it can be tested
+# directly: the hook's own output is identical whether this says yes or no, so
+# the only thing an end-to-end test could observe is the cost, which is the
+# whole point of the gate.
+#
+# Answered with a glob before anything forks. This runs on every tool call, and
+# the README promises TOOL_TIMING is the only setting that costs anything at
+# that rate. Learning the session id needs jq, and forking jq to discover there
+# was nothing to do would make every user running the default pay for a feature
+# they have switched off. A sentinel is staged per session while tool timing is
+# on, so no match here means no session wants timing and the hook is finished.
+# A match means SOME session does; which one still needs the payload, and that
+# is where the fork earns its place.
+#
+# Conservative on purpose: one session with timing on makes every concurrent
+# session pay the parse. Over-recording is recoverable, a missed measurement is
+# not.
+ct_timing_wanted() {
+  local f matched=1
+  ct_state_dir_var
+
+  for f in "$_CT_STATE_DIR"/*.timing-on; do
+    [ -e "$f" ] && matched=0
+    break
+  done
+
+  if [ "$matched" -eq 0 ]; then
+    # A sentinel is re-staged by every prompt, and a tool call always follows a
+    # prompt in the same turn, so one untouched for a day belongs to a session
+    # that ended without a SessionEnd: a crash, a killed terminal, a machine
+    # that slept. Nothing else clears it, and ct_prune_state does not come back
+    # for a week -- so without this, one dead session taxes every tool call in
+    # every OTHER session on the machine with the parse this gate exists to
+    # avoid, for seven days.
+    #
+    # The fork is only reached once the glob has already said yes, which is the
+    # path that was going to fork jq anyway. A miss still costs nothing at all.
+    # No pipe: `find | head` would take SIGPIPE and report 141 under pipefail.
+    if [ -n "$(find "$_CT_STATE_DIR" -maxdepth 1 -name '*.timing-on' -mmin -1440 2>/dev/null)" ]; then
+      return 0
+    fi
+  fi
+
+  # A session whose first prompt predates the staged flag has a turn file but
+  # never staged an .enabled sibling, so it cannot appear in the glob above --
+  # it has no way to say what it wants. Rather than let the gate answer "no
+  # session wants timing" on its behalf, its calls fall through to the same jq
+  # parse and config resolution every call used to pay, until its next prompt
+  # catches it up and stages a real answer.
+  #
+  # This scan's cost grows with the number of sessions in state (measured: ~5ms
+  # at 1, ~9ms at 100, ~18ms at 300, bounded by the 7-day prune) -- kept anyway.
+  # A missed tool-call measurement is an accuracy loss in the exact number this
+  # feature exists to produce; a few extra milliseconds of hook overhead on an
+  # already-cheap path is not something this plugin is optimising away.
+  for f in "$_CT_STATE_DIR"/*; do
+    # Match the ENTRY name, not the whole path. $f is absolute, and a $TMPDIR
+    # with a dot anywhere in it -- macOS hands out /var/folders/xy/....../T by
+    # default -- makes `*.*` match every entry, so the scan skips every session
+    # and tool timing never turns on for a session that predates the staged
+    # flag.
+    case "${f##*/}" in
+      *.*) continue ;;
+    esac
+    [ -e "$f" ] || continue
+    [ -e "${f}.enabled" ] || return 0
+  done
+
+  return 1
+}
+
 # Stage a decision the tool hooks need but cannot make for themselves.
 #
 # PostToolUse decides whether to do anything before it parses its payload, so
