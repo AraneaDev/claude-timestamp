@@ -3029,6 +3029,34 @@ is "the duration is recorded"  "3600" "$(awk -F'\t' 'NR==1{print $2}' "$CLAUDE_T
 is "the turns are recorded"    "12"   "$(awk -F'\t' 'NR==1{print $3}' "$CLAUDE_TIMESTAMP_HISTORY")"
 is "the failures are recorded" "2"    "$(awk -F'\t' 'NR==1{print $6}' "$CLAUDE_TIMESTAMP_HISTORY")"
 
+: > "$CLAUDE_TIMESTAMP_HISTORY"
+ct_history_append 3600 12 900 300 2
+is "row: five arguments still write six fields" \
+   "6" "$(awk -F'\t' 'NR==1{print NF}' "$CLAUDE_TIMESTAMP_HISTORY")"
+
+: > "$CLAUDE_TIMESTAMP_HISTORY"
+ct_history_append 3600 12 900 300 2 "myrepo"
+is "row: a project makes it seven fields" \
+   "7" "$(awk -F'\t' 'NR==1{print NF}' "$CLAUDE_TIMESTAMP_HISTORY")"
+is "row: and the project lands in field seven" \
+   "myrepo" "$(cut -f7 "$CLAUDE_TIMESTAMP_HISTORY")"
+
+: > "$CLAUDE_TIMESTAMP_HISTORY"
+ct_history_append 3600 12 900 300 2 "" "Bash:20:2"
+is "row: tools without a project still make it eight fields" \
+   "8" "$(awk -F'\t' 'NR==1{print NF}' "$CLAUDE_TIMESTAMP_HISTORY")"
+is "row: and field seven is a dash rather than empty" \
+   "-" "$(cut -f7 "$CLAUDE_TIMESTAMP_HISTORY")"
+is "row: and the digest lands in field eight" \
+   "Bash:20:2" "$(cut -f8 "$CLAUDE_TIMESTAMP_HISTORY")"
+
+: > "$CLAUDE_TIMESTAMP_HISTORY"
+ct_history_append 3600 12 900 300 2 "myrepo" "Bash:20:2"
+is "row: both make it eight fields" \
+   "8" "$(awk -F'\t' 'NR==1{print NF}' "$CLAUDE_TIMESTAMP_HISTORY")"
+is "row: no field is ever written empty" \
+   "0" "$(grep -c $'\t\t' "$CLAUDE_TIMESTAMP_HISTORY" || true)"
+
 fresh 'HISTORY_LIMIT=3'
 for i in 1 2 3 4 5 6; do ct_history_append "$i" 1 0 0 0; done
 is "the retention limit is applied" "3" "$(wc -l < "$CLAUDE_TIMESTAMP_HISTORY" | tr -d ' ')"

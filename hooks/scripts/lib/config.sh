@@ -971,8 +971,24 @@ ct_history_append() {
   # after half a second of contention on an operation that takes about a
   # millisecond. So: with the lock, no append can be lost. Without it, this
   # one might be. What cannot happen is the record never being written.
-  printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
-    "$(ct_now iso)" "${1:-0}" "${2:-0}" "${3:-0}" "${4:-0}" "${5:-0}" >> "$file" 2>/dev/null || {
+  # Trailing columns are omitted rather than written empty, so an installation
+  # that has opted into neither keeps producing exactly the six-field row it
+  # produced before they existed. Nothing on disk has to be migrated because
+  # nothing on disk moves.
+  #
+  # A project that is absent while tools are present writes "-", never "".
+  # Two adjacent tabs are the input the field-shifting bug in setup.sh's
+  # reader needs, and not emitting one is cheaper than defending against it
+  # twice more.
+  local row
+  row="$(printf '%s\t%s\t%s\t%s\t%s\t%s' \
+    "$(ct_now iso)" "${1:-0}" "${2:-0}" "${3:-0}" "${4:-0}" "${5:-0}")"
+  if [ -n "${7:-}" ]; then
+    row="$(printf '%s\t%s\t%s' "$row" "${6:--}" "$7")"
+  elif [ -n "${6:-}" ]; then
+    row="$(printf '%s\t%s' "$row" "$6")"
+  fi
+  printf '%s\n' "$row" >> "$file" 2>/dev/null || {
       if [ "$have_lock" -eq 1 ]; then rmdir "$lock" 2>/dev/null || true; fi
       return 0
     }
