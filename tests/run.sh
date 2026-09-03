@@ -5051,26 +5051,63 @@ else
        "root ignores the mode bits, so this needs an unprivileged user"
 fi
 
-# SUSPECTED BUG: a symlinked target is silently detached instead of written
-# through. Quarantined, not blessed. `mv` replaces the NAME, so when the target is a
-# symlink the link itself is replaced by a regular file and the file it pointed
-# at keeps the old settings -- checked, that is what happens today. Symlinking
+# `mv` replaces the NAME, so an unresolved symlinked target is replaced by a
+# regular file and the file it pointed at keeps the old settings. Symlinking
 # ~/.claude/claude-timestamp.conf into a dotfiles repository is the ordinary
 # way to version a config, and this detaches it silently: the wizard reports
 # success, the repository never changes, and the next `stow`-style relink
-# throws the new settings away. The assertion below is what write-through would
-# look like, and it passes the day the function resolves the target first.
+# throws the new settings away, so the write has to resolve the link first.
 if [ "$CT_HAS_SYMLINKS" = "1" ]; then
   rm -rf "$WA/link"; mkdir -p "$WA/link"
   printf '%s\n' 'COLOR=cyan' > "$WA/link/real.conf"
   ln -s "$WA/link/real.conf" "$WA/link/alias.conf"
   printf '%s\n' 'COLOR=green' | _ct_write_atomic "$WA/link/alias.conf"
-  if [ -L "$WA/link/alias.conf" ] && [ "$(cat "$WA/link/real.conf")" = "COLOR=green" ]; then
-    pass "atomic write: a symlinked target is written through, not replaced"
-  else
-    skip "atomic write: a symlinked target is written through, not replaced" \
-         "known: mv replaces the symlink with a regular file, detaching a config symlinked into a dotfiles repo"
-  fi
+  asserts "atomic write: a symlinked target stays a symlink" \
+          test -L "$WA/link/alias.conf"
+  is "atomic write: and the file it points at receives the new content" \
+     "COLOR=green" "$(cat "$WA/link/real.conf")"
+
+  # A relative target is relative to the directory the link sits in, not to the
+  # working directory the wizard happens to be run from. Resolving it against
+  # the wrong one writes a new file next to the caller and leaves the config
+  # untouched, which looks exactly like success.
+  rm -rf "$WA/link"; mkdir -p "$WA/link/inner"
+  printf '%s\n' 'COLOR=cyan' > "$WA/link/inner/real.conf"
+  ln -s real.conf "$WA/link/inner/alias.conf"
+  ( cd "$WA" && printf '%s\n' 'COLOR=green' | _ct_write_atomic "link/inner/alias.conf" )
+  asserts "atomic write: a relative link stays a symlink" \
+          test -L "$WA/link/inner/alias.conf"
+  is "atomic write: and resolves against the link's own directory" \
+     "COLOR=green" "$(cat "$WA/link/inner/real.conf")"
+  refutes "atomic write: and writes nothing beside the caller" \
+          test -e "$WA/real.conf"
+
+  # A chain has to be followed to its end. Stopping one hop in would write the
+  # middle link, replacing it and detaching the rest of the chain.
+  rm -rf "$WA/link"; mkdir -p "$WA/link"
+  printf '%s\n' 'COLOR=cyan' > "$WA/link/real.conf"
+  ln -s real.conf  "$WA/link/mid.conf"
+  ln -s mid.conf   "$WA/link/alias.conf"
+  printf '%s\n' 'COLOR=green' | _ct_write_atomic "$WA/link/alias.conf"
+  is "atomic write: a chain of links reaches the file at the end" \
+     "COLOR=green" "$(cat "$WA/link/real.conf")"
+  asserts "atomic write: and every link in the chain survives" \
+          test -L "$WA/link/alias.conf" -a -L "$WA/link/mid.conf"
+
+  # A loop never reaches a real file. Writing at the point the walk gives up
+  # would replace whichever link it stopped on, so it is refused instead.
+  rm -rf "$WA/link"; mkdir -p "$WA/link"
+  ln -s b.conf "$WA/link/a.conf"
+  ln -s a.conf "$WA/link/b.conf"
+  # The status is captured from the function itself rather than through a
+  # `refutes` helper running it in `sh`, where the function does not exist and
+  # a command-not-found would satisfy the assertion without ever calling it.
+  if printf 'x\n' | _ct_write_atomic "$WA/link/a.conf"; then wa_loop_rc=0; else wa_loop_rc=1; fi
+  is "atomic write: a symlink loop returns 1" "1" "$wa_loop_rc"
+  asserts "atomic write: and leaves the loop as it found it" \
+          test -L "$WA/link/a.conf" -a -L "$WA/link/b.conf"
+  is "atomic write: and leaves no temp behind" "a.conf b.conf" \
+     "$(ls -1A "$WA/link" | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')"
   rm -rf "$WA/link"
 else
   skip "atomic write: a symlinked target is written through, not replaced" "needs real symlinks"
