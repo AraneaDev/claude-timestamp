@@ -876,8 +876,16 @@ write_project_config() {
         # pinned to the empty string (TZ=, or a colour set to inherit) extract
         # as "", so emptiness alone cannot tell "nothing to keep" from "keep an
         # empty pin"; presence can.
-        if printf '%s\n' "$existing" | grep -q "^${key}="; then
-          value="$(printf '%s\n' "$existing" | sed -n "s/^${key}=//p" | tail -1)"
+        # A here-string, not a pipe: `grep -q` exits as soon as it finds a
+        # match, and on a config bigger than the pipe buffer that closes the
+        # read end while printf is still writing, giving printf SIGPIPE.
+        # Under this script's own pipefail, that reports the PIPELINE as
+        # failed even though grep found exactly what it was looking for, so
+        # `if` took the "not present" branch and dropped a real key. A
+        # here-string feeds grep from a temp file bash itself writes, so the
+        # match result no longer depends on how much of it grep chose to read.
+        if grep -q "^${key}=" <<< "$existing"; then
+          value="$(sed -n "s/^${key}=//p" <<< "$existing" | tail -1)"
           carried=1
         else
           continue

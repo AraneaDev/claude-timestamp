@@ -4223,6 +4223,23 @@ is "--project --tz=local pins an empty TZ" "1" "$(grep -c '^TZ=$' "$written_tzlo
 is "an unrelated --project write keeps a pinned TZ=local" "1" "$(grep -c '^TZ=$' "$written_tzlocal")"
 is "and still writes the unrelated setting"               "1" "$(grep -c '^COLOR=none$' "$written_tzlocal")"
 
+# write_project_config tests whether an already-pinned key is present with
+# `printf '%s\n' "$existing" | grep -q "^${key}="`, under this script's own
+# pipefail. grep -q exits as soon as it finds a match, closing its end of the
+# pipe; on a config bigger than the pipe buffer, with the key near the front,
+# printf can still be writing the rest when that happens and gets SIGPIPE --
+# and pipefail reports the PIPELINE as failed even though grep found exactly
+# what it was looking for. The `if` then took the "not present" branch and
+# dropped the key from the rewrite an unrelated flag triggers.
+rm -rf "$PROJ/writable-big"; mkdir -p "$PROJ/writable-big/.claude"
+{ echo "COLOR=cyan"; awk 'BEGIN{for(i=1;i<=10000;i++) print "FILLER" i "=x"}'; } \
+  > "$PROJ/writable-big/.claude/claude-timestamp.conf"
+( cd "$PROJ/writable-big" && unset CLAUDE_TIMESTAMP_CONFIG && HOME="$PROJ/home" \
+    bash "$SCRIPTS/setup.sh" --project --tz=UTC >/dev/null 2>&1 )
+written_big="$PROJ/writable-big/.claude/claude-timestamp.conf"
+is "an unrelated write does not lose a key to a closed pipe on a large config" \
+   "1" "$(grep -c '^COLOR=cyan$' "$written_big")"
+
 rm -rf "$PROJ/writable-tcinherit"; mkdir -p "$PROJ/writable-tcinherit"
 ( cd "$PROJ/writable-tcinherit" && unset CLAUDE_TIMESTAMP_CONFIG && HOME="$PROJ/home" \
     bash "$SCRIPTS/setup.sh" --project --time-color=cyan >/dev/null 2>&1 )
