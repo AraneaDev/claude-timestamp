@@ -316,7 +316,10 @@ $(awk -F'\t' -v since="${CT_STATS_SINCE:-}" -v want="${CT_STATS_PROJECT:-}" '
   # matching row, and a sum of many 15-digit values can still exceed the
   # 64-bit range of the shell even though every value that fed it
   # individually respected this bound. The END block below carries a
-  # second bound for that accumulated case.
+  # second bound for that accumulated case -- and so do the by-project and
+  # slowest-tools passes further down, which accumulate the same kind of
+  # per-row values into secs[] and calls[] of their own and are exposed to
+  # exactly the same overflow.
   $2 !~ /^[0-9]{1,15}$/ || $3 !~ /^[0-9]{1,15}$/ || $4 !~ /^[0-9]{1,15}$/ ||
   $5 !~ /^[0-9]{1,15}$/ || $6 !~ /^[0-9]{1,15}$/ { bad++; next }
   # Field 1 (the date) is otherwise never validated, and it is emitted
@@ -486,7 +489,19 @@ EOF
     }
     END {
       if (!seen) exit 0
-      for (p in secs) printf "%018d\t%s\t%d\n", secs[p], p, n[p]
+      # Same accumulator-overflow bound as the totals pass above, applied per
+      # project rather than once globally: secs[p] is summed across every row
+      # naming project p, and enough rows at the per-value bound can carry
+      # that projects sum past the 64-bit range of the shell downstream even
+      # though no single value that fed it broke the per-value bound. Capped
+      # per project, not on a grand total across projects, since the failure
+      # this guards is a single accumulator overflowing on its own, not the
+      # sum of all of them.
+      cap = 90000000000000000
+      for (p in secs) {
+        if (secs[p] > cap) secs[p] = cap
+        printf "%018d\t%s\t%d\n", secs[p], p, n[p]
+      }
     }' "$file" | sort -rn)"
   if [ -n "$rows" ]; then
     echo
@@ -553,7 +568,24 @@ ROWS
     # `read`, so an empty field stays an empty field no matter what this
     # awk emits -- the entries loop above already keeps that from
     # happening, this just stops relying on it staying that way.
-    END { for (t in secs) printf "%018d\037%s\037%d\n", secs[t], t, calls[t] }
+    END {
+      # Same accumulator-overflow bound as the totals and by-project passes
+      # above, applied per tool: secs[t] and calls[t] are each summed across
+      # every occurrence of tool t, and enough occurrences at the per-value
+      # bound can carry either sum past the 64-bit range of the shell
+      # downstream even though no single value that fed it broke the
+      # per-value bound. calls[t] gets the same cap as secs[t] for the same
+      # reason, not because it feeds a multiplication like waited does above:
+      # it reaches a plain `[ -eq ]` test in the shell, and an accumulator
+      # that overflows there raises the identical raw "integer expression
+      # expected" error.
+      cap = 90000000000000000
+      for (t in secs) {
+        if (secs[t]  > cap) secs[t]  = cap
+        if (calls[t] > cap) calls[t] = cap
+        printf "%018d\037%s\037%d\n", secs[t], t, calls[t]
+      }
+    }
     ' "$file" | sort -rn | head -10)" || true
   # `|| true` above: on a history with many distinct tool names, `head -10`
   # closes the pipe once it has its ten lines, and `sort` -- which may still

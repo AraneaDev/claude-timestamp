@@ -3736,6 +3736,40 @@ refutes "sections: an overflowed total prints no raw shell error" \
 refutes "sections: and the total is not reported as negative" \
         grep -q ' -[0-9]*h' <<< "$out"
 
+# The by-project pass has its own accumulator, secs[p], summed across every
+# row naming the same project -- the identical shape of bug as the totals
+# pass above, just keyed by project instead of global. Without a bound on
+# secs[p] itself, 9300 rows all naming "alpha" at the 15-digit ceiling summed
+# past the 64-bit range of the shell downstream; ct_format_duration then saw
+# a negative value, refused it (its own input guard rejects a leading "-"),
+# and printed nothing where the duration belongs -- silently, with no error,
+# which is worse than an error would have been.
+awk 'BEGIN {
+  for (i = 0; i < 9300; i++)
+    printf "2026-01-01T00:00:00\t999999999999999\t1\t999999999999999\t0\t0\talpha\n"
+}' > "$CLAUDE_TIMESTAMP_HISTORY"
+out="$(bash "$SCRIPTS/setup.sh" --stats 2>&1)"
+asserts "sections: an overflowed by-project total still renders a duration" \
+        grep -qE 'alpha +[0-9]+h[0-9]+m' <<< "$out"
+
+# The slowest-tools pass has two accumulators of the same shape, secs[t] and
+# calls[t], both summed across every occurrence of the same tool name. 9300
+# rows all naming "Bash" with a digest entry at the 15-digit ceiling for both
+# its seconds and its call count summed past the 64-bit range of the shell on
+# both accumulators at once, and without a bound on them this used to raise
+# the shell's own "integer expression expected" from the `[ "$t_calls" -eq 1 ]`
+# test below and leave the duration column blank the same way the by-project
+# case does.
+awk 'BEGIN {
+  for (i = 0; i < 9300; i++)
+    printf "2026-01-01T00:00:00\t100\t1\t10\t0\t0\t-\tBash:999999999999999:999999999999999\n"
+}' > "$CLAUDE_TIMESTAMP_HISTORY"
+out="$(bash "$SCRIPTS/setup.sh" --stats 2>&1)"
+refutes "sections: an overflowed slowest-tools total prints no raw shell error" \
+        grep -q "integer expression expected" <<< "$out"
+asserts "sections: and it still renders a duration for the tool" \
+        grep -qE 'Bash +[0-9]+h[0-9]+m' <<< "$out"
+
 # `--stats`'s slowest-tools pass ends its awk with `sort -rn | head -10`. A
 # history with enough distinct tool names makes `head -10` close the pipe on
 # `sort` before `sort` is done writing, sending it SIGPIPE; under this
