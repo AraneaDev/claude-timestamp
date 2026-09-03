@@ -4315,6 +4315,12 @@ echo "context zone"
 # instead -- digits, one space, the zone -- so a second ticking over between
 # the hook and the assertion cannot fail a test about where the zone goes.
 
+# What the platform calls TZ=UTC, asked of it rather than assumed: Git Bash on
+# Windows answers GMT where Linux and macOS answer UTC, and both are correct
+# names for the same zone. These cases are about where the zone lands in the
+# rendered string, so the name itself is a detail they should not be pinning.
+zone_utc="$(TZ=UTC date '+%Z')"
+
 fresh 'TZ=UTC'
 out="$(printf '{"session_id":"zone24","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh")"
 is "zone: the injection is a UserPromptSubmit result" "UserPromptSubmit" \
@@ -4328,9 +4334,9 @@ asserts "zone: the injecting run also stamped the turn start" test -r "$(ct_stat
 ctx="$(printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext')"
 rest="${ctx#Message sent at local time }"
 case "$rest" in
-  [0-9][0-9]:[0-9][0-9]:[0-9][0-9]" UTC")
+  [0-9][0-9]:[0-9][0-9]:[0-9][0-9]" $zone_utc")
     pass "zone: 24h puts the zone one space after the time" ;;
-  *) fail "zone: 24h puts the zone one space after the time" "HH:MM:SS UTC" "$rest" ;;
+  *) fail "zone: 24h puts the zone one space after the time" "HH:MM:SS $zone_utc" "$rest" ;;
 esac
 
 # The ISO rendering ends at the seconds and carries no offset of its own, so
@@ -4341,9 +4347,9 @@ ctx="$(printf '{"session_id":"zoneiso","prompt":"hi"}' | bash "$SCRIPTS/user-pro
   | jq -r '.hookSpecificOutput.additionalContext')"
 rest="${ctx#Message sent at local time }"
 case "$rest" in
-  [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]" UTC")
+  [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]" $zone_utc")
     pass "zone: iso carries no offset, so the zone resolves it" ;;
-  *) fail "zone: iso carries no offset, so the zone resolves it" "YYYY-MM-DDTHH:MM:SS UTC" "$rest" ;;
+  *) fail "zone: iso carries no offset, so the zone resolves it" "YYYY-MM-DDTHH:MM:SS $zone_utc" "$rest" ;;
 esac
 
 fresh 'TZ=UTC' 'CONTEXT_FORMAT=short'
@@ -4351,9 +4357,9 @@ ctx="$(printf '{"session_id":"zoneshort","prompt":"hi"}' | bash "$SCRIPTS/user-p
   | jq -r '.hookSpecificOutput.additionalContext')"
 rest="${ctx#Message sent at local time }"
 case "$rest" in
-  [0-9][0-9]:[0-9][0-9]" UTC")
+  [0-9][0-9]:[0-9][0-9]" $zone_utc")
     pass "zone: short keeps the zone after a format that drops the seconds" ;;
-  *) fail "zone: short keeps the zone after a format that drops the seconds" "HH:MM UTC" "$rest" ;;
+  *) fail "zone: short keeps the zone after a format that drops the seconds" "HH:MM $zone_utc" "$rest" ;;
 esac
 
 # The zone goes after the AM/PM marker, not between the time and it.
@@ -4362,9 +4368,9 @@ ctx="$(printf '{"session_id":"zone12h","prompt":"hi"}' | bash "$SCRIPTS/user-pro
   | jq -r '.hookSpecificOutput.additionalContext')"
 rest="${ctx#Message sent at local time }"
 case "$rest" in
-  [0-9]:[0-9][0-9]" "[AP]M" UTC"|[0-9][0-9]:[0-9][0-9]" "[AP]M" UTC")
+  [0-9]:[0-9][0-9]" "[AP]M" $zone_utc"|[0-9][0-9]:[0-9][0-9]" "[AP]M" $zone_utc")
     pass "zone: 12h puts the zone after the AM/PM marker" ;;
-  *) fail "zone: 12h puts the zone after the AM/PM marker" "H:MM AM UTC" "$rest" ;;
+  *) fail "zone: 12h puts the zone after the AM/PM marker" "H:MM AM $zone_utc" "$rest" ;;
 esac
 
 # %I is zero-padded and the trim happens before the zone is appended, so
@@ -4381,8 +4387,8 @@ ctx="$(printf '{"session_id":"zoneraw","prompt":"hi"}' | bash "$SCRIPTS/user-pro
   | jq -r '.hookSpecificOutput.additionalContext')"
 rest="${ctx#Message sent at local time }"
 case "$rest" in
-  [0-9][0-9]" UTC") pass "zone: a raw strftime format still gets the zone" ;;
-  *) fail "zone: a raw strftime format still gets the zone" "HH UTC" "$rest" ;;
+  [0-9][0-9]" $zone_utc") pass "zone: a raw strftime format still gets the zone" ;;
+  *) fail "zone: a raw strftime format still gets the zone" "HH $zone_utc" "$rest" ;;
 esac
 
 # A pinned zone that this platform can honour is the one the string is
@@ -4437,7 +4443,7 @@ ctx="$(printf '{"session_id":"zoneaway","prompt":"hi"}' | bash "$SCRIPTS/user-pr
   | jq -r '.hookSpecificOutput.additionalContext')"
 rest="${ctx#Message sent at local time }"
 case "$rest" in
-  [0-9][0-9]:[0-9][0-9]:[0-9][0-9]" UTC, after a 3h break")
+  [0-9][0-9]:[0-9][0-9]:[0-9][0-9]" $zone_utc, after a 3h break")
     pass "zone: the away clause follows the zone, comma and all" ;;
   *) fail "zone: the away clause follows the zone, comma and all" "HH:MM:SS UTC, after a 3h break" "$rest" ;;
 esac
