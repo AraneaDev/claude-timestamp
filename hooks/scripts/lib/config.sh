@@ -52,10 +52,16 @@ ct_find_project_config() {
   CT_PROJECT_SEARCH_CAPPED=""
   [ -n "$dir" ] || return 1
   [ -d "$dir" ] || return 1
-  dir="$(cd "$dir" 2>/dev/null && pwd)" || return 1
+  # Resolved physically, because the home comparison below is: `pwd` alone
+  # reports the path as walked, so a search directory reached through a
+  # symlinked ancestor keeps the link in it and never equals a $HOME that was
+  # resolved. macOS is the ordinary case, where TMPDIR sits under /var and /var
+  # is a link to /private/var, but any automounted or container home does it.
+  dir="$(cd "$dir" 2>/dev/null && pwd -P)" || return 1
 
   # Compared two ways, the same shape write_project_config already uses to
-  # refuse writing a project file into the home directory.
+  # refuse writing a project file into the home directory: both sides through
+  # `pwd -P`, so neither can carry a symlink the other resolved.
   #
   # $HOME can be a symlink: an automounted home, macOS, a container. A
   # directory reached by its real path then never equals $HOME as written, the
