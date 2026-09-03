@@ -3507,6 +3507,19 @@ out="$(bash "$SCRIPTS/setup.sh" --stats 2>&1)"
 contains "stats: reports the damaged row"    "1 unreadable" "$out"
 contains "stats: still totals the good ones" "sessions        1" "$out"
 
+# Field 1 (the date) is never validated for shape, only fields 2-6 are. A
+# space inside it is emitted through a bare %s into the totals' space-
+# separated line, which a positional `read` downstream consumes -- so a
+# date field carrying a stray word reads as extra fields, shifting every
+# later one left and printing a raw shell error in front of the user.
+fresh 'HISTORY=on'
+printf '2026-09-01 EXTRA\t100\t5\t20\t0\t0\n'    >  "$CLAUDE_TIMESTAMP_HISTORY"
+printf '2026-08-20T10:00:00\t100\t5\t20\t0\t0\n' >> "$CLAUDE_TIMESTAMP_HISTORY"
+out="$(bash "$SCRIPTS/setup.sh" --stats 2>&1)"
+lacks    "stats: a whitespace-bearing date prints no shell error" "integer expression" "$out"
+contains "stats: and is reported as damage"                       "1 unreadable" "$out"
+contains "stats: while the valid row alongside it still counts"   "sessions        1" "$out"
+
 # A file with rows but none of them readable was unreachable before this
 # task; the early return must land before the heading, not after it.
 fresh 'HISTORY=on'

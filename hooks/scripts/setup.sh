@@ -314,6 +314,17 @@ $(awk -F'\t' -v since="${CT_STATS_SINCE:-}" -v want="${CT_STATS_PROJECT:-}" '
   # shell error.
   $2 !~ /^[0-9]{1,15}$/ || $3 !~ /^[0-9]{1,15}$/ || $4 !~ /^[0-9]{1,15}$/ ||
   $5 !~ /^[0-9]{1,15}$/ || $6 !~ /^[0-9]{1,15}$/ { bad++; next }
+  # Field 1 (the date) is otherwise never validated, and it is emitted
+  # through a bare %s into a space-separated line that a positional `read`
+  # downstream consumes -- so a field 1 containing a space reads as extra
+  # words, shifting every field after it left the same way an empty
+  # maxwhen/first/last already does above, right down to the raw shell
+  # error. Rejecting on whitespace specifically, not on a full ISO-8601
+  # shape: ct_history_append always writes this field with `ct_now iso`,
+  # so a stricter pattern would probably still be safe, but whitespace is
+  # what actually breaks the reader, and the narrower rule cannot reject a
+  # legitimate historical row written by an older or newer format.
+  $1 ~ /[[:space:]]/ { bad++; next }
   # Filtered rows are skipped, not counted as unreadable: they were read
   # fine, they simply fall outside what was asked for.
   since != "" && $1 "" < since "" { next }
@@ -416,6 +427,10 @@ EOF
     # downstream is damage, not a duration.
     $2 !~ /^[0-9]{1,15}$/ || $3 !~ /^[0-9]{1,15}$/ || $4 !~ /^[0-9]{1,15}$/ ||
     $5 !~ /^[0-9]{1,15}$/ || $6 !~ /^[0-9]{1,15}$/ { next }
+    # Same whitespace-in-the-date-field guard as the totals pass, for the
+    # same reason given there: a row rejected as damage by the totals must
+    # not still count here, or the breakdown would exceed the whole.
+    $1 ~ /[[:space:]]/ { next }
     since != "" && $1 "" < since "" { next }
     want  != "" && ((NF >= 7 && $7 != "" ? $7 : "-") "" != want "") { next }
     {
@@ -462,6 +477,10 @@ ROWS
     # Same 15-digit bound as the totals pass, and for the same reason.
     $2 !~ /^[0-9]{1,15}$/ || $3 !~ /^[0-9]{1,15}$/ || $4 !~ /^[0-9]{1,15}$/ ||
     $5 !~ /^[0-9]{1,15}$/ || $6 !~ /^[0-9]{1,15}$/ { next }
+    # Same whitespace-in-the-date-field guard as the totals pass, for the
+    # same reason given there: a row rejected as damage by the totals must
+    # not still count here.
+    $1 ~ /[[:space:]]/ { next }
     since != "" && $1 "" < since "" { next }
     want  != "" && ((NF >= 7 && $7 != "" ? $7 : "-") "" != want "") { next }
     NF < 8 || $8 == "" { next }
