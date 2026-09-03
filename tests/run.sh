@@ -1872,7 +1872,7 @@ is "invalid: a refusal writes nothing to stdout" "" \
 # --slow-after to correct, so naming one would send them looking for a flag
 # they did not type.
 fresh
-wiz="$(printf 'on\nlocal\n24h\non\nsoon\n30\nlater\n600\noff\nnone\n\nfalse\nn\n' \
+wiz="$(printf 'on\nlocal\n24h\non\nsoon\n30\nlater\n600\noff\noff\nnone\n\nfalse\nn\n' \
         | bash "$SCRIPTS/setup.sh" 2>&1 >/dev/null)"
 contains "invalid: the wizard labels a bad slow-after with the key" \
          "SLOW_AFTER must be a whole number of seconds, got 'soon'." "$wiz"
@@ -2939,10 +2939,12 @@ else
 fi
 
 # Answers in prompt order: enabled, timezone, display format, elapsed, slow
-# after, idle after, summary, history, projects, colour, marker (blank keeps
-# the default), tell-Claude, write. Tool timing and context format are skipped
-# because summary and tell-Claude are answered off and false.
-printf 'off\n%s\nshort\non\n30\n0\noff\non\noff\ncyan\n\nfalse\ny\n' "$tz_answer" \
+# after, idle after, summary, tool timing, history, projects, colour, marker
+# (blank keeps the default), tell-Claude, write. Tool timing is asked
+# unconditionally now, regardless of what summary answered -- it feeds the
+# session history and --stats, not just the on-screen summary any more.
+# Context format is skipped because tell-Claude is answered false.
+printf 'off\n%s\nshort\non\n30\n0\noff\noff\non\noff\ncyan\n\nfalse\ny\n' "$tz_answer" \
   | bash "$SCRIPTS/setup.sh" >/dev/null 2>&1
 ct_load_config
 is "the wizard writes enabled"        "off"        "$CT_ENABLED"
@@ -2956,11 +2958,13 @@ is "the wizard writes the injection"  "false"      "$CT_INJECT_CONTEXT"
 # Answering off then back on in a fresh run proves the question round-trips
 # rather than only ever moving in one direction.
 fresh 'ENABLED=off'
-printf 'on\n%s\nshort\non\n30\n0\noff\non\noff\ncyan\n\nfalse\ny\n' "$tz_answer" \
+printf 'on\n%s\nshort\non\n30\n0\noff\noff\non\noff\ncyan\n\nfalse\ny\n' "$tz_answer" \
   | bash "$SCRIPTS/setup.sh" >/dev/null 2>&1
 ct_load_config
 is "the wizard round-trips enabled back on" "on" "$CT_ENABLED"
 
+# Summary is answered on here, so tool timing was already being asked at this
+# point before this fix -- nothing about this fixture's answer count changes.
 fresh 'COLOR=green'
 printf 'off\nlocal\niso\non\n0\n0\non\non\non\non\nred\n\ntrue\n24h\nn\n' \
   | bash "$SCRIPTS/setup.sh" >/dev/null 2>&1
@@ -2969,7 +2973,7 @@ is "answering no writes nothing"          "green" "$CT_COLOR"
 is "answering no leaves enabled untouched" "on"    "$CT_ENABLED"
 
 fresh
-printf 'on\nlocal\nshort\non\n30\n0\noff\non\non\ncyan\n\nfalse\ny\n' \
+printf 'on\nlocal\nshort\non\n30\n0\noff\noff\non\non\ncyan\n\nfalse\ny\n' \
   | bash "$SCRIPTS/setup.sh" >/dev/null 2>&1
 ct_load_config
 is "the wizard writes history"  "on" "$CT_HISTORY"
@@ -2980,7 +2984,7 @@ is "the wizard writes projects" "on" "$CT_PROJECTS"
 # colour answer below would be swallowed by it and the colour assertion would
 # catch that.
 fresh
-printf 'on\nlocal\nshort\non\n30\n0\noff\noff\ncyan\n\nfalse\ny\n' \
+printf 'on\nlocal\nshort\non\n30\n0\noff\noff\noff\ncyan\n\nfalse\ny\n' \
   | bash "$SCRIPTS/setup.sh" >/dev/null 2>&1
 ct_load_config
 is "the wizard writes history off"            "off"   "$CT_HISTORY"
@@ -4849,7 +4853,7 @@ skip "width: a combining accent draws no column of its own" \
 # column. Measured through the wizard rather than asserted against fixed text,
 # because the markers contain the current clock.
 fresh
-dw_out="$(printf 'off\nlocal\nshort\non\n30\n0\noff\ncyan\n\nfalse\nn\n' \
+dw_out="$(printf 'off\nlocal\nshort\non\n30\n0\noff\noff\ncyan\n\nfalse\nn\n' \
   | bash "$SCRIPTS/setup.sh" 2>/dev/null)"
 dw_cols=""
 # The expected column is derived from constants, not from _ct_display_width, so

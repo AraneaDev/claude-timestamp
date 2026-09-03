@@ -1105,12 +1105,18 @@ wizard() {
   done
   ask "Report session totals when the session ends? (on/off)" "$CT_SUMMARY"; answer="$_CT_ANSWER"
   case "$answer" in on|off) CT_SUMMARY="$answer" ;; esac
-  if [ "$CT_SUMMARY" = "on" ]; then
-    echo "  Tool timing names the slowest tools in that summary. It is the only"
-    echo "  setting that costs anything per tool call rather than per message."
-    ask "  Record what each tool call cost? (on/off)" "$CT_TOOL_TIMING"; answer="$_CT_ANSWER"
-    case "$answer" in on|off) CT_TOOL_TIMING="$answer" ;; esac
-  fi
+  # Unconditional: tool timing used to only change what the summary above
+  # printed, which is why this was nested under it. It now also fills field 8
+  # of the session history and feeds the --stats slowest-tools table, neither
+  # of which depends on the summary being on, so nesting it here would cut
+  # someone who answered "off" above away from the whole tool-breakdown
+  # feature through the guided path.
+  echo "Tool timing names the slowest tools in that summary and in --stats,"
+  echo "and records what each tool call cost into the session history. It is"
+  echo "the only setting that costs anything per tool call rather than per"
+  echo "message."
+  ask "Record what each tool call cost? (on/off)" "$CT_TOOL_TIMING"; answer="$_CT_ANSWER"
+  case "$answer" in on|off) CT_TOOL_TIMING="$answer" ;; esac
   echo
 
   # The one part of the wizard that is not about what appears on screen. It
