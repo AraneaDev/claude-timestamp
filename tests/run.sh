@@ -3641,6 +3641,26 @@ refutes  "sections: the over-long row's project does not appear" grep -q "delta"
 contains "sections: the well-formed row's tool still appears" "Write" "$out"
 refutes  "sections: the over-long row's tool does not appear" grep -q "Edit" <<< "$out"
 
+# `--stats`'s slowest-tools pass ends its awk with `sort -rn | head -10`. A
+# history with enough distinct tool names makes `head -10` close the pipe on
+# `sort` before `sort` is done writing, sending it SIGPIPE; under this
+# script's own errexit/pipefail that used to abort the whole report right
+# there, silently truncating it with no error message and no slowest-tools
+# table. 2000 distinct tools is enough to reproduce it -- the same volume the
+# session-end.sh regression below uses for the same-shaped bug.
+awk 'BEGIN {
+  for (i = 0; i < 2000; i++)
+    printf "2026-01-01T10:00:00\t100\t1\t10\t0\t0\talpha\tTool%04d:%d:1\n", i, 2000 - i
+}' > "$CLAUDE_TIMESTAMP_HISTORY"
+out="$(bash "$SCRIPTS/setup.sh" --stats 2>&1)" && big_stats_rc=0 || big_stats_rc=$?
+is       "sections: a history with 2000 distinct tools still exits 0" \
+         "0" "$big_stats_rc"
+contains "sections: and the slowest-tools table still appears" \
+         "slowest tools" "$out"
+contains "sections: with the actual busiest tool named" "Tool0000" "$out"
+contains "sections: and its correct summed duration" "33m20s" "$out"
+contains "sections: and its correct call count" "(1 call)" "$out"
+
 echo "stats filters"
 
 {

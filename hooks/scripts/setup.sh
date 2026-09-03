@@ -459,7 +459,18 @@ ROWS
       }
     }
     END { for (t in secs) printf "%018d\t%s\t%d\n", secs[t], t, calls[t] }
-    ' "$file" | sort -rn | head -10)"
+    ' "$file" | sort -rn | head -10)" || true
+  # `|| true` above: on a history with many distinct tool names, `head -10`
+  # closes the pipe once it has its ten lines, and `sort` -- which may still
+  # have more to write -- gets SIGPIPE for it, even though every line `head`
+  # needed had already been delivered. That makes the pipeline's exit status
+  # nonzero for reasons that have nothing to do with the output being wrong.
+  # `--stats` runs under this script's own errexit/pipefail, so without
+  # `|| true`, a large enough history would abort the whole report right
+  # here -- truncating it silently, with no error, before the slowest-tools
+  # table the reader came for ever prints. The printed output is unaffected
+  # either way. Same defect, same fix, as ct_tool_digest in lib/config.sh and
+  # the on-screen aggregation in session-end.sh.
   if [ -n "$rows" ]; then
     echo
     echo "  slowest tools"
