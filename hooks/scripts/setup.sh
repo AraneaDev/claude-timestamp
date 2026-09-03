@@ -298,7 +298,16 @@ stats() {
 
   local n total turns waited idle failed maxd maxwhen maxturns first last bad
   read -r n total turns waited idle failed maxd maxwhen maxturns first last bad <<EOF
-$(awk -F'\t' -v since="${CT_STATS_SINCE:-}" -v want="${CT_STATS_PROJECT:-}" '
+$(CT_STATS_SINCE="${CT_STATS_SINCE:-}" CT_STATS_PROJECT="${CT_STATS_PROJECT:-}" awk -F'\t' '
+  # Read through ENVIRON rather than -v: POSIX -v assignment runs escape-
+  # sequence processing on its value, so a project named literally
+  # "back\tslash" arrived here as "back<TAB>slash" -- silently matching
+  # nothing, since the history stores the name unprocessed. ENVIRON performs
+  # no such processing, so the filter sees exactly what the flag was given.
+  # `since` is immune to this in practice, since it is validated down to
+  # digits or a YYYY-MM-DD shape before it ever reaches awk, but it is read
+  # the same way regardless, so the two cannot drift back apart later.
+  BEGIN { since = ENVIRON["CT_STATS_SINCE"]; want = ENVIRON["CT_STATS_PROJECT"] }
   # Six to eight fields, the last two being optional columns a row carries
   # only when the setting that fills them was on. Widening the count alone
   # would weaken the check, so the timings are checked for being timings:
@@ -418,7 +427,10 @@ EOF
       # that from a plain typo. It deliberately does NOT carry `want`: a
       # project filter with no matches is exactly why this hint runs, so
       # filtering the hint on that same project would empty it out.
-      known="$(awk -F'\t' -v since="${CT_STATS_SINCE:-}" '
+      known="$(CT_STATS_SINCE="${CT_STATS_SINCE:-}" awk -F'\t' '
+        # Read through ENVIRON rather than -v; see the totals pass above for
+        # why -v is unsafe for a filter value.
+        BEGIN { since = ENVIRON["CT_STATS_SINCE"] }
         NF < 6 || NF > 8 { next }
         $2 !~ /^[0-9]{1,15}$/ || $3 !~ /^[0-9]{1,15}$/ || $4 !~ /^[0-9]{1,15}$/ ||
         $5 !~ /^[0-9]{1,15}$/ || $6 !~ /^[0-9]{1,15}$/ { next }
@@ -468,7 +480,10 @@ EOF
   # installation that never turned PROJECTS on sees the output it saw before
   # the column existed.
   local rows
-  rows="$(awk -F'\t' -v since="${CT_STATS_SINCE:-}" -v want="${CT_STATS_PROJECT:-}" '
+  rows="$(CT_STATS_SINCE="${CT_STATS_SINCE:-}" CT_STATS_PROJECT="${CT_STATS_PROJECT:-}" awk -F'\t' '
+    # Read through ENVIRON rather than -v; see the totals pass above for why
+    # -v is unsafe for a filter value.
+    BEGIN { since = ENVIRON["CT_STATS_SINCE"]; want = ENVIRON["CT_STATS_PROJECT"] }
     # The same validity test the totals above use, not a looser one. A row
     # rejected there and accepted here would put seconds into a per-project
     # figure that the total it sits under does not count, so the breakdown
@@ -533,7 +548,10 @@ ROWS
   # summary answers "what made this session slow"; this answers "what has been
   # costing me", which is the question a hundred rows can answer and one
   # cannot.
-  rows="$(awk -F'\t' -v since="${CT_STATS_SINCE:-}" -v want="${CT_STATS_PROJECT:-}" '
+  rows="$(CT_STATS_SINCE="${CT_STATS_SINCE:-}" CT_STATS_PROJECT="${CT_STATS_PROJECT:-}" awk -F'\t' '
+    # Read through ENVIRON rather than -v; see the totals pass above for why
+    # -v is unsafe for a filter value.
+    BEGIN { since = ENVIRON["CT_STATS_SINCE"]; want = ENVIRON["CT_STATS_PROJECT"] }
     # The same shared validity guard as the other two passes, plus one more
     # rule this pass alone needs: field 8 must actually be present, since a
     # row can be valid by the shared guard and still carry no tool digest.

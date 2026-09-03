@@ -3950,6 +3950,21 @@ refutes  "filters: --project=1000 does not list 1e3 by project either" \
 contains "filters: --project=1000 keeps the session named plain 1000" \
          "DeltaTool" "$out"
 
+# POSIX -v assignment runs escape-sequence processing on its value, so a
+# filter value carrying a backslash escape sequence -- a project checked out
+# as "back\tslash" -- arrived inside awk as "back<TAB>slash" via -v, even
+# though the history stores (and the by-project table must print) the name
+# unprocessed. Every filter site is fed through ENVIRON instead, which
+# performs no such processing.
+{
+  printf '2026-09-01T10:00:00\t100\t1\t10\t0\t0\t%s\n' 'back\tslash'
+} > "$CLAUDE_TIMESTAMP_HISTORY"
+out="$(bash "$SCRIPTS/setup.sh" --stats --project='back\tslash' 2>&1)"
+contains "filters: a project name with a backslash escape still matches" \
+         "sessions        1" "$out"
+contains "filters: and the by-project table prints it unprocessed" \
+         'back\tslash' "$out"
+
 out="$(bash "$SCRIPTS/setup.sh" --stats --since=soon 2>&1)"
 contains "filters: an unparseable since is refused"   "--since takes" "$out"
 refutes  "filters: and is not silently ignored" \
