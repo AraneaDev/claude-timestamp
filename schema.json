@@ -56,7 +56,7 @@
       "default": "[{%date }%time{ %elapsed}{ · %tool}]",
       "validator": "ct_is_valid_marker",
       "type": "template",
-      "describes": "the marker's layout; %time %elapsed %tool %date are the parts, a {...} group disappears when every part inside it is empty, and groups do not nest"
+      "describes": "the marker's layout; %time %elapsed %tool %date are the parts, a {...} group holds at least one part and disappears when every part inside it is empty, and groups do not nest"
     },
     "TIME_COLOR": {
       "default": "",
