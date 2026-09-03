@@ -1250,6 +1250,32 @@ refutes "rejects a newline in a context format" \
 ct_load_config
 is "a rejected format cannot smuggle a second setting into the file" "on" "$CT_ENABLED"
 
+# The same thing for every flag, driven from the table setup.sh itself parses.
+#
+# No validator accepts a newline: the enums and the numeric checks take nothing
+# outside their own shape, and the three free-text keys refuse a control
+# character outright. So every flag must refuse one, and a flag that reaches
+# the config file without asking its validator cannot -- write_config
+# interpolates into KEY=value with no escaping, so the newline writes a second
+# line the parser reads back as a real setting.
+#
+# Written against the whole flag set rather than against the two that happened
+# to be wrong, so flag twenty-one is covered the day it is added.
+fresh 'ENABLED=on'
+flag_table="$(sed -n '/^CT_FLAG_TABLE="$/,/^"$/p' "$SCRIPTS/setup.sh" | sed '1d;$d')"
+is "every setting has a flag in the table" "20" \
+  "$(printf '%s\n' "$flag_table" | grep -c '^[a-z]')"
+# shellcheck disable=SC2034  # t_rest is read to consume the rest of the row
+while read -r t_flag t_rest; do
+  [ -n "$t_flag" ] || continue
+  refutes "flag --$t_flag refuses a value carrying a newline" \
+    bash "$SCRIPTS/setup.sh" "--$t_flag=$(printf 'x\nENABLED=off')"
+done <<FLAGTABLE
+$flag_table
+FLAGTABLE
+ct_load_config
+is "and no flag smuggled a second setting into the file" "on" "$CT_ENABLED"
+
 fresh
 bash "$SCRIPTS/setup.sh" --marker='%time' >/dev/null
 ct_load_config
