@@ -83,7 +83,14 @@ if [ "$CT_SUMMARY" = "on" ] && [ "$CT_TOOL_TIMING" = "on" ] && [ -s "$log" ]; th
   # -- for the same reason ct_tool_digest in lib/config.sh needs it. This is
   # the more common way to hit it, since SUMMARY and TOOL_TIMING both on is
   # the ordinary way to have TOOL_TIMING on at all.
-  tools="$(awk '{ sum[$1] += $2; n[$1]++ }
+  tools="$(awk '
+                # Byte-identical to the filter ct_tool_digest applies in
+                # lib/config.sh, so a blank line or a line torn off mid-write
+                # cannot become a tool on screen that the history then does
+                # not carry: the two aggregations read the same log and must
+                # agree on what counts as a usable line.
+                $1 == "" || $2 !~ /^[0-9]+(\.[0-9]+)?$/ { next }
+                { sum[$1] += $2; n[$1]++ }
                 END { for (t in sum) printf "%.3f\t%s\t%d\n", sum[t], t, n[t] }' "$log" \
            | sort -rn | head -3 \
            | awk -F'\t' '{

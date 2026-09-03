@@ -5849,6 +5849,41 @@ else
 fi
 
 if command -v jq >/dev/null 2>&1; then
+  # ct_tool_digest in lib/config.sh skips a line with no usable tool name or
+  # duration -- a blank line, or one torn off mid-write. The on-screen
+  # aggregation four lines above it in this same hook is a second, separate
+  # awk pass over the identical log, and never got that filter: a blank line
+  # or a torn final line ("Rea", with no duration and no outcome) became a
+  # zero-duration, one-call tool named after whatever fragment survived,
+  # shown on screen even though the history row for the same session never
+  # recorded it.
+  it_sid="torn-line-$$-$RANDOM"
+  fresh 'TOOL_TIMING=on'
+  it_sf="$(ct_state_file "$it_sid")"
+  printf '%s' "$(( $(date +%s) - 100 ))" > "${it_sf}.start"
+  printf '1'  > "${it_sf}.turns"
+  printf '40' > "${it_sf}.wait"
+  printf '0'  > "${it_sf}.idle"
+  printf 'Bash 3.000 ok\nRead 1.000 ok\n\nRea' > "${it_sf}.tools"
+  it_out="$(printf '{"session_id":"%s","cwd":""}' "$it_sid" \
+    | bash "$SCRIPTS/session-end.sh")"
+  it_screen_tools="$(printf '%s' "$it_out" | jq -r '.systemMessage' \
+    | grep -oE '[A-Za-z]* [0-9.]+s \([0-9]+ calls?\)' \
+    | awk '{print $1}' | sort -u | paste -sd, -)"
+  it_history_tools="$(cut -f8 "$CLAUDE_TIMESTAMP_HISTORY" \
+    | tr ',' '\n' | cut -d: -f1 | sort -u | paste -sd, -)"
+  is "columns: a torn log line names the same tools on screen as in the history" \
+     "$it_screen_tools" "$it_history_tools"
+  refutes "columns: neither readout turns the torn fragment into a tool" \
+          grep -qx "Rea" <<< "$(tr ',' '\n' <<< "$it_screen_tools")"
+else
+  skip "columns: a torn log line names the same tools on screen as in the history" \
+       "jq not installed"
+  skip "columns: neither readout turns the torn fragment into a tool" \
+       "jq not installed"
+fi
+
+if command -v jq >/dev/null 2>&1; then
   # End to end: drive the real writer, post-tool-use.sh, instead of
   # fabricating its output. This is the case that would have caught the
   # space-vs-tab mismatch on its own, and is meant to keep catching it if the
