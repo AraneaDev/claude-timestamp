@@ -469,15 +469,17 @@ ROWS
       c = split($8, entries, ",")
       for (i = 1; i <= c; i++) {
         if (split(entries[i], part, ":") != 3) continue
-        # An empty name (a hand-edited ":0:1" entry) must not become a row:
-        # the read loop below splits on tab, and tab is one of the "IFS
-        # whitespace" characters, so bash read collapses an empty field
-        # next to it instead of preserving it -- the name that should have
-        # been empty comes out holding the call count, and the call count
-        # comes out empty, which then fails an integer test with a raw shell
-        # error. Skipped here the same way ct_tool_digest in lib/config.sh
-        # already skips a malformed entry at the source, so the read loop
-        # never has to parse one in the first place.
+        # An empty name (a hand-edited ":0:1" entry) must not become a row.
+        # The read loop below splits on \037 (unit separator), not tab, and
+        # \037 is not one of the "IFS whitespace" characters, so `read`
+        # preserves an empty field there instead of collapsing it into a
+        # neighbour -- the collapse that would otherwise shift the call
+        # count into the name and leave the count empty, failing an integer
+        # test with a raw shell error. That means this skip is no longer
+        # the thing standing between an empty name and that collapse; \037
+        # already prevents it. This is defense in depth: it keeps an empty
+        # name out of the emitted rows at all, the same way ct_tool_digest
+        # in lib/config.sh already skips a malformed entry at the source.
         if (part[1] == "") continue
         # Same 15-digit bound as the timing fields of the row itself.
         if (part[2] !~ /^[0-9]{1,15}$/ || part[3] !~ /^[0-9]{1,15}$/) continue
