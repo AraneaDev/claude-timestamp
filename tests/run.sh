@@ -3646,6 +3646,37 @@ asserts  "filters: the relative form is accepted" \
 contains "filters: and resolves to a dated cutoff" \
          "since $(ct_date_days_ago 7)" "$out"
 
+# The relative form has to resolve in the CONFIGURED zone, not the machine's:
+# the parser that reads --since=Nd runs before ct_load_config, so a cutoff
+# computed right there would be rendered in whichever zone the machine
+# happens to sit in. Every other assertion in this file leaves TZ unset, so
+# machine and configured zone silently coincide and would never catch that.
+# Pacific/Kiritimati (UTC+14) and Etc/GMT+12 (UTC-12) are 26 hours apart, more
+# than a full day, so at least one of them is always on a different calendar
+# date than any machine zone right now. Picked dynamically -- rather than
+# hardcoding one -- so this cannot start silently asserting nothing the day
+# somebody runs the suite from a machine that already sits in the zone
+# chosen here.
+if ct_tz_supported; then
+  ct_machine_date="$(date +%Y-%m-%d)"
+  ct_kiri_date="$(TZ=Pacific/Kiritimati date +%Y-%m-%d)"
+  if [ "$ct_kiri_date" != "$ct_machine_date" ]; then
+    ct_pinned_zone="Pacific/Kiritimati"; ct_pinned_date="$ct_kiri_date"
+  else
+    ct_pinned_zone="Etc/GMT+12"; ct_pinned_date="$(TZ=Etc/GMT+12 date +%Y-%m-%d)"
+  fi
+
+  fresh "TZ=$ct_pinned_zone" 'HISTORY=on'
+  printf '%sT10:00:00\t3600\t10\t600\t0\t0\n' "$ct_pinned_date" > "$CLAUDE_TIMESTAMP_HISTORY"
+  out="$(bash "$SCRIPTS/setup.sh" --stats --since=0d 2>&1)"
+  contains "filters: the relative form resolves in the configured zone, not the machine's" \
+           "since $ct_pinned_date" "$out"
+  fresh 'HISTORY=on'
+else
+  skip "filters: the relative form resolves in the configured zone, not the machine's" \
+       "no timezone database"
+fi
+
 echo
 echo "project configuration"
 

@@ -25,7 +25,15 @@ ZONEINFO="/usr/share/zoneinfo"
 # Report filters for --stats, set by --since and --project in main()'s parser.
 # Empty means unfiltered. These configure a report rather than a persisted
 # setting, so they live here rather than in CT_FLAG_TABLE.
+#
+# CT_STATS_SINCE_DAYS holds the day count from a relative --since=Nd until
+# stats() can resolve it: the parser runs before ct_load_config, so CT_TZ is
+# still empty there, and resolving the cutoff that early would render it in
+# the machine's zone rather than the configured one. The absolute
+# --since=YYYY-MM-DD form needs no such deferral -- it is a literal, so it
+# goes straight into CT_STATS_SINCE.
 CT_STATS_SINCE=""
+CT_STATS_SINCE_DAYS=""
 CT_STATS_PROJECT=""
 
 usage() {
@@ -258,6 +266,18 @@ preview() {
 # because ct_format_duration already exists and should not be reimplemented.
 stats() {
   ct_load_config
+
+  # The relative --since form is stored as a day count rather than resolved
+  # in the parser, because the parser runs before ct_load_config -- CT_TZ is
+  # still empty there, so a cutoff computed at parse time would be rendered
+  # in the machine's zone rather than the configured one. Resolved here,
+  # right after the config (and therefore CT_TZ) is loaded.
+  if [ -n "${CT_STATS_SINCE_DAYS:-}" ]; then
+    CT_STATS_SINCE="$(ct_date_days_ago "$CT_STATS_SINCE_DAYS")" || {
+      echo "This system's date cannot compute a cutoff. Use --since=YYYY-MM-DD." >&2
+      return 2
+    }
+  fi
 
   local file
   file="$(ct_history_path)"
@@ -1220,10 +1240,10 @@ main() {
         value="${arg#*=}"
         case "$value" in
           [0-9]*d)
-            CT_STATS_SINCE="$(ct_date_days_ago "${value%d}")" || {
-              echo "This system's date cannot compute a cutoff. Use --since=YYYY-MM-DD." >&2
-              exit 2
-            } ;;
+            # Stored, not resolved: CT_TZ is not loaded yet at parse time.
+            # stats() resolves this into CT_STATS_SINCE right after it calls
+            # ct_load_config.
+            CT_STATS_SINCE_DAYS="${value%d}" ;;
           [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9])
             CT_STATS_SINCE="$value" ;;
           *)
