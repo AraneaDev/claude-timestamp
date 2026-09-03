@@ -379,6 +379,28 @@ ct_now() {
   printf '%s' "$out"
 }
 
+# A date N days before now, as YYYY-MM-DD in the configured zone, for the
+# history filter. The two date implementations disagree on how to format an
+# epoch that is not now: GNU takes -d @EPOCH, BSD takes -r EPOCH. Both are
+# tried, and neither working prints nothing, which the caller reads as "no
+# cutoff could be computed" rather than as a cutoff of zero.
+#
+# CT_TZ is applied per call rather than exported, as ct_now does, so the
+# cutoff lands in the same zone the rows were written in.
+ct_date_days_ago() {
+  local days="$1" target
+  case "$days" in ''|*[!0-9]*) return 1 ;; esac
+  target=$(( $(date +%s) - days * 86400 ))
+  if ct_tz_honoured; then
+    TZ="$CT_TZ" date -d "@$target" +%Y-%m-%d 2>/dev/null && return 0
+    TZ="$CT_TZ" date -r "$target"  +%Y-%m-%d 2>/dev/null && return 0
+  else
+    date -d "@$target" +%Y-%m-%d 2>/dev/null && return 0
+    date -r "$target"  +%Y-%m-%d 2>/dev/null && return 0
+  fi
+  return 1
+}
+
 # Current timezone abbreviation (CEST, JST...) for the model-facing string.
 ct_zone() {
   if ct_tz_honoured; then TZ="$CT_TZ" date '+%Z'; else date '+%Z'; fi

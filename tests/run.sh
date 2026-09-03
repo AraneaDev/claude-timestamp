@@ -3608,6 +3608,44 @@ refutes  "sections: the over-long row's project does not appear" grep -q "delta"
 contains "sections: the well-formed row's tool still appears" "Write" "$out"
 refutes  "sections: the over-long row's tool does not appear" grep -q "Edit" <<< "$out"
 
+echo "stats filters"
+
+{
+  printf '2026-08-01T10:00:00\t3600\t10\t600\t0\t0\talpha\n'
+  printf '2026-09-02T10:00:00\t1800\t5\t300\t0\t0\tbeta\n'
+} > "$CLAUDE_TIMESTAMP_HISTORY"
+
+out="$(bash "$SCRIPTS/setup.sh" --stats --since=2026-09-01 2>&1)"
+contains "filters: since narrows the count"  "sessions        1" "$out"
+contains "filters: and says so in the header" "since 2026-09-01" "$out"
+
+out="$(bash "$SCRIPTS/setup.sh" --stats --project=alpha 2>&1)"
+contains "filters: project narrows the count" "sessions        1" "$out"
+contains "filters: and says which"            "alpha" "$out"
+
+out="$(bash "$SCRIPTS/setup.sh" --stats --project=nope 2>&1)"
+contains "filters: an unmatched project says so"      "No sessions match in nope" "$out"
+contains "filters: and names the ones that do exist"  "alpha" "$out"
+
+out="$(bash "$SCRIPTS/setup.sh" --stats --since=soon 2>&1)"
+contains "filters: an unparseable since is refused"   "--since takes" "$out"
+refutes  "filters: and is not silently ignored" \
+         bash "$SCRIPTS/setup.sh" --stats --since=soon
+
+is "filters: days ago renders ten digits" "10" \
+   "$(ct_date_days_ago 7 | tr -d '\n' | wc -c | tr -d ' ')"
+
+# The relative form end to end, not just the helper underneath it. The fixture
+# rows carry fixed dates while "now" moves, so asserting which of them survive
+# a seven-day window would start failing on its own. What is stable is that the
+# form is accepted and resolves to a cutoff that gets named either way, which
+# is why the unmatched branch names its filter too.
+out="$(bash "$SCRIPTS/setup.sh" --stats --since=7d 2>&1)"
+asserts  "filters: the relative form is accepted" \
+         bash "$SCRIPTS/setup.sh" --stats --since=7d
+contains "filters: and resolves to a dated cutoff" \
+         "since $(ct_date_days_ago 7)" "$out"
+
 echo
 echo "project configuration"
 

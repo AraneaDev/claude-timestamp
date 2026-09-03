@@ -22,6 +22,12 @@ source "$CT_LIB/state.sh"
 
 ZONEINFO="/usr/share/zoneinfo"
 
+# Report filters for --stats, set by --since and --project in main()'s parser.
+# Empty means unfiltered. These configure a report rather than a persisted
+# setting, so they live here rather than in CT_FLAG_TABLE.
+CT_STATS_SINCE=""
+CT_STATS_PROJECT=""
+
 usage() {
   cat <<'USAGE'
 claude-timestamp setup
@@ -31,6 +37,11 @@ claude-timestamp setup
   setup.sh --show             Print the current configuration.
   setup.sh --doctor           Check that everything needed is present and working.
   setup.sh --stats            Summarise the sessions recorded so far.
+  setup.sh --stats --since=7d  Only sessions from the last seven days.
+  setup.sh --stats --since=2026-09-01
+                              Only sessions on or after that date.
+  setup.sh --stats --project=NAME
+                              Only sessions recorded against that project.
 
 Flags
   --tz=ZONE                   IANA timezone (Europe/Amsterdam), or "local".
@@ -263,7 +274,7 @@ stats() {
 
   local n total turns waited idle failed maxd maxwhen maxturns first last bad
   read -r n total turns waited idle failed maxd maxwhen maxturns first last bad <<EOF
-$(awk -F'\t' '
+$(awk -F'\t' -v since="${CT_STATS_SINCE:-}" -v want="${CT_STATS_PROJECT:-}" '
   # Six to eight fields, the last two being optional columns a row carries
   # only when the setting that fills them was on. Widening the count alone
   # would weaken the check, so the timings are checked for being timings:
@@ -272,6 +283,10 @@ $(awk -F'\t' '
   NF < 6 || NF > 8 { bad++; next }
   $2 !~ /^[0-9]+$/ || $3 !~ /^[0-9]+$/ || $4 !~ /^[0-9]+$/ ||
   $5 !~ /^[0-9]+$/ || $6 !~ /^[0-9]+$/ { bad++; next }
+  # Filtered rows are skipped, not counted as unreadable: they were read
+  # fine, they simply fall outside what was asked for.
+  since != "" && $1 "" < since "" { next }
+  want  != "" && ((NF >= 7 && $7 != "" ? $7 : "-") != want) { next }
   {
     n++; total += $2; turns += $3; waited += $4; idle += $5; failed += $6
     # Seeded on the first row rather than only when a row beats the running
@@ -305,13 +320,38 @@ $(awk -F'\t' '
 EOF
 
   if [ "$n" -eq 0 ]; then
+    if [ -n "${CT_STATS_PROJECT:-}${CT_STATS_SINCE:-}" ]; then
+      # The filter is named even though nothing matched. --since=7d resolves to
+      # a date the user never typed, and "nothing matched" without saying what
+      # was asked for leaves them unable to tell a wrong filter from an empty
+      # history.
+      printf 'No sessions match'
+      [ -n "${CT_STATS_PROJECT:-}" ] && printf ' in %s' "$CT_STATS_PROJECT"
+      [ -n "${CT_STATS_SINCE:-}" ] && printf ' since %s' "$CT_STATS_SINCE"
+      printf '.\n'
+      local known
+      known="$(awk -F'\t' 'NF >= 7 && $7 != "" && $7 != "-" { print $7 }' "$file" \
+               | sort -u | tr '\n' ' ')"
+      [ -n "$known" ] && echo "  projects recorded: $known"
+      return 0
+    fi
     echo "No readable sessions recorded."
     [ "$bad" -gt 0 ] && echo "  $bad unreadable row(s) in $(ct_tilde "$file")."
     return 0
   fi
 
-  printf 'claude-timestamp stats%*slast %s session' "$((28 - 21))" "" "$n"
+  # "last N sessions" is right for an unfiltered view and wrong for a filtered
+  # one: the rows are the ones that matched, not the most recent ones. The
+  # filter is spelled out so a narrowed total is never read as an all-time one.
+  printf 'claude-timestamp stats%*s' "$((28 - 21))" ""
+  if [ -n "${CT_STATS_SINCE:-}${CT_STATS_PROJECT:-}" ]; then
+    printf '%s session' "$n"
+  else
+    printf 'last %s session' "$n"
+  fi
   [ "$n" -eq 1 ] || printf 's'
+  [ -n "${CT_STATS_PROJECT:-}" ] && printf ' in %s' "$CT_STATS_PROJECT"
+  [ -n "${CT_STATS_SINCE:-}" ] && printf ' since %s' "$CT_STATS_SINCE"
   printf '\n\n'
 
   echo "  sessions        $n"
@@ -334,7 +374,7 @@ EOF
   # installation that never turned PROJECTS on sees the output it saw before
   # the column existed.
   local rows
-  rows="$(awk -F'\t' '
+  rows="$(awk -F'\t' -v since="${CT_STATS_SINCE:-}" -v want="${CT_STATS_PROJECT:-}" '
     # The same validity test the totals above use, not a looser one. A row
     # rejected there and accepted here would put seconds into a per-project
     # figure that the total it sits under does not count, so the breakdown
@@ -342,6 +382,8 @@ EOF
     NF < 6 || NF > 8 { next }
     $2 !~ /^[0-9]+$/ || $3 !~ /^[0-9]+$/ || $4 !~ /^[0-9]+$/ ||
     $5 !~ /^[0-9]+$/ || $6 !~ /^[0-9]+$/ { next }
+    since != "" && $1 "" < since "" { next }
+    want  != "" && ((NF >= 7 && $7 != "" ? $7 : "-") != want) { next }
     {
       # seen tracks whether any row named a real project, not merely whether
       # field 7 is present: a history where PROJECTS was never turned on, or
@@ -378,13 +420,15 @@ ROWS
   # summary answers "what made this session slow"; this answers "what has been
   # costing me", which is the question a hundred rows can answer and one
   # cannot.
-  rows="$(awk -F'\t' '
+  rows="$(awk -F'\t' -v since="${CT_STATS_SINCE:-}" -v want="${CT_STATS_PROJECT:-}" '
     # The same shared validity guard as the other two passes, plus one more
     # rule this pass alone needs: field 8 must actually be present, since a
     # row can be valid by the shared guard and still carry no tool digest.
     NF < 6 || NF > 8 { next }
     $2 !~ /^[0-9]+$/ || $3 !~ /^[0-9]+$/ || $4 !~ /^[0-9]+$/ ||
     $5 !~ /^[0-9]+$/ || $6 !~ /^[0-9]+$/ { next }
+    since != "" && $1 "" < since "" { next }
+    want  != "" && ((NF >= 7 && $7 != "" ? $7 : "-") != want) { next }
     NF < 8 || $8 == "" { next }
     {
       c = split($8, entries, ",")
@@ -1171,6 +1215,24 @@ main() {
       --show)      action="show";   interactive=0 ;;
       --doctor)    action="doctor"; interactive=0 ;;
       --stats)     action="stats";  interactive=0 ;;
+      --since=*)
+        action="stats"; interactive=0
+        value="${arg#*=}"
+        case "$value" in
+          [0-9]*d)
+            CT_STATS_SINCE="$(ct_date_days_ago "${value%d}")" || {
+              echo "This system's date cannot compute a cutoff. Use --since=YYYY-MM-DD." >&2
+              exit 2
+            } ;;
+          [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9])
+            CT_STATS_SINCE="$value" ;;
+          *)
+            echo "--since takes a number of days such as 7d, or a date such as 2026-09-01." >&2
+            exit 2 ;;
+        esac ;;
+      --project=*)
+        action="stats"; interactive=0
+        CT_STATS_PROJECT="${arg#*=}" ;;
       -h|--help)   usage; exit 0 ;;
       --*=*)
         flag="${arg#--}"; flag="${flag%%=*}"
