@@ -893,10 +893,30 @@ if command -v jq >/dev/null 2>&1; then
 
   # An end that precedes the start means the turn drew no message of its own.
   ct_clear_state "acct"; mkdir -p "$(ct_state_dir)"
-  printf '%s' "$(date +%s)" > "$base"
-  ct_close_turn "$base" "$(( $(date +%s) - 500 ))"
+  now="$(date +%s)"
+  printf '%s' "$now" > "$base"
+  ct_close_turn "$base" "$(( now - 500 ))"
   is "a turn ending before it started adds nothing" "0" "$(ct_read_counter "$base.wait")"
   asserts "a turn ending before it started is still closed" test -r "$base.closed"
+  # ...but not stamped with that earlier time. The next prompt measures the
+  # user's break from .closed, so a turn abandoned before it drew anything --
+  # straight into a long tool call, then an interrupt -- would hand the gap
+  # its own whole duration on top of the real break. Closing no earlier than
+  # the turn began keeps the figure to something that was actually a gap.
+  is "and is closed no earlier than it began" "$now" "$(ct_read_counter "$base.closed")"
+
+  # The same thing through the measurement that consumes it. A turn opened
+  # 7000s ago spent 1800s in a tool and was then interrupted, drawing nothing,
+  # so .last still points at the previous turn 8800s back. The break to report
+  # is the 7000s since this turn opened, not the 8800s to a message from
+  # before the user's own prompt.
+  ct_clear_state "acct"; mkdir -p "$(ct_state_dir)"
+  now="$(date +%s)"
+  printf '%s' "$(( now - 7000 ))" > "$base"
+  printf '%s' "$(( now - 8800 ))" > "$base.last"
+  ct_close_turn "$base" "$(ct_read_counter "$base.last")"
+  CT_IDLE_AFTER=3600 ct_record_away "acct" "$now"
+  is "an abandoned turn is not counted as time away" "7000" "$(ct_read_counter "$base.away")"
 
   ct_clear_state "acct"; mkdir -p "$(ct_state_dir)"
   ct_close_turn "$base" "$(date +%s)"
