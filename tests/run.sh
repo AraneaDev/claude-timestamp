@@ -1269,6 +1269,22 @@ bash "$SCRIPTS/setup.sh" --color=cyan >/dev/null
 is "config: an unremarkable marker still writes unquoted" "1" \
   "$(grep -c '^MARKER=\[' "$CLAUDE_TIMESTAMP_CONFIG")"
 
+# ct_load_config reads this file from five hooks, and message-display reads it
+# on every displayed message, so a writer that truncates in place can be caught
+# mid-write: the reader sees a partial file, silently falls back to defaults
+# for the keys not yet written, and draws one message in the wrong timezone or
+# colour. A reader that opened the file before the write stands in for that
+# race deterministically -- with a truncate-in-place writer its descriptor is
+# emptied under it, and with a rename it keeps the complete previous file.
+fresh 'COLOR=cyan'
+exec 9< "$CLAUDE_TIMESTAMP_CONFIG"
+bash "$SCRIPTS/setup.sh" --color=red >/dev/null
+opened="$(cat <&9)"
+exec 9<&-
+contains "config: a write never truncates a file already being read" "COLOR=cyan" "$opened"
+ct_load_config
+is "config: and the new value did land" "red" "$CT_COLOR"
+
 fresh
 bash "$SCRIPTS/setup.sh" --time-color=cyan --elapsed-color=green --tool-color=gray >/dev/null
 ct_load_config
@@ -2595,6 +2611,17 @@ is "--project writes nothing else"   "0" "$(grep -c '^DISPLAY_FORMAT=' "$written
     bash "$SCRIPTS/setup.sh" --project --display=short >/dev/null 2>&1 )
 is "--project keeps what was already pinned" "1" "$(grep -c '^COLOR=cyan' "$written")"
 is "--project adds the new setting"          "1" "$(grep -c '^DISPLAY_FORMAT=short' "$written")"
+
+# The project writer reads the file it is about to replace, so it has the same
+# truncate-in-place hazard as the account writer, and a project config is read
+# by a hook on every message of every session in that repository.
+exec 9< "$written"
+( cd "$PROJ/writable" && unset CLAUDE_TIMESTAMP_CONFIG && HOME="$PROJ/home" \
+    bash "$SCRIPTS/setup.sh" --project --color=green >/dev/null 2>&1 )
+opened_project="$(cat <&9)"
+exec 9<&-
+contains "--project never truncates a file already being read" "COLOR=cyan" "$opened_project"
+is "--project still applied the new value" "1" "$(grep -c '^COLOR=green' "$written")"
 
 # The marker and its part colours must be wired into the project writer the
 # same way every other setting is, or --project silently drops them: the
