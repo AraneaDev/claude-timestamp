@@ -3886,6 +3886,28 @@ asserts  "filters: a leading-zero relative form is accepted (09d)" \
 contains "filters: 09d resolves to a dated cutoff, not an octal error" \
          "since $(ct_date_days_ago 9)" "$out"
 
+# [0-9]*d as a glob is "one digit, then anything, then a literal d" -- the
+# middle * matches any character, not just digits -- so "7dd" and "7x1d" both
+# matched it too. ${value%d} then stripped only the trailing d, handing
+# ct_date_days_ago a string it could not parse ("7d" or "7x1"), which failed
+# there and blamed the platform ("This system's date cannot compute a
+# cutoff") instead of the *) branch's own, correct message about the flag.
+out="$(bash "$SCRIPTS/setup.sh" --stats --since=7dd 2>&1)"
+contains "filters: 7dd's message is about the flag" "--since takes" "$out"
+refutes  "filters: not about the platform's date command" \
+         grep -q "This system's date" <<< "$out"
+
+out="$(bash "$SCRIPTS/setup.sh" --stats --since=7x1d 2>&1)"
+contains "filters: 7x1d's message names the flag rather than the platform" \
+         "--since takes" "$out"
+
+# A run of digits long enough overflows days * 86400 well before it ever
+# reaches ct_date_days_ago -- refused here, at the digit count, rather than
+# computed into a nonsense cutoff or a raw arithmetic error.
+out="$(bash "$SCRIPTS/setup.sh" --stats --since=99999999999999999999d 2>&1)"
+contains "filters: an absurd day count's message names the flag, not an overflow" \
+         "--since takes" "$out"
+
 # The relative form has to resolve in the CONFIGURED zone, not the machine's:
 # the parser that reads --since=Nd runs before ct_load_config, so a cutoff
 # computed right there would be rendered in whichever zone the machine

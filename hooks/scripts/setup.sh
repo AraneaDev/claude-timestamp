@@ -1305,7 +1305,7 @@ TABLE
 
 main() {
   local interactive=1 action="write" project_scope=0
-  local arg flag value i
+  local arg flag value i days
   # Parallel arrays with a counter of their own. bash 3.2 is what macOS ships:
   # it has no associative arrays, and under `set -u` it treats an empty array
   # as unset, so neither ${#arr[@]} nor a bare "${arr[@]}" is safe to lean on
@@ -1334,11 +1334,34 @@ main() {
         value="${arg#*=}"
         saw_since_flag=1; since_flag_value="$value"
         case "$value" in
-          [0-9]*d)
+          *d)
+            # [0-9]*d as a glob is "one digit, then anything, then a literal
+            # d" -- the middle * matches any character, not just digits --
+            # so "7dd" and "7x1d" both matched it too. ${value%d} then
+            # stripped only the trailing d and handed ct_date_days_ago a
+            # string it could not parse, which failed there and blamed the
+            # platform ("This system's date cannot compute a cutoff")
+            # instead of naming the flag the way the *) branch below does.
+            # Validated here instead, against digits alone.
+            days="${value%d}"
+            case "$days" in
+              ''|*[!0-9]*)
+                echo "--since takes a number of days such as 7d, or a date such as 2026-09-01." >&2
+                exit 2 ;;
+            esac
+            # Bounded to 6 digits. The plugin has not existed for anywhere
+            # near the 2700-odd years that many days is, and it keeps
+            # `days * 86400` in ct_date_days_ago far inside the shell's
+            # 64-bit range, rather than accepted here and left to overflow,
+            # or worse silently wrap, deep inside that arithmetic.
+            if [ "${#days}" -gt 6 ]; then
+              echo "--since takes a number of days such as 7d, or a date such as 2026-09-01." >&2
+              exit 2
+            fi
             # Stored, not resolved: CT_TZ is not loaded yet at parse time.
             # stats() resolves this into CT_STATS_SINCE right after it calls
             # ct_load_config.
-            CT_STATS_SINCE_DAYS="${value%d}" ;;
+            CT_STATS_SINCE_DAYS="$days" ;;
           [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9])
             CT_STATS_SINCE="$value" ;;
           *)
