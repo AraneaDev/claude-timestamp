@@ -2640,6 +2640,22 @@ contains "validate: and the TOOL_TIMING problem names its own key and default" \
 is "validate: ten unusable settings make ten problems" "10" \
   "$(printf '%s\n' "$CT_CONFIG_PROBLEMS" | grep -c 'is not valid')"
 
+echo
+echo "projects setting"
+
+: > "$CLAUDE_TIMESTAMP_CONFIG"
+ct_load_config
+is "projects: defaults to off" "off" "$CT_PROJECTS"
+
+printf 'PROJECTS=on\n' > "$CLAUDE_TIMESTAMP_CONFIG"
+ct_load_config
+is "projects: on is read" "on" "$CT_PROJECTS"
+
+printf 'PROJECTS=maybe\n' > "$CLAUDE_TIMESTAMP_CONFIG"
+ct_load_config
+is "projects: an invalid value falls back to the default" "off" "$CT_PROJECTS"
+contains "projects: and says so" "PROJECTS=maybe is not valid" "$CT_CONFIG_PROBLEMS"
+
 # ct_is_valid_tz is the only thing between a hand-edited file and a zone name
 # that walks out of the zoneinfo directory.
 fresh 'TZ=../etc'
@@ -2888,22 +2904,6 @@ is "require: an awkward value is reproduced verbatim" \
 unset -f ct_req_spy
 unset CT_REQ_SPY CT_REQ_SPY_SEEN
 fresh
-
-echo
-echo "projects setting"
-
-: > "$CLAUDE_TIMESTAMP_CONFIG"
-ct_load_config
-is "projects: defaults to off" "off" "$CT_PROJECTS"
-
-printf 'PROJECTS=on\n' > "$CLAUDE_TIMESTAMP_CONFIG"
-ct_load_config
-is "projects: on is read" "on" "$CT_PROJECTS"
-
-printf 'PROJECTS=maybe\n' > "$CLAUDE_TIMESTAMP_CONFIG"
-ct_load_config
-is "projects: an invalid value falls back to the default" "off" "$CT_PROJECTS"
-contains "projects: and says so" "PROJECTS=maybe is not valid" "$CT_CONFIG_PROBLEMS"
 
 echo
 echo "settings apply without a restart"
