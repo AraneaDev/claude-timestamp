@@ -890,7 +890,18 @@ ct_tool_digest() {
       n[name]++
     }
     END {
-      for (t in sum) printf "%018d\t%s\t%d\n", sum[t], t, n[t]
+      # Milliseconds, not seconds: %018d truncates its argument to an
+      # integer, and a sort key truncated to whole seconds ties two tools at,
+      # say, 1.2s and 1.9s at "1" -- `sort -rn` then breaks the tie on the
+      # rest of the line, reverse-alphabetically, which can drop the
+      # genuinely costlier tool from the eight-entry cap below in favour of
+      # the cheaper one. Scaling to milliseconds keeps every tie the on-screen
+      # aggregation in session-end.sh (which sorts on "%.3f", full precision)
+      # would also call a tie, while the zero-padded width keeps the plain
+      # `sort -rn` correct on GNU and BSD alike. `+ 0.5` rounds rather than
+      # truncating a second time, so float error in `sum[t]` cannot shave a
+      # whole millisecond off a value that was exact in the log.
+      for (t in sum) printf "%018d\t%s\t%d\n", int(sum[t] * 1000 + 0.5), t, n[t]
     }' "$file" \
   |
   # `|| true` at the very end of this pipeline: on a log with many distinct
@@ -904,7 +915,14 @@ ct_tool_digest() {
   # session state. The printed output is unaffected either way.
   sort -rn \
   | head -8 \
-  | awk -F'\t' '{ printf "%s%s:%d:%d", (NR > 1 ? "," : ""), $2, $1 + 0, $3 }' \
+  | awk -F'\t' '{
+      # $1 is milliseconds here, the same scaling the first stage applied to
+      # the sort key; converted back to whole seconds only now, for the one
+      # part of the output format that has not changed: still whole seconds,
+      # still truncated, since /timestamps and the history documentation both
+      # read this field that way.
+      printf "%s%s:%d:%d", (NR > 1 ? "," : ""), $2, int($1 / 1000), $3
+    }' \
   || true
 }
 

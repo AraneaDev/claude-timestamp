@@ -5628,6 +5628,62 @@ printf 'Bash\nRead 2.000 ok\n' > "$log"
 is "digest: a line with too few fields contributes nothing, valid lines still aggregate" \
    "Read:2:1" "$(ct_tool_digest "$log")"
 
+# %018d on a sum still carrying its fractional seconds truncates it away, so
+# two tools whose sums differ only below the whole second used to tie on the
+# sort key and have `sort -rn` break the tie on the rest of the line,
+# reverse-alphabetically. Named so alphabetical order runs the opposite way
+# from the real one -- "Alpha" costs more than "Zulu" here -- so a
+# reverse-alphabetical tie-break cannot accidentally land on the right answer
+# the way a pair named "Costly"/"Cheap" would.
+printf 'Alpha 1.900 ok\nZulu 1.200 ok\n' > "$log"
+is "digest: a sub-second difference still orders the costlier tool first" \
+   "Alpha:1:1,Zulu:1:1" "$(ct_tool_digest "$log")"
+
+# The same failure also reached the eight-entry cap: two tools separated only
+# below the whole second could tie there too, and `head -8` could keep the
+# cheaper one instead of the one that actually cost more. Seven fillers, far
+# enough above both contenders to always claim the first seven places, plus
+# a pair separated only by fractional seconds for the eighth -- again named
+# so alphabetical order opposes the real one.
+: > "$log"
+for i in 1 2 3 4 5 6 7; do printf 'Filler%s 100.000 ok\n' "$i" >> "$log"; done
+printf 'Alpha 5.900 ok\nZulu 5.200 ok\n' >> "$log"
+is "digest: the 8-cap keeps the costlier of two sub-second-separated tools" \
+   "1" "$(ct_tool_digest "$log" | tr ',' '\n' | grep -c '^Alpha:')"
+is "digest: and drops the cheaper one instead" \
+   "0" "$(ct_tool_digest "$log" | tr ',' '\n' | grep -c '^Zulu:')"
+
+if command -v jq >/dev/null 2>&1; then
+  # The on-screen aggregation in session-end.sh sorts on "%.3f" -- full
+  # precision -- and was never affected by this bug, so it is the reference
+  # the digest's own ordering is checked against for the very same log. Names
+  # chosen so neither an alphabetical nor a reverse-alphabetical tie-break
+  # would accidentally land on the right answer: by value, Kilo (1.9s) >
+  # Alpha (1.5s) > Zulu (1.2s), which is neither name order.
+  do_sid="digest-order-$$-$RANDOM"
+  fresh 'TOOL_TIMING=on'
+  do_sf="$(ct_state_file "$do_sid")"
+  printf '%s' "$(( $(date +%s) - 100 ))" > "${do_sf}.start"
+  printf '1'  > "${do_sf}.turns"
+  printf '40' > "${do_sf}.wait"
+  printf '0'  > "${do_sf}.idle"
+  printf 'Kilo 1.900 ok\nAlpha 1.500 ok\nZulu 1.200 ok\n' > "${do_sf}.tools"
+  do_out="$(printf '{"session_id":"%s","cwd":""}' "$do_sid" \
+    | bash "$SCRIPTS/session-end.sh")"
+  do_screen_order="$(printf '%s' "$do_out" | jq -r '.systemMessage' \
+    | grep -oE '[A-Za-z]+ [0-9.]+s \([0-9]+ calls?\)' \
+    | awk '{print $1}' | paste -sd, -)"
+  do_digest_order="$(cut -f8 "$CLAUDE_TIMESTAMP_HISTORY" \
+    | tr ',' '\n' | cut -d: -f1 | paste -sd, -)"
+  is "digest: ordering matches the on-screen summary for the same log" \
+     "Kilo,Alpha,Zulu" "$do_screen_order"
+  is "digest: and the history row orders the same way" \
+     "Kilo,Alpha,Zulu" "$do_digest_order"
+else
+  skip "digest: ordering matches the on-screen summary for the same log" "jq not installed"
+  skip "digest: and the history row orders the same way" "jq not installed"
+fi
+
 if command -v jq >/dev/null 2>&1; then
   # End to end: drive the real writer, post-tool-use.sh, instead of
   # fabricating its output. This is the case that would have caught the
