@@ -5612,7 +5612,21 @@ is "digest: and keeps the costliest ones" \
 
 printf 'Bash not-a-number ok\n' > "$log"
 is "digest: a row with no usable duration contributes nothing" \
-   "Bash:0:1" "$(ct_tool_digest "$log")"
+   "" "$(ct_tool_digest "$log")"
+
+# A blank line has neither a tool name nor a duration; a line with too few
+# fields has a name but no duration. Both used to be aggregated into an entry
+# with an empty tool name, such as ":0:1" -- invisible on screen only because
+# --stats happens to guard against drawing an empty name, but still a
+# meaningless entry riding along in the history row. Valid lines elsewhere in
+# the same log must still aggregate normally.
+printf '\nBash 1.000 ok\n' > "$log"
+is "digest: a bare blank line contributes nothing, valid lines still aggregate" \
+   "Bash:1:1" "$(ct_tool_digest "$log")"
+
+printf 'Bash\nRead 2.000 ok\n' > "$log"
+is "digest: a line with too few fields contributes nothing, valid lines still aggregate" \
+   "Read:2:1" "$(ct_tool_digest "$log")"
 
 if command -v jq >/dev/null 2>&1; then
   # End to end: drive the real writer, post-tool-use.sh, instead of

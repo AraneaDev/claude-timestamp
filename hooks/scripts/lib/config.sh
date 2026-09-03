@@ -878,6 +878,11 @@ ct_tool_digest() {
   # below reads tab-separated input, because it is reading this awk's own
   # output, which this awk deliberately emits with a tab.
   awk '
+    # A blank line, or one with too few fields, has no tool name and no
+    # usable duration -- skip it rather than aggregating it into an entry
+    # with an empty name, which the digest would otherwise carry all the way
+    # into the history row as a meaningless "" entry.
+    $1 == "" || $2 !~ /^[0-9]+(\.[0-9]+)?$/ { next }
     {
       name = $1
       gsub(/[,:\t]/, "_", name)
