@@ -9,3 +9,10 @@
 # Screenshot tooling installs its Python dependencies here.
 tools/screenshots/.venv/
 __pycache__/
+
+# Working notes about the work, not reference material for using it: specs,
+# plans, ledgers, task briefs, review diffs. Kept out of a repository someone
+# else will read. Root-anchored so an unrelated docs/ directory deeper in the
+# tree is not swallowed with them.
+/docs/
+/.superpowers/
