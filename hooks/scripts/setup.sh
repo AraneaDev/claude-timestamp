@@ -1472,7 +1472,12 @@ main() {
       --project=*)
         action="stats"; interactive=0
         saw_project_filter=1
-        CT_STATS_PROJECT="${arg#*=}" ;;
+        value="${arg#*=}"
+        if [ -z "$value" ]; then
+          echo "--project takes a name to filter by, such as my-app; it cannot be empty." >&2
+          exit 2
+        fi
+        CT_STATS_PROJECT="$value" ;;
       -h|--help)   usage; exit 0 ;;
       --*=*)
         flag="${arg#--}"; flag="${flag%%=*}"

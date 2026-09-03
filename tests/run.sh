@@ -3867,13 +3867,22 @@ contains "filters: and names --since for the date form too" \
          "--since=2026-09-01 filters --stats" "$out"
 
 rm -f "$WORK/f-empty-project-conflict.conf"
-refutes "filters: an empty --project= cannot be combined with a setting to write" \
+refutes "filters: an empty --project= is refused outright, even with a setting to write" \
         bash "$SCRIPTS/setup.sh" --config="$WORK/f-empty-project-conflict.conf" \
         --history=off --project=
 out="$(bash "$SCRIPTS/setup.sh" --config="$WORK/f-empty-project-conflict.conf" \
        --history=off --project= 2>&1)"
-contains "filters: and the message covers the empty NAME too" \
-         "does not write a setting" "$out"
+contains "filters: and the message names the empty value, not the write conflict" \
+         "cannot be empty" "$out"
+
+# --project= with nothing after the = used to read as "no filter", not as an
+# empty one, so --stats --project= silently reported on everything instead of
+# refusing the way --since= already refuses an empty or malformed value.
+refutes "filters: --project= alone is refused rather than reporting everything" \
+        bash "$SCRIPTS/setup.sh" --stats --project=
+out="$(bash "$SCRIPTS/setup.sh" --stats --project= 2>&1)"
+contains "filters: and says the value cannot be empty" \
+         "cannot be empty" "$out"
 
 rm -f "$WORK/f-stats-conflict.conf"
 refutes "filters: bare --stats cannot be combined with a setting to write" \
