@@ -2570,6 +2570,18 @@ contains "stats: an all-damaged file says so"      "No readable sessions" "$out"
 contains "stats: and counts what it could not read" "2 unreadable"        "$out"
 lacks    "stats: no totals are printed for nothing" "sessions        "    "$out"
 
+# A history whose longest session is zero seconds never satisfied
+# `$2 + 0 > maxd + 0`, so awk's maxwhen stayed unset, its %s printed nothing,
+# and the output line came back one field short. Every field after it shifted
+# left: maxturns became a date, last became "0", and bad came back empty, which
+# put a raw `[: : integer expression expected` in front of the user.
+fresh 'HISTORY=on'
+printf '2026-09-03T07:58:15\t0\t1\t0\t0\t0\n' > "$CLAUDE_TIMESTAMP_HISTORY"
+out="$(bash "$SCRIPTS/setup.sh" --stats 2>&1)"
+lacks    "stats: a zero-length session prints no shell error" "integer expression" "$out"
+contains "stats: and is still counted"                        "sessions        1" "$out"
+contains "stats: and its longest line reads as a duration"    "longest         2026-09-03  0s over 1 turns" "$out"
+
 bash "$SCRIPTS/setup.sh" --history=off --history-limit=50 >/dev/null
 ct_load_config
 is "--history is accepted"       "off" "$CT_HISTORY"
