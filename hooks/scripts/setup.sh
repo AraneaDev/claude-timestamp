@@ -411,6 +411,12 @@ EOF
       [ -n "${CT_STATS_PROJECT:-}" ] && printf ' in %s' "$CT_STATS_PROJECT"
       [ -n "${CT_STATS_SINCE:-}" ] && printf ' since %s' "$CT_STATS_SINCE"
       printf '.\n'
+      # bad is computed regardless of whether a filter is in play -- the NF
+      # and timing guard above runs over every row before since/want ever
+      # apply. The unfiltered branch below already reports it; a filtered
+      # miss must too, in the same wording, or a history with damaged rows
+      # reads as merely unmatched rather than as damaged.
+      [ "$bad" -gt 0 ] && echo "  $bad unreadable row(s) in $(ct_tilde "$file")."
       local known
       # The same row-validity guard the totals, by-project and slowest-tools
       # passes above share -- NF in range, each timing field a bounded run of

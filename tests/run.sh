@@ -3965,6 +3965,20 @@ contains "filters: a project name with a backslash escape still matches" \
 contains "filters: and the by-project table prints it unprocessed" \
          'back\tslash' "$out"
 
+# A filtered miss used to say only "No sessions match", even when bad had
+# already been computed and the unfiltered branch reports it in the same
+# spot. A history with damaged rows then read as merely unmatched rather
+# than as damaged.
+{
+  printf '2026-09-01T10:00:00\t999999999999999999999\t1\t10\t0\t0\talpha\n'
+  printf '2026-09-02T10:00:00\t100\t1\t10\t0\t0\talpha\n'
+} > "$CLAUDE_TIMESTAMP_HISTORY"
+out="$(bash "$SCRIPTS/setup.sh" --stats --project=nope 2>&1)"
+contains "filters: a filtered miss still explains itself" \
+         "No sessions match in nope" "$out"
+contains "filters: and now also reports the damaged row" \
+         "1 unreadable row(s)" "$out"
+
 out="$(bash "$SCRIPTS/setup.sh" --stats --since=soon 2>&1)"
 contains "filters: an unparseable since is refused"   "--since takes" "$out"
 refutes  "filters: and is not silently ignored" \
