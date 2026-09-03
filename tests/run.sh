@@ -1581,6 +1581,18 @@ refutes "invalid: a placeholder with a suffix" ct_is_valid_marker '%timex'
 refutes "invalid: unbalanced open brace"  ct_is_valid_marker '[%time{ %elapsed]'
 refutes "invalid: unbalanced close brace" ct_is_valid_marker '[%time} %elapsed]'
 
+# A group exists to disappear when the parts inside it are empty, which is the
+# only rule the README, the schema and /timestamps state about it. A group
+# holding no part at all cannot do that: the renderer has nothing to test, so
+# it falls through and emits the braces themselves, and the user reads literal
+# {hi} on every message for the rest of the session. Refused at the validator,
+# where a wrong template already produces a message they can act on.
+refutes "invalid: a group with no placeholder" ct_is_valid_marker '[{hi}%time]'
+refutes "invalid: an empty group"              ct_is_valid_marker '%time{}'
+asserts "valid: a group whose part is decorated" ct_is_valid_marker '%time{ (%elapsed)}'
+# Text outside a group has never needed one, and must not start needing one.
+asserts "valid: literal braces are only a group when they hold a part" ct_is_valid_marker 'hello'
+
 # write_config interpolates a value into KEY=value with no escaping, so a
 # newline in a marker or format flag writes a second config line that the
 # parser reads back as a real setting -- and because it lands after the key
@@ -1900,6 +1912,12 @@ is "a word is not seconds"          "1" "$(ct_is_seconds soon         && echo 0 
 is "an empty timezone is fine"      "0" "$(ct_is_valid_tz ''          && echo 0 || echo 1)"
 is "an absolute timezone path is not" "1" "$(ct_is_valid_tz /etc/passwd && echo 0 || echo 1)"
 is "a traversing timezone is not"   "1" "$(ct_is_valid_tz a/../b      && echo 0 || echo 1)"
+# The three patterns all required a slash BEFORE the traversal, so a name that
+# opens with one walked straight past them. The guard reads as exhaustive and
+# should be.
+refutes "a timezone opening with a traversal is rejected" ct_is_valid_tz '../etc'
+refutes "and a bare traversal is too"                     ct_is_valid_tz '..'
+asserts "a name that merely starts with dots is still fine" ct_is_valid_tz '..zone/Oslo'
 
 # TZ is a third free-text setting that reaches write_config the same way
 # MARKER and the formats do, so it needs the same control-character guard

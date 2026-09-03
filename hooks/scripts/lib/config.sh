@@ -261,7 +261,12 @@ ct_is_valid_tz() {
   ct_has_control "${1:-}" && return 1
   case "${1:-}" in
     '') return 0 ;;
-    /*|*/../*|*/..) return 1 ;;
+    # The middle and trailing forms need a slash BEFORE the traversal, so a
+    # name that opens with one -- "../bar", or a bare ".." -- walked straight
+    # past all three and was resolved under the zoneinfo root. The C library
+    # validates the TZif header, so the practical reach was a fallback rather
+    # than a disclosure, but a guard written to be exhaustive should be.
+    /*|../*|..|*/../*|*/..) return 1 ;;
     *) return 0 ;;
   esac
 }
@@ -658,28 +663,42 @@ ct_render_marker() {
 # (_ct_span assumes no braces at all), so a nested group would be accepted here
 # and mis-rendered there. Depth is capped at 1 instead of taught to the
 # renderer.
+# A group must also hold at least one placeholder. Disappearing when the parts
+# inside it are empty is the only thing a group does, and the only rule the
+# README, schema.json and commands/timestamps.md state about one -- a group
+# holding no part cannot do it. The renderer has nothing to test there, so it
+# falls through and emits the braces themselves, and "[{hi}%time]" draws a
+# literal {hi} on every message for the rest of the session. Refused here,
+# where a wrong template already produces a message the user can act on.
 ct_is_valid_marker() {
   local s="${1:-}"
   ct_has_control "$s" && return 1
-  local i=0 n depth ch rc
-  n=${#s}; depth=0
+  local i=0 n depth ch rc group_has_ph
+  n=${#s}; depth=0; group_has_ph=0
   while [ "$i" -lt "$n" ]; do
     ch="${s:i:1}"
     case "$ch" in
       '{')
         depth=$(( depth + 1 ))
         [ "$depth" -gt 1 ] && return 1
+        group_has_ph=0
         i=$(( i + 1 ))
         ;;
       '}')
         depth=$(( depth - 1 ))
         [ "$depth" -lt 0 ] && return 1
+        [ "$group_has_ph" -eq 1 ] || return 1
         i=$(( i + 1 ))
         ;;
       '%')
         rc=0; _ct_word "$s" "$i" || rc=$?
         [ "$rc" -eq 1 ] && return 1
-        if [ "$rc" -eq 0 ]; then i=$(( i + _CT_WLEN )); else i=$(( i + 1 )); fi
+        if [ "$rc" -eq 0 ]; then
+          [ "$depth" -eq 1 ] && group_has_ph=1
+          i=$(( i + _CT_WLEN ))
+        else
+          i=$(( i + 1 ))
+        fi
         ;;
       *) i=$(( i + 1 )) ;;
     esac

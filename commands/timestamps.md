@@ -223,8 +223,9 @@ in `schema.json`:
   `%timex` is not `%time` followed by an `x`; refuse both and name the four
   valid parts.
 - A `%` followed by anything else is literal, so `100%` is fine.
-- A `{...}` group disappears when every part inside it is empty. Braces must
-  balance.
+- A `{...}` group must hold at least one part, and disappears when every part
+  inside it is empty. Braces must balance. `{hi}` holds no part, so it is not a
+  group and is refused rather than drawn as literal braces.
 - Outside a group, an empty part eats one run of spaces, so `[%time %elapsed]`
   reads correctly when the duration is absent. A part decorated with anything
   other than spaces needs a group: write `%time{ (%elapsed)}`, not

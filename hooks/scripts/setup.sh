@@ -39,8 +39,9 @@ Flags
   --color=COLOR               none | dim | gray | cyan | blue | green
                               | yellow | magenta | red.
   --marker=TEMPLATE           The marker's layout. %time %elapsed %tool %date
-                              are the parts; a {...} group disappears when
-                              every part inside it is empty.
+                              are the parts; a {...} group holds at least one
+                              of them and disappears when every part inside it
+                              is empty.
   --time-color=COLOR          Colour of %time and %date. inherit follows
                               --color, which is also the default.
   --elapsed-color=COLOR       Colour of %elapsed, or inherit. A slow turn
@@ -127,7 +128,8 @@ valid_format() {
 valid_marker() {
   ct_is_valid_marker "$1" && return 0
   echo "That marker template is not usable. The parts are %time, %elapsed, %tool and %date," >&2
-  echo "a {...} group disappears when every part inside it is empty, and braces must balance." >&2
+  echo "a {...} group holds at least one of them and disappears when every part inside it is" >&2
+  echo "empty, and braces must balance." >&2
   return 1
 }
 
@@ -892,7 +894,8 @@ wizard() {
   # The marker's layout. Shown as three real renderings rather than described,
   # because a template is much easier to recognise than to read.
   echo "The marker's layout is a template. %time %elapsed %tool %date are the"
-  echo "parts, and a {...} group disappears when every part inside it is empty."
+  echo "parts, and a {...} group holds at least one of them and disappears when"
+  echo "every part inside it is empty."
   echo
   local tpl_width tpl_pad
   for tpl in '[{%date }%time{ %elapsed}{ · %tool}]' '%time' '%time{ → %elapsed}'; do
