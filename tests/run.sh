@@ -3718,6 +3718,24 @@ out="$(bash "$SCRIPTS/setup.sh" --stats 2>&1)"
 refutes  "sections: the oversized tool entry itself is skipped" \
          grep -q "Bash" <<< "$out"
 
+# The 15-digit bound above keeps any one row's duration inside the shell's
+# 64-bit range, but total/waited/idle/turns/failed are the SUM of every
+# matching row, and a sum of many 15-digit values can overflow that range
+# even though no single value in it broke the per-value bound. 9300 rows
+# each at the 15-digit ceiling is enough: summed, they land well past
+# INT64_MAX, and without a bound on the accumulator itself that used to
+# print a raw shell error from the `[ "$total" -gt 0 ]` test and a negative,
+# nonsensical total duration.
+awk 'BEGIN {
+  for (i = 0; i < 9300; i++)
+    printf "2026-01-01T00:00:00\t999999999999999\t1\t999999999999999\t0\t0\n"
+}' > "$CLAUDE_TIMESTAMP_HISTORY"
+out="$(bash "$SCRIPTS/setup.sh" --stats 2>&1)"
+refutes "sections: an overflowed total prints no raw shell error" \
+        grep -q "integer expression expected" <<< "$out"
+refutes "sections: and the total is not reported as negative" \
+        grep -q ' -[0-9]*h' <<< "$out"
+
 # `--stats`'s slowest-tools pass ends its awk with `sort -rn | head -10`. A
 # history with enough distinct tool names makes `head -10` close the pipe on
 # `sort` before `sort` is done writing, sending it SIGPIPE; under this

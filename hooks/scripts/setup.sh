@@ -307,11 +307,16 @@ $(awk -F'\t' -v since="${CT_STATS_SINCE:-}" -v want="${CT_STATS_PROJECT:-}" '
   NF < 6 || NF > 8 { bad++; next }
   # Bounded to 15 digits, not merely to digits. That still admits any real
   # duration -- 15 nines is over 31 million years of seconds -- while
-  # keeping the value inside the exact-integer range of a double (2^53 is
-  # 16 digits), so awk cannot silently round it, and inside the 64-bit
-  # range of the shell downstream, where a longer run of digits overflowed
-  # and turned every arithmetic expression that touched it into a raw
-  # shell error.
+  # keeping each individual value inside the exact-integer range of a
+  # double (2^53 is 16 digits), so awk cannot silently round it, and inside
+  # the 64-bit range of the shell downstream, where a longer run of digits
+  # overflowed and turned every arithmetic expression that touched it into
+  # a raw shell error. This bounds each value alone, not their sum: totals,
+  # waited, idle, turns and failed below are accumulated across every
+  # matching row, and a sum of many 15-digit values can still exceed the
+  # 64-bit range of the shell even though every value that fed it
+  # individually respected this bound. The END block below carries a
+  # second bound for that accumulated case.
   $2 !~ /^[0-9]{1,15}$/ || $3 !~ /^[0-9]{1,15}$/ || $4 !~ /^[0-9]{1,15}$/ ||
   $5 !~ /^[0-9]{1,15}$/ || $6 !~ /^[0-9]{1,15}$/ { bad++; next }
   # Field 1 (the date) is otherwise never validated, and it is emitted
@@ -356,6 +361,29 @@ $(awk -F'\t' -v since="${CT_STATS_SINCE:-}" -v want="${CT_STATS_PROJECT:-}" '
     if (maxwhen == "") maxwhen = "-"
     if (first == "") first = "-"
     if (last == "") last = "-"
+    # The per-value bound above keeps any one duration inside the 64-bit
+    # range of the shell; it says nothing about their sum. Enough rows each
+    # individually at that bound overflow these accumulators once awk sums
+    # them as doubles -- past 2^53 the sum itself is no longer exact, and
+    # the rounded result handed to the shell can land outside its signed
+    # 64-bit range entirely, reproducing the same raw shell error
+    # ("integer expression expected") the per-value bound exists to
+    # prevent. Clamped here to a value comfortably under the shell limit of
+    # INT64_MAX (about 9.22e18), with headroom for "waiting" below, which
+    # multiplies its total by 100 before dividing: the cap on waited times
+    # 100 must itself still fit, so the cap is chosen an order of magnitude
+    # below the raw 64-bit ceiling rather than right up against it. Every
+    # real history is many orders of magnitude under this either way --
+    # 9e16 seconds is billions of years of sessions -- so the clamp is
+    # unreachable in practice; it exists so the shell downstream is
+    # mathematically guaranteed never to see an integer it cannot hold,
+    # rather than relying on that being true by coincidence of scale.
+    cap = 90000000000000000
+    if (total  > cap) total  = cap
+    if (waited > cap) waited = cap
+    if (idle   > cap) idle   = cap
+    if (turns  > cap) turns  = cap
+    if (failed > cap) failed = cap
     printf "%d %d %d %d %d %d %d %s %d %s %s %d\n",
       n, total, turns, waited, idle, failed, maxd, maxwhen, maxturns, first, last, bad + 0
   }' "$file")
