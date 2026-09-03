@@ -1283,6 +1283,12 @@ main() {
   # A key present in named_keys was named on this run, which is the whole of
   # what "named" used to need four separate *_named locals to express.
   local named_keys=() named_values=() named_count=0
+  # Set when a stats-only flag was named, so the write-vs-report conflict
+  # below can be detected without re-deriving it from `action` -- which
+  # --since=* and --project=* both also set unconditionally, and set the
+  # same way whether or not a setting flag came with them.
+  local saw_stats_bare=0 saw_since_flag=0 since_flag_value=""
+  local saw_project_filter=0
 
   while [ $# -gt 0 ]; do
     arg="$1"
@@ -1291,10 +1297,11 @@ main() {
       --project)   project_scope=1; interactive=0 ;;
       --show)      action="show";   interactive=0 ;;
       --doctor)    action="doctor"; interactive=0 ;;
-      --stats)     action="stats";  interactive=0 ;;
+      --stats)     action="stats";  interactive=0; saw_stats_bare=1 ;;
       --since=*)
         action="stats"; interactive=0
         value="${arg#*=}"
+        saw_since_flag=1; since_flag_value="$value"
         case "$value" in
           [0-9]*d)
             # Stored, not resolved: CT_TZ is not loaded yet at parse time.
@@ -1309,6 +1316,7 @@ main() {
         esac ;;
       --project=*)
         action="stats"; interactive=0
+        saw_project_filter=1
         CT_STATS_PROJECT="${arg#*=}" ;;
       -h|--help)   usage; exit 0 ;;
       --*=*)
@@ -1366,7 +1374,7 @@ main() {
   # to write silently picked the --stats action over the write, discarding
   # the write with no error -- and no project is plausibly named "on" or
   # "off", so that value is almost always a typo for --projects=.
-  if [ -n "${CT_STATS_PROJECT:-}" ]; then
+  if [ "$saw_project_filter" = "1" ]; then
     case "$CT_STATS_PROJECT" in
       on|off)
         echo "--project=$CT_STATS_PROJECT looks like a typo for --projects=$CT_STATS_PROJECT." >&2
@@ -1375,7 +1383,26 @@ main() {
         exit 2
         ;;
     esac
-    if [ "$project_scope" = "1" ] || [ "$named_count" -gt 0 ]; then
+  fi
+
+  # --stats and --since=* have the same write-vs-report conflict as
+  # --project=NAME above: each sets action="stats" unconditionally, so a
+  # setting flag named on the same run used to be silently discarded rather
+  # than refused. Checked here, after the flags are all parsed, against
+  # anything that writes a setting -- a --key=value flag (named_count), or
+  # bare --project selecting write scope.
+  if [ "$project_scope" = "1" ] || [ "$named_count" -gt 0 ]; then
+    if [ "$saw_stats_bare" = "1" ]; then
+      echo "--stats reports on recorded sessions; it does not write a setting." >&2
+      echo "Drop --stats to write settings, or drop the setting flags to see the report." >&2
+      exit 2
+    fi
+    if [ "$saw_since_flag" = "1" ]; then
+      echo "--since=$since_flag_value filters --stats; it does not write a setting." >&2
+      echo "Drop --since to write settings, or drop the setting flags to see the report." >&2
+      exit 2
+    fi
+    if [ "$saw_project_filter" = "1" ]; then
       echo "--project=$CT_STATS_PROJECT filters --stats; it does not write a setting." >&2
       echo "Use bare --project to write a setting for the current project, or" >&2
       echo "--projects=on|off to change whether project names are recorded." >&2

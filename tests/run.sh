@@ -3725,6 +3725,47 @@ contains "filters: and suggests --projects= instead" "--projects=on" "$out"
 refutes "filters: --project=off is refused the same way" \
         bash "$SCRIPTS/setup.sh" --project=off
 
+# --stats and --since=* have the identical conflict --project=NAME had: each
+# sets action="stats" unconditionally, and the guard above only ever tested
+# CT_STATS_PROJECT, so a setting flag riding along with --since, or with a
+# --project= that named no project at all, used to be written straight past
+# with no error and no file written.
+rm -f "$WORK/f-since-conflict.conf"
+refutes "filters: --since=7d cannot be combined with a setting to write" \
+        bash "$SCRIPTS/setup.sh" --config="$WORK/f-since-conflict.conf" \
+        --history=off --since=7d
+out="$(bash "$SCRIPTS/setup.sh" --config="$WORK/f-since-conflict.conf" \
+       --history=off --since=7d 2>&1)"
+contains "filters: and the message names --since" \
+         "--since=7d filters --stats" "$out"
+
+rm -f "$WORK/f-since-date-conflict.conf"
+refutes "filters: --since=YYYY-MM-DD cannot be combined with a setting to write" \
+        bash "$SCRIPTS/setup.sh" --config="$WORK/f-since-date-conflict.conf" \
+        --history=off --since=2026-09-01
+out="$(bash "$SCRIPTS/setup.sh" --config="$WORK/f-since-date-conflict.conf" \
+       --history=off --since=2026-09-01 2>&1)"
+contains "filters: and names --since for the date form too" \
+         "--since=2026-09-01 filters --stats" "$out"
+
+rm -f "$WORK/f-empty-project-conflict.conf"
+refutes "filters: an empty --project= cannot be combined with a setting to write" \
+        bash "$SCRIPTS/setup.sh" --config="$WORK/f-empty-project-conflict.conf" \
+        --history=off --project=
+out="$(bash "$SCRIPTS/setup.sh" --config="$WORK/f-empty-project-conflict.conf" \
+       --history=off --project= 2>&1)"
+contains "filters: and the message covers the empty NAME too" \
+         "does not write a setting" "$out"
+
+rm -f "$WORK/f-stats-conflict.conf"
+refutes "filters: bare --stats cannot be combined with a setting to write" \
+        bash "$SCRIPTS/setup.sh" --config="$WORK/f-stats-conflict.conf" \
+        --history=off --stats
+out="$(bash "$SCRIPTS/setup.sh" --config="$WORK/f-stats-conflict.conf" \
+       --history=off --stats 2>&1)"
+contains "filters: and the message names --stats" \
+         "--stats reports" "$out"
+
 # The combinations that must still work.
 rm -rf "$WORK/f-still-project"; mkdir -p "$WORK/f-still-project"
 ( cd "$WORK/f-still-project" && unset CLAUDE_TIMESTAMP_CONFIG && HOME="$WORK/f-still-home" \
