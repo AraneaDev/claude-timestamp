@@ -5221,6 +5221,46 @@ is "atomic write: a raced target still carries every key" "" "$wa_lost"
 is "atomic write: and is exactly one writer's file, never a blend" "" "$wa_torn"
 rm -rf "$WA"
 
+echo "project naming"
+
+proj="$WORK/proj-$$"
+mkdir -p "$proj/repo/deep/deeper/.keep" "$proj/repo/.git" "$proj/loose/sub"
+
+is "project: a repository root is named after itself" \
+   "repo" "$(ct_project_name "$proj/repo")"
+is "project: a directory inside a repository takes the repository's name" \
+   "repo" "$(ct_project_name "$proj/repo/deep/deeper")"
+is "project: an empty cwd is unnamed" \
+   "-" "$(ct_project_name "")"
+is "project: the filesystem root is unnamed" \
+   "-" "$(ct_project_name "/")"
+
+# The two fallback cases below need no repository ANYWHERE above the fixture,
+# and that is a property of wherever TMPDIR points rather than of anything this
+# suite controls. Under a TMPDIR inside a checkout the walk correctly finds
+# that checkout, and the assertions would fail for a reason that has nothing to
+# do with the code. Checked, and skipped rather than asserted when the
+# environment cannot answer, which is what skip() exists for.
+pn_clean=1
+pn_dir="$proj"
+while [ -n "$pn_dir" ] && [ "$pn_dir" != "/" ]; do
+  if [ -d "$pn_dir/.git" ] || [ -f "$pn_dir/.git" ]; then pn_clean=0; break; fi
+  pn_dir="${pn_dir%/*}"
+done
+if [ "$pn_clean" -eq 1 ]; then
+  is "project: no repository above falls back to the directory itself" \
+     "sub" "$(ct_project_name "$proj/loose/sub")"
+  is "project: a cwd that does not exist still yields its own basename" \
+     "gone" "$(ct_project_name "$proj/gone")"
+else
+  skip "project: no repository above falls back to the directory itself" \
+       "TMPDIR is inside a git repository, so there is always one above"
+  skip "project: a cwd that does not exist still yields its own basename" \
+       "TMPDIR is inside a git repository, so there is always one above"
+fi
+
+rm -rf "$proj"
+
 echo
 echo "----"
 printf '%d passed, %d failed\n' "$PASS" "$FAIL"

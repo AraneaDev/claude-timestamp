@@ -756,6 +756,44 @@ ct_history_path() {
   printf '%s' "${CLAUDE_TIMESTAMP_HISTORY:-${HOME}/.claude/claude-timestamp-history.tsv}"
 }
 
+# A working directory reduced to a bare project name, for the history's
+# optional project column.
+#
+# The walk is the shape ct_find_project_config uses and is bounded the same
+# way: 40 levels is far past any real checkout, and an unbounded loop on a
+# path that never reaches / would hang a hook. No subprocess, so this costs
+# nothing beyond the directory tests themselves, and it runs once per session.
+#
+# Only ever the basename. The parent directories are the part of a path that
+# says who you work for and what you call your clients, and none of it belongs
+# in a file that accumulates indefinitely.
+ct_project_name() {
+  local dir="$1" steps=0
+  case "$dir" in
+    "" | "/") printf '%s' '-'; return 0 ;;
+  esac
+  # Trailing slashes would make the basename empty, and "/a/b/" and "/a/b" are
+  # the same directory.
+  while [ "${dir}" != "/" ] && [ "${dir%/}" != "$dir" ]; do dir="${dir%/}"; done
+  while [ -n "$dir" ] && [ "$dir" != "/" ] && [ "$steps" -lt 40 ]; do
+    if [ -d "$dir/.git" ] || [ -f "$dir/.git" ]; then
+      printf '%s' "${dir##*/}"
+      return 0
+    fi
+    dir="${dir%/*}"
+    steps=$((steps + 1))
+  done
+  # No repository above it. The directory is still the best available answer,
+  # so fall back to the original rather than reporting nothing.
+  dir="$1"
+  while [ "${dir}" != "/" ] && [ "${dir%/}" != "$dir" ]; do dir="${dir%/}"; done
+  case "$dir" in
+    "" | "/") printf '%s' '-' ;;
+    */*)      printf '%s' "${dir##*/}" ;;
+    *)        printf '%s' "$dir" ;;
+  esac
+}
+
 # Machine-level facts, published for whoever configures the plugin from inside
 # Claude Code so they need no subprocess to learn them. Only things that cannot
 # be read out of the config files belong here: the effective settings do not,
