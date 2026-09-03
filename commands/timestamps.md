@@ -321,7 +321,8 @@ separated:
 4. waited
 5. idle
 6. failed tools
-7. project, only when `PROJECTS=on` was set. `-` means unnamed
+7. project, when `PROJECTS=on` was set (`-` means unnamed); `TOOL_TIMING=on`
+   alone also writes `-` here, as a placeholder holding field 8's place
 8. tool digest, only when `TOOL_TIMING=on` was set
 
 A row carries six, seven or eight fields. Six is a session recorded before
