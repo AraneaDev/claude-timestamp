@@ -3665,6 +3665,38 @@ refutes  "sections: the over-long row's project does not appear" grep -q "delta"
 contains "sections: the well-formed row's tool still appears" "Write" "$out"
 refutes  "sections: the over-long row's tool does not appear" grep -q "Edit" <<< "$out"
 
+# An empty tool name inside field 8, such as ":0:1", used to survive into the
+# slowest-tools render loop and break there: `while IFS=$'\t' read` collapses
+# adjacent tabs no matter what IFS is set to, since tab counts as "IFS
+# whitespace" -- so the empty name shifted the call count into the name slot
+# and left the call count blank, and comparing that blank against an integer
+# put a raw shell error inside the printed report.
+printf '2026-09-01T10:00:00\t100\t1\t10\t0\t0\talpha\tBash:5:2,:0:1\n' \
+  > "$CLAUDE_TIMESTAMP_HISTORY"
+out="$(bash "$SCRIPTS/setup.sh" --stats 2>&1)"
+refutes  "sections: an empty-named tool entry prints no raw shell error" \
+         grep -q "integer expression expected" <<< "$out"
+
+# A field this long overflows the shell's 64-bit arithmetic downstream --
+# ct_format_duration and the `$((10#...))` reads that feed it both choke on
+# it -- turning the report into a wall of raw shell errors and a nonsense
+# duration instead of treating the row as unreadable.
+printf '2026-09-01T10:00:00\t99999999999999999999999\t1\t10\t0\t0\talpha\t\n' \
+  > "$CLAUDE_TIMESTAMP_HISTORY"
+out="$(bash "$SCRIPTS/setup.sh" --stats 2>&1)"
+contains "sections: an oversized field is treated as damage, not counted" \
+         "1 unreadable" "$out"
+refutes  "sections: and prints no raw shell error either" \
+         grep -q "integer expression expected" <<< "$out"
+
+# The same bound applies to a tool-entry number inside field 8, not just to
+# the row's own timing fields.
+printf '2026-09-01T10:00:00\t100\t1\t10\t0\t0\talpha\tBash:99999999999999999999999:1\n' \
+  > "$CLAUDE_TIMESTAMP_HISTORY"
+out="$(bash "$SCRIPTS/setup.sh" --stats 2>&1)"
+refutes  "sections: the oversized tool entry itself is skipped" \
+         grep -q "Bash" <<< "$out"
+
 # `--stats`'s slowest-tools pass ends its awk with `sort -rn | head -10`. A
 # history with enough distinct tool names makes `head -10` close the pipe on
 # `sort` before `sort` is done writing, sending it SIGPIPE; under this
@@ -5745,10 +5777,13 @@ is "digest: a row with no usable duration contributes nothing" \
 
 # A blank line has neither a tool name nor a duration; a line with too few
 # fields has a name but no duration. Both used to be aggregated into an entry
-# with an empty tool name, such as ":0:1" -- invisible on screen only because
-# --stats happens to guard against drawing an empty name, but still a
-# meaningless entry riding along in the history row. Valid lines elsewhere in
-# the same log must still aggregate normally.
+# with an empty tool name, such as ":0:1", which rode along into the history
+# row and then into --stats' slowest-tools table -- NOT harmlessly: `while
+# IFS=$'\t' read` there collapses adjacent tabs, because tab counts as "IFS
+# whitespace" no matter what IFS is set to, so the empty name shifted the
+# call count into the name slot and left the call count empty, producing a
+# raw shell error ("integer expression expected") printed inside the report.
+# Valid lines elsewhere in the same log must still aggregate normally.
 printf '\nBash 1.000 ok\n' > "$log"
 is "digest: a bare blank line contributes nothing, valid lines still aggregate" \
    "Bash:1:1" "$(ct_tool_digest "$log")"

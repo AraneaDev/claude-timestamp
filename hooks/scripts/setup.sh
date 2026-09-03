@@ -305,8 +305,15 @@ $(awk -F'\t' -v since="${CT_STATS_SINCE:-}" -v want="${CT_STATS_PROJECT:-}" '
   # a partially written line usually still lands on some field count, and
   # only this catches that.
   NF < 6 || NF > 8 { bad++; next }
-  $2 !~ /^[0-9]+$/ || $3 !~ /^[0-9]+$/ || $4 !~ /^[0-9]+$/ ||
-  $5 !~ /^[0-9]+$/ || $6 !~ /^[0-9]+$/ { bad++; next }
+  # Bounded to 15 digits, not merely to digits. That still admits any real
+  # duration -- 15 nines is over 31 million years of seconds -- while
+  # keeping the value inside the exact-integer range of a double (2^53 is
+  # 16 digits), so awk cannot silently round it, and inside the 64-bit
+  # range of the shell downstream, where a longer run of digits overflowed
+  # and turned every arithmetic expression that touched it into a raw
+  # shell error.
+  $2 !~ /^[0-9]{1,15}$/ || $3 !~ /^[0-9]{1,15}$/ || $4 !~ /^[0-9]{1,15}$/ ||
+  $5 !~ /^[0-9]{1,15}$/ || $6 !~ /^[0-9]{1,15}$/ { bad++; next }
   # Filtered rows are skipped, not counted as unreadable: they were read
   # fine, they simply fall outside what was asked for.
   since != "" && $1 "" < since "" { next }
@@ -404,8 +411,11 @@ EOF
     # figure that the total it sits under does not count, so the breakdown
     # would exceed the whole.
     NF < 6 || NF > 8 { next }
-    $2 !~ /^[0-9]+$/ || $3 !~ /^[0-9]+$/ || $4 !~ /^[0-9]+$/ ||
-    $5 !~ /^[0-9]+$/ || $6 !~ /^[0-9]+$/ { next }
+    # Same 15-digit bound as the totals pass, and for the same reason: a
+    # value long enough to overflow the 64-bit arithmetic of the shell
+    # downstream is damage, not a duration.
+    $2 !~ /^[0-9]{1,15}$/ || $3 !~ /^[0-9]{1,15}$/ || $4 !~ /^[0-9]{1,15}$/ ||
+    $5 !~ /^[0-9]{1,15}$/ || $6 !~ /^[0-9]{1,15}$/ { next }
     since != "" && $1 "" < since "" { next }
     want  != "" && ((NF >= 7 && $7 != "" ? $7 : "-") "" != want "") { next }
     {
@@ -449,8 +459,9 @@ ROWS
     # rule this pass alone needs: field 8 must actually be present, since a
     # row can be valid by the shared guard and still carry no tool digest.
     NF < 6 || NF > 8 { next }
-    $2 !~ /^[0-9]+$/ || $3 !~ /^[0-9]+$/ || $4 !~ /^[0-9]+$/ ||
-    $5 !~ /^[0-9]+$/ || $6 !~ /^[0-9]+$/ { next }
+    # Same 15-digit bound as the totals pass, and for the same reason.
+    $2 !~ /^[0-9]{1,15}$/ || $3 !~ /^[0-9]{1,15}$/ || $4 !~ /^[0-9]{1,15}$/ ||
+    $5 !~ /^[0-9]{1,15}$/ || $6 !~ /^[0-9]{1,15}$/ { next }
     since != "" && $1 "" < since "" { next }
     want  != "" && ((NF >= 7 && $7 != "" ? $7 : "-") "" != want "") { next }
     NF < 8 || $8 == "" { next }
@@ -458,11 +469,30 @@ ROWS
       c = split($8, entries, ",")
       for (i = 1; i <= c; i++) {
         if (split(entries[i], part, ":") != 3) continue
-        if (part[2] !~ /^[0-9]+$/ || part[3] !~ /^[0-9]+$/) continue
+        # An empty name (a hand-edited ":0:1" entry) must not become a row:
+        # the read loop below splits on tab, and tab is one of the "IFS
+        # whitespace" characters, so bash read collapses an empty field
+        # next to it instead of preserving it -- the name that should have
+        # been empty comes out holding the call count, and the call count
+        # comes out empty, which then fails an integer test with a raw shell
+        # error. Skipped here the same way ct_tool_digest in lib/config.sh
+        # already skips a malformed entry at the source, so the read loop
+        # never has to parse one in the first place.
+        if (part[1] == "") continue
+        # Same 15-digit bound as the timing fields of the row itself.
+        if (part[2] !~ /^[0-9]{1,15}$/ || part[3] !~ /^[0-9]{1,15}$/) continue
         secs[part[1]] += part[2]; calls[part[1]] += part[3]
       }
     }
-    END { for (t in secs) printf "%018d\t%s\t%d\n", secs[t], t, calls[t] }
+    # \037 (unit separator) rather than a tab: the read loop below uses
+    # `read`, and tab is one of the "IFS whitespace" characters, which makes
+    # `read` collapse adjacent delimiters and trim leading/trailing ones
+    # regardless of what IFS is set to, so a field that really was empty
+    # would silently shift into its neighbour. \037 is not whitespace to
+    # `read`, so an empty field stays an empty field no matter what this
+    # awk emits -- the entries loop above already keeps that from
+    # happening, this just stops relying on it staying that way.
+    END { for (t in secs) printf "%018d\037%s\037%d\n", secs[t], t, calls[t] }
     ' "$file" | sort -rn | head -10)" || true
   # `|| true` above: on a history with many distinct tool names, `head -10`
   # closes the pipe once it has its ten lines, and `sort` -- which may still
@@ -479,7 +509,7 @@ ROWS
     echo
     echo "  slowest tools"
     local t_secs t_name t_calls
-    while IFS=$'\t' read -r t_secs t_name t_calls; do
+    while IFS=$'\x1f' read -r t_secs t_name t_calls; do
       [ -n "$t_name" ] || continue
       printf '    %-20s %10s  (%d call' "$t_name" \
         "$(ct_format_duration "$((10#$t_secs))")" "$t_calls"
