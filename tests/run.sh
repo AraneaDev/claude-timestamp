@@ -6,6 +6,19 @@
 #
 # Every test runs against a temp config file via CLAUDE_TIMESTAMP_CONFIG and a
 # temp TMPDIR, so a run never touches the real configuration or state.
+# Three shellcheck codes are answered here once rather than at each of the
+# sites, because they say something true of a test suite generally and would
+# otherwise need repeating on every case added from here on.
+#
+# SC2012 (prefer find over ls): every name this suite reads back is one it
+# wrote itself, and find -printf, the usual replacement, is GNU-only while CI
+# runs the suite on BSD and Git Bash too.
+#
+# SC2030/SC2031 (a variable modified in a subshell): setting HOME, TMPDIR or
+# LC_ALL inside a $( ) is how a hook is run under an environment of the
+# suite's choosing without disturbing the rest of the run. That scoping is the
+# isolation being asked for, not the accident it is reported as.
+# shellcheck disable=SC2012,SC2030,SC2031
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -4290,6 +4303,146 @@ out="$(printf '{"session_id":"firstprompt","prompt":"hi"}' | bash "$SCRIPTS/user
 lacks "away: the first prompt of a session has no gap" "break" "$out"
 
 echo
+echo "context zone"
+
+# The zone appended to the model-facing string is not decoration on the
+# default format: the hook appends it whatever CONTEXT_FORMAT renders,
+# precisely so the model can resolve the offset when the format itself omits
+# one. Every preset is asserted separately, because "it still works on 24h"
+# is exactly what this regression looks like from the outside.
+#
+# The clock is never recomputed into an expected string. The shape is matched
+# instead -- digits, one space, the zone -- so a second ticking over between
+# the hook and the assertion cannot fail a test about where the zone goes.
+
+fresh 'TZ=UTC'
+out="$(printf '{"session_id":"zone24","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh")"
+is "zone: the injection is a UserPromptSubmit result" "UserPromptSubmit" \
+   "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.hookEventName')"
+
+# Proof this run reached the injection path rather than leaving early: the
+# turn-start stamp is written on the way there. Without it every assertion
+# below would be about a string the hook never produced.
+asserts "zone: the injecting run also stamped the turn start" test -r "$(ct_state_file zone24)"
+
+ctx="$(printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext')"
+rest="${ctx#Message sent at local time }"
+case "$rest" in
+  [0-9][0-9]:[0-9][0-9]:[0-9][0-9]" UTC")
+    pass "zone: 24h puts the zone one space after the time" ;;
+  *) fail "zone: 24h puts the zone one space after the time" "HH:MM:SS UTC" "$rest" ;;
+esac
+
+# The ISO rendering ends at the seconds and carries no offset of its own, so
+# the trailing zone is the only thing that resolves it. This is the preset the
+# omission would have hurt most.
+fresh 'TZ=UTC' 'CONTEXT_FORMAT=iso'
+ctx="$(printf '{"session_id":"zoneiso","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh" \
+  | jq -r '.hookSpecificOutput.additionalContext')"
+rest="${ctx#Message sent at local time }"
+case "$rest" in
+  [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]" UTC")
+    pass "zone: iso carries no offset, so the zone resolves it" ;;
+  *) fail "zone: iso carries no offset, so the zone resolves it" "YYYY-MM-DDTHH:MM:SS UTC" "$rest" ;;
+esac
+
+fresh 'TZ=UTC' 'CONTEXT_FORMAT=short'
+ctx="$(printf '{"session_id":"zoneshort","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh" \
+  | jq -r '.hookSpecificOutput.additionalContext')"
+rest="${ctx#Message sent at local time }"
+case "$rest" in
+  [0-9][0-9]:[0-9][0-9]" UTC")
+    pass "zone: short keeps the zone after a format that drops the seconds" ;;
+  *) fail "zone: short keeps the zone after a format that drops the seconds" "HH:MM UTC" "$rest" ;;
+esac
+
+# The zone goes after the AM/PM marker, not between the time and it.
+fresh 'TZ=UTC' 'CONTEXT_FORMAT=12h'
+ctx="$(printf '{"session_id":"zone12h","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh" \
+  | jq -r '.hookSpecificOutput.additionalContext')"
+rest="${ctx#Message sent at local time }"
+case "$rest" in
+  [0-9]:[0-9][0-9]" "[AP]M" UTC"|[0-9][0-9]:[0-9][0-9]" "[AP]M" UTC")
+    pass "zone: 12h puts the zone after the AM/PM marker" ;;
+  *) fail "zone: 12h puts the zone after the AM/PM marker" "H:MM AM UTC" "$rest" ;;
+esac
+
+# %I is zero-padded and the trim happens before the zone is appended, so
+# appending must not resurrect the pad.
+case "$rest" in
+  0*) fail "zone: 12h still trims the leading zero with the zone appended" "no leading zero" "$rest" ;;
+  *)  pass "zone: 12h still trims the leading zero with the zone appended" ;;
+esac
+
+# Anything containing a % is a raw strftime string rather than a preset, and
+# gets the same treatment.
+fresh 'TZ=UTC' 'CONTEXT_FORMAT=%H'
+ctx="$(printf '{"session_id":"zoneraw","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh" \
+  | jq -r '.hookSpecificOutput.additionalContext')"
+rest="${ctx#Message sent at local time }"
+case "$rest" in
+  [0-9][0-9]" UTC") pass "zone: a raw strftime format still gets the zone" ;;
+  *) fail "zone: a raw strftime format still gets the zone" "HH UTC" "$rest" ;;
+esac
+
+# A pinned zone that this platform can honour is the one the string is
+# labelled with -- never the machine's own. Needs a timezone database, and
+# needs the machine not to already be in the probe zone, or the negative
+# assertion would be asserting nothing.
+zone_local="$(date '+%Z')"
+if ct_tz_supported && [ "$zone_local" != "JST" ]; then
+  fresh 'TZ=Asia/Tokyo'
+  ctx="$(printf '{"session_id":"zonetokyo","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh" \
+    | jq -r '.hookSpecificOutput.additionalContext')"
+  is "zone: a honoured pinned zone supplies the abbreviation" "JST" "${ctx##* }"
+  lacks "zone: a honoured pinned zone never shows the machine's abbreviation" "$zone_local" "$ctx"
+else
+  skip "zone: a honoured pinned zone supplies the abbreviation" "no timezone database, or this machine is already JST"
+  skip "zone: a honoured pinned zone never shows the machine's abbreviation" "no timezone database, or this machine is already JST"
+fi
+
+# Nothing pinned: the label is whatever the machine says it is. %Z does not
+# change across a minute boundary, so this one can be compared directly.
+fresh
+ctx="$(printf '{"session_id":"zonenone","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh" \
+  | jq -r '.hookSpecificOutput.additionalContext')"
+is "zone: with nothing pinned the label is the machine's own" "$zone_local" "${ctx##* }"
+
+# A pinned IANA name on a platform with no timezone database, simulated by
+# priming the memoised probe in the hook's own environment. ct_now ignores the
+# zone it cannot honour and renders local time; the abbreviation has to follow
+# it down, because local time wearing a foreign label is the one output that
+# is actually wrong rather than merely not what was asked for.
+fresh 'TZ=Asia/Tokyo' 'CONTEXT_FORMAT=short'
+cl_ref1="$(date '+%H:%M') $zone_local"
+ctx="$(printf '{"session_id":"zonenotz","prompt":"hi"}' \
+  | CT_TZ_SUPPORTED=no bash "$SCRIPTS/user-prompt-submit.sh" \
+  | jq -r '.hookSpecificOutput.additionalContext')"
+cl_ref2="$(date '+%H:%M') $zone_local"
+rest="${ctx#Message sent at local time }"
+is_clock "zone: an unhonourable zone drags the time and the label down together" \
+  "$cl_ref1" "$rest" "$cl_ref2"
+if [ "$zone_local" != "JST" ]; then
+  lacks "zone: local time is never labelled with a zone that was not honoured" "JST" "$ctx"
+else
+  skip "zone: local time is never labelled with a zone that was not honoured" "this machine is already JST"
+fi
+
+# The away clause is appended after the zone, so a long break can never
+# swallow it. The gap is measured from the previous turn's close, so the
+# fixture stages a .closed.
+fresh 'TZ=UTC' 'IDLE_AFTER=1800'
+printf '%s' "$(( $(date +%s) - 10800 ))" > "$(ct_state_file zoneaway).closed"
+ctx="$(printf '{"session_id":"zoneaway","prompt":"hi"}' | bash "$SCRIPTS/user-prompt-submit.sh" \
+  | jq -r '.hookSpecificOutput.additionalContext')"
+rest="${ctx#Message sent at local time }"
+case "$rest" in
+  [0-9][0-9]:[0-9][0-9]:[0-9][0-9]" UTC, after a 3h break")
+    pass "zone: the away clause follows the zone, comma and all" ;;
+  *) fail "zone: the away clause follows the zone, comma and all" "HH:MM:SS UTC, after a 3h break" "$rest" ;;
+esac
+
+echo
 echo "asset format"
 
 # Every README screenshot is a lossless WebP (see tools/screenshots/screenshots.py's
@@ -4302,6 +4455,664 @@ bad_assets="$(for f in "$ROOT"/assets/*; do
   [ "$sig" = "WEBP" ] || basename "$f"
 done)"
 is "every file in assets/ is a WebP" "" "$bad_assets"
+
+echo
+echo "display width"
+
+# The wizard's own column counter. setup.sh ends in `main "$@"`, so sourcing it
+# would run the whole thing; lift just this function out of the file instead,
+# the same way the flag-table case above reads CT_FLAG_TABLE.
+eval "$(sed -n '/^_ct_display_width() {$/,/^}$/p' "$SCRIPTS/setup.sh")"
+
+is "width: plain ASCII counts its characters"  "3" "$(_ct_display_width 'abc')"
+is "width: a template made only of ASCII"      "5" "$(_ct_display_width '%time')"
+is "width: an empty string is zero columns"    "0" "$(_ct_display_width '')"
+
+# A UTF-8 sequence draws one column, not one per byte. Both of these characters
+# appear in templates the wizard previews.
+is "width: a two-byte character is one column"   "1" "$(_ct_display_width '·')"
+is "width: a three-byte character is one column" "1" "$(_ct_display_width '→')"
+
+# The bug this function exists to fix. printf's %-38s pads by bytes, so the
+# default template's preview used to land a column early. The byte length is
+# asserted next to the display width, because the claim is that the two differ:
+# a regression that made them agree again would otherwise pass silently.
+dw_tpl='[{%date }%time{ %elapsed}{ · %tool}]'
+is "width: the default template is 37 bytes" "37" \
+  "$(printf '%s' "$dw_tpl" | LC_ALL=C wc -c | tr -d ' ')"
+is "width: but draws only 36 columns"        "36" "$(_ct_display_width "$dw_tpl")"
+
+# The argument is data. It reaches printf only as the value behind a '%s', so a
+# marker template carrying a conversion specifier is counted, never applied --
+# a template is free-text a user types, and '%s%s' would eat the pad width.
+is "width: a percent conversion is counted, not interpreted" "2" "$(_ct_display_width '%d')"
+is "width: and so is a pair of them"                         "4" "$(_ct_display_width '%s%s')"
+
+# printf '%s' does not expand escapes in its argument either, so a literal
+# backslash followed by t is the two characters it looks like.
+is "width: a literal backslash escape is two columns" "2" "$(_ct_display_width '\t')"
+
+# Padding is the whole point, so the spaces the preview has to account for are
+# counted rather than trimmed.
+is "width: surrounding whitespace is counted, not trimmed" "5" "$(_ct_display_width '  a  ')"
+
+# LC_ALL=C inside the function puts tr on raw bytes, so the answer cannot depend
+# on the locale the wizard happens to be run under.
+is "width: locale-independent under LC_ALL=C" "1" \
+  "$(export LC_ALL=C; _ct_display_width '→')"
+dw_utf8_locale=""
+for dw_cand in C.UTF-8 C.utf8 en_US.UTF-8; do
+  if [ "$(LC_ALL="$dw_cand" locale charmap 2>/dev/null)" = "UTF-8" ]; then
+    dw_utf8_locale="$dw_cand"; break
+  fi
+done
+if [ -n "$dw_utf8_locale" ]; then
+  is "width: and the same under a UTF-8 locale" "1" \
+    "$(export LC_ALL="$dw_utf8_locale"; _ct_display_width '→')"
+else
+  skip "width: and the same under a UTF-8 locale" "no UTF-8 locale on this machine"
+fi
+
+# Two inputs where what this function counts and what a terminal draws come
+# apart. The contract's first sentence is that it returns the columns a string
+# occupies; what it actually counts is characters, bytes minus continuation
+# bytes, and characters are not columns. Quarantined rather than pinned: the
+# numbers returned today are the gap itself, so writing them down as the
+# expectation would freeze a wcwidth bug into the suite as if it were the
+# specification. The columns each string really draws are recorded instead.
+# Neither input is reachable from a shipped template, which is why this is
+# latent rather than something anyone has seen misalign.
+#
+# SUSPECTED BUG: a four-byte emoji occupies two columns and counts one, so a
+# template carrying one would be padded a column too wide.
+skip "width: an emoji counts the two columns it draws" \
+  "SUSPECTED BUG: input the grinning-face emoji draws 2 columns, _ct_display_width returns 1"
+# SUSPECTED BUG: a combining accent draws no column of its own, so "e" followed
+# by U+0301 occupies one column and counts two -- a column too narrow, the
+# opposite error. The contract predicts a third answer again ("a combining mark
+# counts only its base"), so the intended value is unclear as well as unmet;
+# flagged rather than guessed at.
+skip "width: a combining accent draws no column of its own" \
+  "SUSPECTED BUG: input e followed by U+0301 draws 1 column, _ct_display_width returns 2"
+
+# The alignment this function is the only reason for. The wizard prints three
+# template previews padded to a common width, two of the templates containing a
+# multi-byte character, and the rendered markers must all start in the same
+# column. Measured through the wizard rather than asserted against fixed text,
+# because the markers contain the current clock.
+fresh
+dw_out="$(printf 'off\nlocal\nshort\non\n30\n0\noff\ncyan\n\nfalse\nn\n' \
+  | bash "$SCRIPTS/setup.sh" 2>/dev/null)"
+dw_cols=""
+# The expected column is derived from constants, not from _ct_display_width, so
+# the measurement cannot cancel out a regression in the thing it is measuring:
+# the leading number is each template's character count, counted by hand.
+for dw_pair in "36:[{%date }%time{ %elapsed}{ · %tool}]" "5:%time" "18:%time{ → %elapsed}"; do
+  dw_n="${dw_pair%%:*}"; dw_t="${dw_pair#*:}"
+  dw_lead=""
+  while IFS= read -r dw_line; do
+    dw_line="$(strip_ansi "$dw_line")"
+    # The template is quoted so its braces and brackets match literally, and the
+    # trailing space keeps '%time' off the '%time{ ... }' line.
+    case "$dw_line" in
+      "  $dw_t "*)
+        dw_rest="${dw_line#"  $dw_t"}"
+        dw_lead="${dw_rest%%[! ]*}"
+        ;;
+    esac
+  done <<DWOUT
+$dw_out
+DWOUT
+  dw_cols="$dw_cols$(( 2 + dw_n + ${#dw_lead} )) "
+done
+# Two leading spaces, a field padded to 38 columns, one separator space.
+is "wizard: all three template previews start the marker in one column" \
+  "41 41 41 " "$dw_cols"
+
+
+if command -v jq >/dev/null 2>&1; then
+  echo
+  echo "session end reconciles an open turn"
+
+  # A session can end with no Stop behind it, which leaves the last turn open:
+  # a start file with no .closed sibling. session-end.sh closes that turn
+  # itself, at the time the last message was drawn, BEFORE it reads any
+  # totals -- so the final turn's waiting time reaches the summary and the
+  # history row instead of being dropped.
+  #
+  # Every fixture below plants exactly that state directly under the session's
+  # state path, and the only thing that varies between cases is what .last
+  # says, which is the one input the reconciliation reads. The session is an
+  # hour old, the open turn 90s old, and 100s of waiting is already banked
+  # from the turns that closed normally -- so an unreconciled run reports
+  # 1m40s and a reconciled one 2m40s, and no case can be satisfied by both.
+  #
+  # One reading of the clock per fixture, shared by every offset, so a case
+  # cannot straddle a second boundary between two `date` calls.
+  seed_open_turn() {
+    # $1 session id; $2, when given, how many seconds ago the last message was
+    # drawn (negative puts it in the future). Omitting $2 plants no .last.
+    local b now
+    b="$(ct_state_file "$1")"
+    mkdir -p "$(ct_state_dir)"
+    now="$(date +%s)"
+    printf '%s' "$(( now - 3600 ))" > "$b.start"
+    printf '2'   > "$b.turns"
+    printf '100' > "$b.wait"
+    printf '%s' "$(( now - 90 ))" > "$b"
+    if [ "$#" -gt 1 ]; then
+      printf '%s' "$(( now - $2 ))" > "$b.last"
+    fi
+    return 0
+  }
+
+  end_open_session() {
+    printf '{"session_id":"%s"}' "$1" \
+      | bash "$SCRIPTS/session-end.sh" | jq -r '.systemMessage // ""'
+  }
+
+  fresh
+  seed_open_turn "reopen" 30
+  out="$(end_open_session reopen)"
+  contains "session end counts the turn no Stop ever closed" "2m40s of it waiting" "$out"
+  # Closing a turn must not open one: the count is whatever the prompt hook
+  # recorded, untouched by the reconciliation that runs beside it.
+  contains "reconciling the last turn does not invent one" "over 2 turns," "$out"
+
+  # The control that makes the case above a statement about the code rather
+  # than about the clock. Identical state, no .last, so the reconciliation has
+  # no end time to close at and contributes nothing: the 60s above came from
+  # .last, not from `date`.
+  fresh
+  seed_open_turn "reopen-none"
+  contains "with no .last the same fixture reports only the banked wait" \
+    "1m40s of it waiting" "$(end_open_session reopen-none)"
+
+  # Stop already closed this turn and already banked what it cost. The .closed
+  # sibling is the record of that, and finding one makes the close a no-op --
+  # otherwise every session that ended tidily would count its last turn twice.
+  fresh
+  seed_open_turn "reopen-closed" 30
+  printf '%s' "$(( $(date +%s) - 30 ))" > "$(ct_state_file reopen-closed).closed"
+  contains "a turn Stop already closed is not counted a second time" \
+    "1m40s of it waiting" "$(end_open_session reopen-closed)"
+
+  # The reconciliation happens before the totals are read, so it reaches the
+  # history row too -- field 4 is the waiting figure ct_history_append is
+  # handed. Without it the row would say 100.
+  fresh 'HISTORY=on'
+  seed_open_turn "reopen-hist" 30
+  end_open_session reopen-hist >/dev/null
+  is "the reconciled total is what the history row records" "160" \
+     "$(awk -F'\t' 'END{print $4}' "$CLAUDE_TIMESTAMP_HISTORY")"
+
+  # SUMMARY and HISTORY are independent, and the reconciliation sits upstream
+  # of both: switching the printed summary off must not switch off the figure
+  # the row is built from.
+  fresh 'SUMMARY=off' 'HISTORY=on'
+  seed_open_turn "reopen-quiet" 30
+  is "SUMMARY=off prints nothing even with a turn to reconcile" "" \
+     "$(end_open_session reopen-quiet)"
+  is "the row still carries the reconciled total with the summary off" "160" \
+     "$(awk -F'\t' 'END{print $4}' "$CLAUDE_TIMESTAMP_HISTORY")"
+
+  # A turn that drew nothing at all -- straight into a long tool call, then an
+  # interrupt -- leaves .last pointing at the PREVIOUS turn. It contributes
+  # nothing; what it must never do is subtract.
+  fresh
+  seed_open_turn "reopen-before" 200
+  contains "a .last older than the open turn never decrements the total" \
+    "1m40s of it waiting" "$(end_open_session reopen-before)"
+
+  fresh
+  seed_open_turn "reopen-equal" 90
+  contains "a .last exactly at the turn's start contributes nothing" \
+    "1m40s of it waiting" "$(end_open_session reopen-equal)"
+
+  # A clock that jumped forward can put .last past now, which would otherwise
+  # hand the summary more waiting than the session lasted. The clamp in
+  # ct_session_totals runs after the reconciliation, so it still applies.
+  fresh 'HISTORY=on'
+  seed_open_turn "reopen-skew" -100000
+  contains "waiting from a future .last is clamped to the elapsed total" \
+    "1h00m of it waiting" "$(end_open_session reopen-skew)"
+  is "the row never claims more waiting than the session lasted" "clamped" \
+     "$(awk -F'\t' 'END{print ($4 <= $2) ? "clamped" : $4 " > " $2}' "$CLAUDE_TIMESTAMP_HISTORY")"
+
+  # .last is a file on disk, so it can be truncated or half-written. Both read
+  # as 0, which is the no-end-time case above, and neither takes the hook down
+  # under its `set -e`.
+  fresh
+  seed_open_turn "reopen-junk"
+  printf 'abc' > "$(ct_state_file reopen-junk).last"
+  status=0
+  out="$(printf '{"session_id":"reopen-junk"}' | bash "$SCRIPTS/session-end.sh")" || status=$?
+  is "a corrupt .last does not fail the hook" "0" "$status"
+  contains "a corrupt .last leaves the banked wait alone" "1m40s of it waiting" \
+    "$(printf '%s' "$out" | jq -r '.systemMessage')"
+
+  fresh
+  seed_open_turn "reopen-empty"
+  : > "$(ct_state_file reopen-empty).last"
+  status=0
+  out="$(printf '{"session_id":"reopen-empty"}' | bash "$SCRIPTS/session-end.sh")" || status=$?
+  is "an empty .last does not fail the hook" "0" "$status"
+  contains "an empty .last leaves the banked wait alone" "1m40s of it waiting" \
+    "$(printf '%s' "$out" | jq -r '.systemMessage')"
+
+  # The close writes a .closed sibling of its own, and ct_clear_state runs
+  # after it. Nothing the reconciliation writes may outlive the session.
+  fresh
+  seed_open_turn "reopen-clear" 30
+  end_open_session reopen-clear >/dev/null
+  is "reconciliation leaves nothing behind for the clear to miss" "0" \
+     "$(ls -1 "$(ct_state_file reopen-clear)"* 2>/dev/null | wc -l | tr -d ' ')"
+
+  fresh
+fi
+
+echo
+echo "closing a turn by session id"
+
+# ct_turn_close is the only close the hooks ever call: stop.sh, session-end.sh
+# and user-prompt-submit.sh each name the session by id and none of them knows
+# the state layout. ct_close_turn itself has cover under "turn accounting", so
+# what is asserted here is the seam between the two -- the id reduction, and
+# the promise that every path returns 0, which is the only thing keeping three
+# `set -euo pipefail` hooks alive when a payload carries something odd.
+
+fresh
+tc_now="$(date +%s)"
+tc_base="$(ct_state_file "tc")"
+printf '%s' "$(( tc_now - 40 ))" > "$tc_base"
+tc_end="$(date +%s)"
+ct_turn_close "tc" "$tc_end"
+is_near "turn close: banks the turn against the id's own state file" 40 \
+  "$(ct_read_counter "$tc_base.wait")" 2
+# The end time is captured rather than computed inline so the stamp can be
+# pinned to it, not merely shown to exist. A close that always stamped the
+# turn's own start -- the value the clamped branch below writes -- would
+# satisfy an existence check while getting every ordinary turn wrong, and
+# ct_record_away measures the next break from exactly this number.
+is "turn close: and marks the turn closed at the end it was handed" "$tc_end" \
+  "$(ct_read_counter "$tc_base.closed")"
+tc_closed="$(ct_read_counter "$tc_base.closed")"
+
+# A hook can cause the model to run again, so a turn seeing two closes is a
+# case to survive. The second one carries a later end time and must still move
+# neither the total nor the close time.
+ct_turn_close "tc" "$(( tc_now + 300 ))"
+is_near "turn close: a second close adds nothing to the total" 40 \
+  "$(ct_read_counter "$tc_base.wait")" 2
+is "turn close: and does not move the close time" "$tc_closed" \
+  "$(ct_read_counter "$tc_base.closed")"
+
+# An end before the turn's own start means the turn drew no message of its own,
+# so it contributes nothing -- but it is still closed, and closed at its start
+# rather than at that earlier time. ct_record_away measures the user's break
+# from .closed, so a stamp from before this turn opened would hand the next gap
+# this turn's whole duration on top of the real break.
+fresh
+tc_now="$(date +%s)"
+tc_base="$(ct_state_file "tc2")"
+printf '%s' "$tc_now" > "$tc_base"
+# The running total is seeded rather than left absent, because an absent .wait
+# and a .wait holding a negative number both read back as 0: a close that
+# skipped the clamp and banked `ended - started` would write -500 here and pass
+# an assertion that expected 0. Against a real total the wrong write is visible.
+printf '88' > "$tc_base.wait"
+ct_turn_close "tc2" "$(( tc_now - 500 ))"
+is "turn close: an end before the start contributes nothing" "88" \
+  "$(ct_read_counter "$tc_base.wait")"
+asserts "turn close: but the turn is closed anyway" test -r "$tc_base.closed"
+is "turn close: at its own start, never at the earlier end" "$tc_now" \
+  "$(ct_read_counter "$tc_base.closed")"
+
+# No end time at all. `${2:-0}` collapses it to 0, which is the same value
+# session-end.sh arrives with when .last was never written -- a session that
+# ended mid-turn having drawn nothing. The turn is closed at its start, and the
+# running total is left exactly as it was.
+#
+# The start is put 50 seconds in the past on purpose. With it stamped at "now",
+# a close that quietly substituted the current time for the missing argument
+# would land on the same .closed and the same total within the same second, and
+# this case would pass against exactly the behaviour it exists to rule out.
+fresh
+tc_now="$(date +%s)"
+tc_start="$(( tc_now - 50 ))"
+tc_base="$(ct_state_file "tc3")"
+printf '%s' "$tc_start" > "$tc_base"
+printf '77' > "$tc_base.wait"
+ct_turn_close "tc3" ""
+is "turn close: an empty end time still closes the turn" "$tc_start" \
+  "$(ct_read_counter "$tc_base.closed")"
+is "turn close: and leaves the banked wait untouched" "77" \
+  "$(ct_read_counter "$tc_base.wait")"
+
+# A non-numeric or negative end is not a time. Nothing is written, so the turn
+# stays open for whoever can close it properly.
+fresh
+tc_base="$(ct_state_file "tc4")"
+printf '%s' "$(date +%s)" > "$tc_base"
+# Seeded, for the reason the clamped case above gives: a total that already
+# holds a number distinguishes "left alone" from "written with something that
+# reads back as zero", which an absent file cannot.
+printf '13' > "$tc_base.wait"
+ct_turn_close "tc4" "abc"
+refutes "turn close: a non-numeric end writes no .closed" test -e "$tc_base.closed"
+ct_turn_close "tc4" "-5"
+refutes "turn close: a negative end writes no .closed" test -e "$tc_base.closed"
+is "turn close: and neither banks any waiting" "13" "$(ct_read_counter "$tc_base.wait")"
+
+# The id arrives in a hook payload, so it is reduced to a filename before it
+# can steer a write anywhere. An id that reduces to nothing is a silent no-op:
+# the hooks call this as a bare statement, so refusing loudly would be worse
+# than doing nothing.
+fresh
+tc_before="$(ls -1A "$TMPDIR")"
+asserts "turn close: an empty id returns 0"              ct_turn_close "" 12345
+asserts "turn close: an id of only separators returns 0" ct_turn_close "///" 12345
+asserts "turn close: an id of only dots returns 0"       ct_turn_close ".." 12345
+is "turn close: and none of them writes inside the state directory" "0" \
+  "$(ls -1A "$(ct_state_dir)" | wc -l | tr -d ' ')"
+is "turn close: nor beside it, under the state dir's own name or its parent's" \
+  "$tc_before" "$(ls -1A "$TMPDIR")"
+
+# A traversal id flattens to one name inside the state directory, and that
+# file -- not the path it spells -- is the turn that gets closed.
+fresh
+tc_now="$(date +%s)"
+tc_base="$(ct_state_dir)/etcpasswd"
+printf '%s' "$(( tc_now - 30 ))" > "$tc_base"
+tc_before="$(ls -1A "$TMPDIR")"
+ct_turn_close "../../etc/passwd" "$tc_now"
+is "turn close: a traversal id closes the flattened file" "30" \
+  "$(ct_read_counter "$tc_base.wait")"
+is "turn close: and writes only siblings of that name" \
+  "etcpasswd etcpasswd.closed etcpasswd.wait" \
+  "$(ls -1A "$(ct_state_dir)" | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')"
+is "turn close: and nothing at all outside the state directory" \
+  "$tc_before" "$(ls -1A "$TMPDIR")"
+
+# Stop can fire for a session whose state was already cleared, or swept.
+fresh
+tc_base="$(ct_state_file "tc-absent")"
+asserts "turn close: a session with no state file returns 0" \
+  ct_turn_close "tc-absent" "$(date +%s)"
+refutes "turn close: and closes nothing" test -e "$tc_base.closed"
+
+# The state file is a file on disk, so it can be truncated or half-written.
+# Both read as a start of 0, which is not a turn: nothing is closed and nothing
+# is banked, rather than a turn dated from the epoch.
+fresh
+tc_base="$(ct_state_file "tc-corrupt")"
+printf 'garbage' > "$tc_base"
+ct_turn_close "tc-corrupt" "$(date +%s)"
+refutes "turn close: a corrupt start writes no .closed" test -e "$tc_base.closed"
+is "turn close: and banks nothing" "0" "$(ct_read_counter "$tc_base.wait")"
+: > "$tc_base"
+ct_turn_close "tc-corrupt" "$(date +%s)"
+refutes "turn close: an empty start writes no .closed" test -e "$tc_base.closed"
+is "turn close: and banks nothing either" "0" "$(ct_read_counter "$tc_base.wait")"
+
+# /tmp is swept periodically, so the state directory can vanish under a live
+# session. Closing does not call ct_state_ready, unlike ct_turn_open: a close
+# with nowhere to write is dropped, rather than resurrecting a directory whose
+# contents are gone anyway.
+fresh
+tc_base="$(ct_state_file "tc-sweep")"
+printf '%s' "$(( $(date +%s) - 10 ))" > "$tc_base"
+rm -rf "$(ct_state_dir)"
+asserts "turn close: a swept state directory still returns 0" \
+  ct_turn_close "tc-sweep" "$(date +%s)"
+is "turn close: and the close does not recreate it" "0" \
+  "$([ -d "$(ct_state_dir)" ] && echo 1 || echo 0)"
+
+# The guard the three call sites depend on. Each invokes this as a bare
+# statement under `set -euo pipefail`, where one non-zero return kills the hook
+# and the plugin goes silent with nothing reported. Asserted in a real errexit
+# shell, because this suite deliberately runs without -e and so cannot observe
+# it here.
+# shellcheck disable=SC2016  # $1 is for the inner bash, not this one
+is "turn close: an unusable id does not abort an errexit hook" "ok" \
+  "$(env bash -c '
+       set -euo pipefail
+       . "$1/lib/config.sh"; . "$1/lib/state.sh"
+       ct_turn_close "" 1
+       ct_turn_close "///" 1
+       echo ok
+     ' _ "$SCRIPTS" 2>/dev/null)"
+# shellcheck disable=SC2016  # $1 is for the inner bash, not this one
+is "turn close: nor does a session with nothing to close" "ok" \
+  "$(env bash -c '
+       set -euo pipefail
+       . "$1/lib/config.sh"; . "$1/lib/state.sh"
+       ct_turn_close "tc-errexit" 1
+       echo ok
+     ' _ "$SCRIPTS" 2>/dev/null)"
+
+# The wrapper is ct_close_turn with the path resolved for it, and the two must
+# not drift into disagreeing about the same turn. One clock reading feeds both
+# sides, so the comparison is about the code rather than the second it ran in,
+# and the banked figure is pinned as well as compared -- two zeroes would agree
+# with each other while proving nothing.
+fresh
+tc_now="$(date +%s)"
+tc_a="$(ct_state_file "tcpar-a")"
+tc_b="$(ct_state_file "tcpar-b")"
+printf '%s' "$(( tc_now - 65 ))" > "$tc_a"
+printf '%s' "$(( tc_now - 65 ))" > "$tc_b"
+ct_turn_close "tcpar-a" "$tc_now"
+ct_close_turn "$tc_b" "$tc_now"
+is "turn close: banks the turn's whole cost" "65" "$(ct_read_counter "$tc_a.wait")"
+is "turn close: parity with ct_close_turn on the total" \
+  "$(ct_read_counter "$tc_b.wait")" "$(ct_read_counter "$tc_a.wait")"
+is "turn close: parity with ct_close_turn on the close time" \
+  "$(ct_read_counter "$tc_b.closed")" "$(ct_read_counter "$tc_a.closed")"
+
+# A session is many turns and .wait is the running total across all of them.
+# Reopening is what user-prompt-submit.sh does -- restamp the start, drop the
+# .closed sibling -- and the next close has to add to what is banked rather
+# than replace it.
+fresh
+tc_now="$(date +%s)"
+tc_base="$(ct_state_file "tc-acc")"
+printf '%s' "$(( tc_now - 10 ))" > "$tc_base"
+ct_turn_close "tc-acc" "$tc_now"
+is "turn close: the first turn banks its own cost" "10" \
+  "$(ct_read_counter "$tc_base.wait")"
+rm -f "$tc_base.closed"
+printf '%s' "$(( tc_now - 30 ))" > "$tc_base"
+ct_turn_close "tc-acc" "$tc_now"
+is "turn close: a reopened turn adds to the total rather than replacing it" "40" \
+  "$(ct_read_counter "$tc_base.wait")"
+
+echo
+echo "atomic config writes"
+
+# Both config writers -- write_config and write_project_config -- pipe the file
+# they have built into _ct_write_atomic, which builds it beside the target and
+# renames over it. Lift just that function out of setup.sh: the file ends in
+# `main "$@"`, so sourcing it would run the whole wizard. Same trick the
+# display-width cases above use for _ct_display_width.
+eval "$(sed -n '/^_ct_write_atomic() {$/,/^}$/p' "$SCRIPTS/setup.sh")"
+
+# The temp file is named "$file.$$", so two writers get distinct temps only
+# when they are distinct PROCESSES -- a subshell inherits $$. The racing case
+# at the end therefore needs real second and third processes, and this runner
+# is one. It doubles as the way to observe a failing return code without the
+# error path's diagnostics landing in the suite's own output.
+wa_runner="$WORK/write-atomic-runner.sh"
+{
+  echo '#!/usr/bin/env bash'
+  sed -n '/^_ct_write_atomic() {$/,/^}$/p' "$SCRIPTS/setup.sh"
+  # shellcheck disable=SC2016  # $1 is for the generated script to expand, not
+  # for this one.
+  echo '_ct_write_atomic "$1"'
+} > "$wa_runner"
+
+WA="$WORK/atomic"
+rm -rf "$WA"; mkdir -p "$WA"
+
+# Whatever arrives on stdin is what lands. The byte count is asserted next to
+# the text because `$(cat ...)` eats trailing newlines: a writer that appended
+# one of its own would still satisfy the text comparison alone, and the config
+# file is read back by a parser that is sensitive to what its last line is.
+printf '%s\n' 'COLOR=cyan' 'TZ=Asia/Tokyo' | _ct_write_atomic "$WA/new.conf"
+is "atomic write: a new file reports success" "0" "$?"
+is "atomic write: stdin lands verbatim" "COLOR=cyan
+TZ=Asia/Tokyo" "$(cat "$WA/new.conf")"
+is "atomic write: and nothing is added to it" "25" \
+   "$(LC_ALL=C wc -c < "$WA/new.conf" | tr -d ' ')"
+
+# The property this function exists for, and the reason the config writers do
+# not simply redirect over the target: ct_load_config reads the config from
+# five hooks and message-display reads it on every displayed message, so a
+# reader can be holding the file open across a write. Rename swaps the
+# directory entry, so that reader keeps the whole OLD file rather than watching
+# its own file shrink to nothing. Written the same way the --project case at
+# the top of "writing a project config" does it.
+printf '%s\n' 'COLOR=cyan' > "$WA/live.conf"
+exec 9< "$WA/live.conf"
+printf '%s\n' 'COLOR=green' 'MARKER=%time' | _ct_write_atomic "$WA/live.conf"
+wa_open="$(cat <&9)"
+exec 9<&-
+is "atomic write: a reader holding the old file still reads it whole" "COLOR=cyan" "$wa_open"
+is "atomic write: while the path now names the new file" "COLOR=green
+MARKER=%time" "$(cat "$WA/live.conf")"
+
+# The temp is an implementation detail and must not outlive the call. One left
+# behind in ~/.claude is litter the user has to explain to themselves, and one
+# left behind next to a project config would be committed.
+# Asked as the glob the contract names -- "$file".* -- rather than by parsing
+# ls, so a temp with a space or a newline in its name is still caught. With
+# nullglob off an unmatched pattern comes back as itself, which is what the
+# -e guard is for.
+wa_left=""
+for wa_f in "$WA"/*.conf.*; do
+  [ -e "$wa_f" ] && wa_left="$wa_left ${wa_f##*/}"
+done
+is "atomic write: no temp file survives a success" "" "${wa_left# }"
+
+# An empty payload is a file, not a no-op. write_project_config refuses to call
+# this with nothing to write, but the account writer has no such guard, and
+# "the file was left alone" and "the file was emptied" are different states for
+# a loader that treats a missing file as "not configured yet".
+printf '' | _ct_write_atomic "$WA/empty.conf"
+is "atomic write: empty stdin reports success" "0" "$?"
+asserts "atomic write: empty stdin still creates the target" test -f "$WA/empty.conf"
+is "atomic write: and the target is zero bytes" "0" \
+   "$(LC_ALL=C wc -c < "$WA/empty.conf" | tr -d ' ')"
+
+# write_project_config ends with `printf '%s' "$out"`, so whether the file ends
+# in a newline is decided by the caller. This function may not decide it: the
+# length pins that nothing was appended, the text pins that nothing was lost.
+printf 'COLOR=cyan' | _ct_write_atomic "$WA/nonl.conf"
+is "atomic write: a payload with no trailing newline keeps its length" "10" \
+   "$(LC_ALL=C wc -c < "$WA/nonl.conf" | tr -d ' ')"
+is "atomic write: and keeps its content" "COLOR=cyan" "$(cat "$WA/nonl.conf")"
+
+# The temp is created beside the target on purpose -- a rename across
+# filesystems is not atomic -- which means a target whose parent is missing
+# cannot be staged anywhere. That has to be a clean failure, not a half-written
+# file somewhere else.
+rm -rf "$WA/absent"
+printf '%s\n' 'COLOR=cyan' | bash "$wa_runner" "$WA/absent/sub.conf" 2>/dev/null
+is "atomic write: a missing parent directory returns 1" "1" "$?"
+refutes "atomic write: and nothing is created on the way" test -e "$WA/absent"
+
+# A read-only parent is the realistic version of the same failure: the config
+# directory exists but the write cannot land. The contract is that the target
+# is left exactly as it was and the temp is cleaned up, so a failed
+# `/timestamps` leaves a working config rather than an empty one.
+#
+# Root ignores the mode bits entirely -- checked: the write succeeds as root --
+# so this needs an unprivileged user and a filesystem that has mode bits at all.
+if [ "$(id -u)" != "0" ] && [ "$CT_HAS_MODES" = "1" ]; then
+  rm -rf "$WA/ro"; mkdir -p "$WA/ro"
+  printf '%s\n' 'COLOR=cyan' > "$WA/ro/keep.conf"
+  chmod 500 "$WA/ro"
+  printf '%s\n' 'COLOR=green' | bash "$wa_runner" "$WA/ro/keep.conf" 2>/dev/null
+  is "atomic write: an unwritable parent directory returns 1" "1" "$?"
+  chmod 700 "$WA/ro"
+  is "atomic write: and the target keeps what it had" "COLOR=cyan" "$(cat "$WA/ro/keep.conf")"
+  wa_left=""
+  for wa_f in "$WA/ro"/*.conf.*; do
+    [ -e "$wa_f" ] && wa_left="$wa_left ${wa_f##*/}"
+  done
+  is "atomic write: and no temp is left behind by the failure" "" "${wa_left# }"
+  rm -rf "$WA/ro"
+else
+  skip "atomic write: an unwritable parent directory returns 1" \
+       "root ignores the mode bits, so this needs an unprivileged user"
+  skip "atomic write: and the target keeps what it had" \
+       "root ignores the mode bits, so this needs an unprivileged user"
+  skip "atomic write: and no temp is left behind by the failure" \
+       "root ignores the mode bits, so this needs an unprivileged user"
+fi
+
+# SUSPECTED BUG: a symlinked target is silently detached instead of written
+# through. Quarantined, not blessed. `mv` replaces the NAME, so when the target is a
+# symlink the link itself is replaced by a regular file and the file it pointed
+# at keeps the old settings -- checked, that is what happens today. Symlinking
+# ~/.claude/claude-timestamp.conf into a dotfiles repository is the ordinary
+# way to version a config, and this detaches it silently: the wizard reports
+# success, the repository never changes, and the next `stow`-style relink
+# throws the new settings away. The assertion below is what write-through would
+# look like, and it passes the day the function resolves the target first.
+if [ "$CT_HAS_SYMLINKS" = "1" ]; then
+  rm -rf "$WA/link"; mkdir -p "$WA/link"
+  printf '%s\n' 'COLOR=cyan' > "$WA/link/real.conf"
+  ln -s "$WA/link/real.conf" "$WA/link/alias.conf"
+  printf '%s\n' 'COLOR=green' | _ct_write_atomic "$WA/link/alias.conf"
+  if [ -L "$WA/link/alias.conf" ] && [ "$(cat "$WA/link/real.conf")" = "COLOR=green" ]; then
+    pass "atomic write: a symlinked target is written through, not replaced"
+  else
+    skip "atomic write: a symlinked target is written through, not replaced" \
+         "known: mv replaces the symlink with a regular file, detaching a config symlinked into a dotfiles repo"
+  fi
+  rm -rf "$WA/link"
+else
+  skip "atomic write: a symlinked target is written through, not replaced" "needs real symlinks"
+fi
+
+# Two wizards finishing at once -- two terminals, or a hook and a hand-run
+# `/timestamps`. Whoever renames last wins, and that is fine; what may never
+# happen is a survivor built from both. Repeated, because a single round would
+# pass even on a writer that truncates in place and simply got lucky.
+rm -rf "$WA/race"; mkdir -p "$WA/race"
+wa_race="$WA/race/config.conf"
+wa_a="ENABLED=on
+COLOR=cyan
+TZ=Asia/Tokyo
+MARKER=%time"
+wa_b="ENABLED=off
+COLOR=green
+TZ=Europe/Paris
+MARKER=%date"
+wa_torn=""
+wa_lost=""
+for wa_round in 1 2 3 4 5 6 7 8; do
+  printf '%s' "$wa_a" | bash "$wa_runner" "$wa_race" 2>/dev/null &
+  wa_p1=$!
+  printf '%s' "$wa_b" | bash "$wa_runner" "$wa_race" 2>/dev/null &
+  wa_p2=$!
+  wait "$wa_p1"; wait "$wa_p2"
+  wa_got="$(cat "$wa_race")"
+  for wa_key in ENABLED COLOR TZ MARKER; do
+    case "$wa_got" in
+      *"$wa_key="*) ;;
+      *) wa_lost="$wa_lost round$wa_round:$wa_key" ;;
+    esac
+  done
+  case "$wa_got" in
+    "$wa_a"|"$wa_b") ;;
+    *) wa_torn="$wa_torn round$wa_round" ;;
+  esac
+done
+is "atomic write: a raced target still carries every key" "" "$wa_lost"
+is "atomic write: and is exactly one writer's file, never a blend" "" "$wa_torn"
+rm -rf "$WA"
 
 echo
 echo "----"
