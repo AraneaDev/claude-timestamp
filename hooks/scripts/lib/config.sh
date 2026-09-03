@@ -81,7 +81,17 @@ ct_find_project_config() {
       printf '%s' "$dir/$CT_PROJECT_CONFIG_NAME"
       return 0
     fi
-    dir="$(dirname "$dir")"
+    # Parameter expansion rather than `dirname`, which is an external binary in
+    # a command substitution and was being run once per level, up to forty
+    # times, on a path ct_load_config takes for every displayed message.
+    # Measured at depth 11, 200 searches: 1.78s with dirname, 0.11s with this.
+    #
+    # The one case the two differ on is the last level, where "/foo" becomes ""
+    # here and "/" there. Both end the loop -- this one on the [ -n "$dir" ]
+    # condition rather than the [ "$dir" != "/" ] one -- after the same number
+    # of steps, so the cap and its CT_PROJECT_SEARCH_CAPPED record are
+    # unchanged.
+    dir="${dir%/*}"
     steps=$((steps + 1))
   done
   # Giving up at the cap and finding nothing look identical to a caller, and
