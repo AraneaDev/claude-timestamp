@@ -5497,6 +5497,26 @@ is "project: an empty cwd is unnamed" \
 is "project: the filesystem root is unnamed" \
    "-" "$(ct_project_name "/")"
 
+# A slash-free argument makes "${dir%/*}" a no-op, which used to leave the
+# walk re-testing the same directory on every one of its 40 steps instead of
+# recognising at once that there is nowhere left to shorten to.
+is "project: a slash-free input still resolves correctly" \
+   "no-such-project-xyz123" "$(ct_project_name "no-such-project-xyz123")"
+
+# The assertion above passes either way -- the walk was always bounded and
+# always fell through to the same right answer, slash-free path or not. What
+# changed is how many times it tested the same directory on the way there.
+# Traced by counting how often the loop actually tests "-d .../.git", the
+# only way to observe that from outside the function: 40 times before this
+# fix (one per step, since the path never got any shorter), once after.
+pn_walk_steps="$(bash -c '
+  source "'"$SCRIPTS"'/lib/config.sh"
+  set -x
+  ct_project_name "no-such-project-xyz123" >/dev/null
+' 2>&1 | grep -c -- "-d no-such-project-xyz123/.git")"
+is "project: a slash-free input no longer spins through all 40 steps" \
+   "1" "$pn_walk_steps"
+
 # A directory name may legally contain a tab or a newline (mkdir does not
 # reject either), and either would corrupt a history row: a tab forges an
 # extra field, a newline splits the row into two lines. The character sits in

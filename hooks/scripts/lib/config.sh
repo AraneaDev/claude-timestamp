@@ -802,7 +802,7 @@ ct_history_path() {
 # neutralises its own separators, and through parameter expansion rather than a
 # subprocess, matching the no-subprocess promise above.
 ct_project_name() {
-  local dir="$1" steps=0 base
+  local dir="$1" steps=0 base next
   case "$dir" in
     "" | "/") printf '%s' '-'; return 0 ;;
   esac
@@ -815,7 +815,14 @@ ct_project_name() {
       printf '%s' "${base//[$'\t\r\n']/_}"
       return 0
     fi
-    dir="${dir%/*}"
+    next="${dir%/*}"
+    # A path with no slash left in it -- "foo", or what a leading path
+    # component like "/foo" reduces to once that slash is stripped below --
+    # makes "${dir%/*}" a no-op, so without this check the loop would spend
+    # its remaining steps re-testing the same directory for no reason, up to
+    # the 40-step cap, before falling through to the same answer either way.
+    [ "$next" = "$dir" ] && break
+    dir="$next"
     steps=$((steps + 1))
   done
   # No repository above it. The directory is still the best available answer,
