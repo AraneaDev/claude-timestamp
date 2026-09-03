@@ -39,6 +39,7 @@
     "COLOR": {
       "default": "dim",
       "validator": "ct_is_valid_color",
+      "aliases": ["off", "grey"],
       "values": [
         "none",
         "dim",
@@ -61,6 +62,7 @@
     "TIME_COLOR": {
       "default": "",
       "validator": "ct_is_valid_part_color",
+      "aliases": ["off", "grey"],
       "values": [
         "",
         "none",
@@ -78,6 +80,7 @@
     "ELAPSED_COLOR": {
       "default": "",
       "validator": "ct_is_valid_part_color",
+      "aliases": ["off", "grey"],
       "values": [
         "",
         "none",
@@ -95,6 +98,7 @@
     "TOOL_COLOR": {
       "default": "",
       "validator": "ct_is_valid_part_color",
+      "aliases": ["off", "grey"],
       "values": [
         "",
         "none",
@@ -128,6 +132,7 @@
     "SLOW_COLOR": {
       "default": "yellow",
       "validator": "ct_is_valid_color",
+      "aliases": ["off", "grey"],
       "values": [
         "none",
         "dim",

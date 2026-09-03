@@ -1744,6 +1744,26 @@ if command -v jq >/dev/null 2>&1; then
   done <<EOF
 $marker_names
 EOF
+
+  # ct_is_valid_color accepts "off" and "grey" as aliases for "none" and
+  # "gray", and schema.json listed neither. commands/timestamps.md calls the
+  # schema the only source of truth about what a key may hold and tells the
+  # model to refuse a value it does not accept -- so a user asking for grey
+  # was told grey is not a colour, by a contract narrower than the code behind
+  # it. check-docs.sh could not catch it: it asserts every listed value passes
+  # its validator, never that every accepted value is listed.
+  #
+  # They live in `aliases` rather than in `values` because `values` is also the
+  # list the picker offers, and a picker showing both gray and grey is worse
+  # than one showing either.
+  for schema_key in COLOR SLOW_COLOR TIME_COLOR ELAPSED_COLOR TOOL_COLOR; do
+    for schema_alias in off grey; do
+      is "schema: $schema_key accepts the alias '$schema_alias'" "1" \
+        "$(jq -r --arg k "$schema_key" --arg a "$schema_alias" \
+             '[(.keys[$k].values // [])[], (.keys[$k].aliases // [])[]]
+              | if index($a) then 1 else 0 end' "$ROOT/schema.json")"
+    done
+  done
 fi
 
 echo
