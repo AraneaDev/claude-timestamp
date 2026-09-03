@@ -3623,8 +3623,16 @@ echo "stats sections"
 } > "$CLAUDE_TIMESTAMP_HISTORY"
 out="$(bash "$SCRIPTS/setup.sh" --stats 2>&1)"
 contains "sections: a by-project block appears"      "by project" "$out"
-contains "sections: the busiest project leads"       "alpha" "$out"
-contains "sections: with its total and its count"    "1h30m" "$out"
+# "leads" means first in the table, not merely present -- alpha (2 sessions,
+# 1h30m total) must sort ahead of beta (1 session, 15m), so the assertion has
+# to compare where each name's row falls, not just that alpha appears
+# somewhere in output that also happens to include the word "by project".
+alpha_line="$(grep -n "alpha" <<< "$out" | head -1 | cut -d: -f1)"
+beta_line="$(grep -n "beta"  <<< "$out" | head -1 | cut -d: -f1)"
+asserts "sections: the busiest project leads" \
+        test "${alpha_line:-0}" -lt "${beta_line:-0}"
+contains "sections: with its total"                  "1h30m" "$out"
+contains "sections: and its count"                    "2 sessions" "$out"
 contains "sections: a slowest-tools block appears"   "slowest tools" "$out"
 contains "sections: summing a tool across sessions"  "2m30s" "$out"
 contains "sections: and its call count"              "8 calls" "$out"
