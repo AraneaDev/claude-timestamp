@@ -390,7 +390,11 @@ ct_now() {
 ct_date_days_ago() {
   local days="$1" target
   case "$days" in ''|*[!0-9]*) return 1 ;; esac
-  target=$(( $(date +%s) - days * 86400 ))
+  # Force base 10. "$days" is all digits at this point, but a leading zero --
+  # e.g. "08" -- makes bash arithmetic read it as octal, where 8 is not a
+  # valid digit, aborting the caller; "10#" pins the base so the digits are
+  # read as the decimal --since=Nd meant. Do not remove this as noise.
+  target=$(( $(date +%s) - 10#$days * 86400 ))
   if ct_tz_honoured; then
     TZ="$CT_TZ" date -d "@$target" +%Y-%m-%d 2>/dev/null && return 0
     TZ="$CT_TZ" date -r "$target"  +%Y-%m-%d 2>/dev/null && return 0

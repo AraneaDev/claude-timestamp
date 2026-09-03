@@ -3675,6 +3675,24 @@ asserts  "filters: the relative form is accepted" \
 contains "filters: and resolves to a dated cutoff" \
          "since $(ct_date_days_ago 7)" "$out"
 
+# A leading zero must be read as decimal, not as octal by the shell
+# arithmetic that multiplies it by 86400. "01d" through "07d" happen to be
+# valid octal and so worked by accident; "08d" and "09d" are not valid octal
+# and used to abort with a raw shell error instead of resolving a cutoff.
+out="$(bash "$SCRIPTS/setup.sh" --stats --since=08d 2>&1)"
+asserts  "filters: a leading-zero relative form is accepted (08d)" \
+         bash "$SCRIPTS/setup.sh" --stats --since=08d
+contains "filters: 08d resolves to a dated cutoff, not an octal error" \
+         "since $(ct_date_days_ago 8)" "$out"
+refutes  "filters: 08d does not surface a shell arithmetic error" \
+         grep -q "value too great for base" <<< "$out"
+
+out="$(bash "$SCRIPTS/setup.sh" --stats --since=09d 2>&1)"
+asserts  "filters: a leading-zero relative form is accepted (09d)" \
+         bash "$SCRIPTS/setup.sh" --stats --since=09d
+contains "filters: 09d resolves to a dated cutoff, not an octal error" \
+         "since $(ct_date_days_ago 9)" "$out"
+
 # The relative form has to resolve in the CONFIGURED zone, not the machine's:
 # the parser that reads --since=Nd runs before ct_load_config, so a cutoff
 # computed right there would be rendered in whichever zone the machine
