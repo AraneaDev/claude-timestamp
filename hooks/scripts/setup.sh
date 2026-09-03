@@ -267,7 +267,13 @@ $(awk -F'\t' '
   NF != 6 { bad++; next }
   {
     n++; total += $2; turns += $3; waited += $4; idle += $5; failed += $6
-    if ($2 + 0 > maxd + 0) { maxd = $2; maxwhen = $1; maxturns = $3 }
+    # Seeded on the first row rather than only when a row beats the running
+    # maximum. A history whose longest session is zero seconds never satisfies
+    # the comparison, so maxwhen stayed unset, its %s below printed nothing,
+    # and the line came back one field short -- shifting every field after it
+    # left, so maxturns became a date, last became "0", and bad came back
+    # empty, which put a raw shell error in front of the user.
+    if (maxwhen == "" || $2 + 0 > maxd + 0) { maxd = $2; maxwhen = $1; maxturns = $3 }
     if (first == "") first = $1
     last = $1
   }
