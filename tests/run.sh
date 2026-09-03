@@ -2955,6 +2955,30 @@ is "the wizard writes the colour"     "cyan"       "$CT_COLOR"
 is "the wizard writes the summary"    "off"        "$CT_SUMMARY"
 is "the wizard writes the injection"  "false"      "$CT_INJECT_CONTEXT"
 
+# A broad enough search term can match more zoneinfo entries than `head -25`
+# keeps, closing the pipe on `sort` before it is done writing and sending it
+# SIGPIPE. This machine's own zoneinfo may be too small to reproduce that --
+# a reviewer could not -- so the search is pointed at a synthetic tree large
+# enough to guarantee it instead: 20000 matches reliably overflows the pipe
+# buffer that lets a shorter list slip through unnoticed. The answer after
+# "list" is "local" rather than a real zone, so this does not also depend on
+# the fake tree containing the real answer.
+zs_zoneinfo="$WORK/zs-zoneinfo"
+rm -rf "$zs_zoneinfo"
+mkdir -p "$zs_zoneinfo/Zone"
+seq 1 20000 | awk -v base="$zs_zoneinfo/Zone/City" '{ print base $1 }' | xargs touch
+fresh
+zs_out="$WORK/zone-search.out"
+zs_rc=0
+printf 'off\nlist\nZone\nlocal\nshort\non\n30\n0\noff\noff\non\noff\ncyan\n\nfalse\ny\n' \
+  | CLAUDE_TIMESTAMP_ZONEINFO="$zs_zoneinfo" bash "$SCRIPTS/setup.sh" > "$zs_out" 2>&1 \
+  || zs_rc=$?
+is "the wizard's zone search survives a closed pipe on a large zoneinfo" \
+   "0" "$zs_rc"
+contains "and still reaches the write confirmation" \
+   "Write this configuration?" "$(cat "$zs_out")"
+rm -rf "$zs_zoneinfo"
+
 # Answering off then back on in a fresh run proves the question round-trips
 # rather than only ever moving in one direction.
 fresh 'ENABLED=off'

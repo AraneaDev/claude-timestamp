@@ -20,7 +20,11 @@ CT_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib"
 source "$CT_LIB/config.sh"
 source "$CT_LIB/state.sh"
 
-ZONEINFO="/usr/share/zoneinfo"
+# CLAUDE_TIMESTAMP_ZONEINFO exists so the test suite can point the wizard's
+# zone search at a synthetic tree large enough to reproduce a SIGPIPE that a
+# real machine's own zoneinfo may be too small to trigger; it is not a
+# user-facing setting.
+ZONEINFO="${CLAUDE_TIMESTAMP_ZONEINFO:-/usr/share/zoneinfo}"
 
 # Report filters for --stats, set by --since and --project in main()'s parser.
 # Empty means unfiltered. These configure a report rather than a persisted
@@ -1060,8 +1064,22 @@ wizard() {
       local term
       ask "  Search for" "Europe"; term="$_CT_ANSWER"
       if [ -d "$ZONEINFO" ]; then
+        # `|| true` at the very end of this pipeline: a broad enough search
+        # term can match enough files that `head -25` closes the pipe once it
+        # has its 25 lines, and `sort` -- which may still have more to write
+        # -- gets SIGPIPE for it, even though every line `head` needed had
+        # already been delivered. That makes the pipeline's exit status
+        # nonzero for reasons that have nothing to do with the output being
+        # wrong. This script runs under its own errexit/pipefail (see the top
+        # of the file), so without `|| true`, a search that matched enough
+        # zones would abort the wizard right here, mid-question. A reviewer
+        # could not reproduce this on this machine's own zoneinfo size, but
+        # the hazard is structural rather than size-dependent. Same defect,
+        # same fix, as ct_tool_digest in lib/config.sh, the aggregation in
+        # session-end.sh, and the slowest-tools pass in stats() below.
         find "$ZONEINFO" -type f -path "*$term*" 2>/dev/null \
-          | sed "s|^$ZONEINFO/||" | grep -v '^posix/\|^right/\|\.' | sort | head -25
+          | sed "s|^$ZONEINFO/||" | grep -v '^posix/\|^right/\|\.' | sort | head -25 \
+          || true
       else
         echo "  No zoneinfo database on this machine; type the name directly."
       fi
