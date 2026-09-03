@@ -410,11 +410,20 @@ EOF
       # damaged row's field 7 could be offered as a suggestion and then
       # refused when the reader tried it, since --project filters against
       # the very same guard.
-      known="$(awk -F'\t' '
+      #
+      # It also carries the same `since` clause as those three passes, for a
+      # different reason: this hint exists to point a reader at a project
+      # they can actually retry, and a suggestion --since already excludes is
+      # a dead end -- refused the moment it is tried, with no way to tell
+      # that from a plain typo. It deliberately does NOT carry `want`: a
+      # project filter with no matches is exactly why this hint runs, so
+      # filtering the hint on that same project would empty it out.
+      known="$(awk -F'\t' -v since="${CT_STATS_SINCE:-}" '
         NF < 6 || NF > 8 { next }
         $2 !~ /^[0-9]{1,15}$/ || $3 !~ /^[0-9]{1,15}$/ || $4 !~ /^[0-9]{1,15}$/ ||
         $5 !~ /^[0-9]{1,15}$/ || $6 !~ /^[0-9]{1,15}$/ { next }
         $1 ~ /[[:space:]]/ { next }
+        since != "" && $1 "" < since "" { next }
         NF >= 7 && $7 != "" && $7 != "-" { print $7 }
       ' "$file" | sort -u | tr '\n' ' ')"
       [ -n "$known" ] && echo "  projects recorded: $known"

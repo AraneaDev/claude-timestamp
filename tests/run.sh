@@ -3822,6 +3822,20 @@ contains "filters: the hint names a project a valid row recorded" "real" "$out"
 refutes  "filters: but not one only a damaged row recorded" \
          grep -q "ghost-project" <<< "$out"
 
+# The hint pass shares the NF/timing/whitespace validity guard with its three
+# siblings, but --since is a separate matter from that guard: a row can be
+# perfectly valid and still fall outside --since. Naming its project anyway
+# was a dead end -- retrying the suggestion hit the same "no sessions match",
+# since the project it named is precisely what --since had already excluded.
+{
+  printf '2020-01-01T10:00:00\t3600\t10\t600\t0\t0\told\n'
+} > "$CLAUDE_TIMESTAMP_HISTORY"
+out="$(bash "$SCRIPTS/setup.sh" --stats --since=7d --project=nope 2>&1)"
+contains "filters: a since-and-project miss still explains itself" \
+         "No sessions match" "$out"
+refutes  "filters: but the hint does not suggest a project since excludes" \
+         grep -q "old" <<< "$out"
+
 # Three similar flags: bare --project selects project scope for a setting
 # being WRITTEN; --project=NAME filters --stats; --projects=on|off is the
 # setting itself. Combined with a flag that writes a setting, --project=NAME
