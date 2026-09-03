@@ -1161,6 +1161,25 @@ ct_load_config
 is "--tool-timing is accepted" "on" "$CT_TOOL_TIMING"
 refutes "rejects a non on/off tool-timing value" bash "$SCRIPTS/setup.sh" --tool-timing=sometimes
 
+# The two format flags were the only ones that reached the config file without
+# passing their validator. A name that is neither a preset nor a strftime
+# string is a typo, and writing it means the loader replaces it with the
+# default at the next session start -- hours after the flag reported success.
+refutes "rejects an unusable display format" bash "$SCRIPTS/setup.sh" --display=nonsense
+refutes "rejects an unusable context format" bash "$SCRIPTS/setup.sh" --context=nonsense
+
+# A control character is worse than a typo. write_config interpolates a value
+# into KEY=value with no escaping, so a newline writes a second line that the
+# parser reads back as a real setting -- one the caller never named, and one
+# that lands after the key it came from, so it wins.
+fresh 'ENABLED=on'
+refutes "rejects a newline in a display format" \
+  bash "$SCRIPTS/setup.sh" --display=$'%H:%M\nENABLED=off'
+refutes "rejects a newline in a context format" \
+  bash "$SCRIPTS/setup.sh" --context=$'%H:%M\nENABLED=off'
+ct_load_config
+is "a rejected format cannot smuggle a second setting into the file" "on" "$CT_ENABLED"
+
 fresh
 bash "$SCRIPTS/setup.sh" --marker='%time' >/dev/null
 ct_load_config
