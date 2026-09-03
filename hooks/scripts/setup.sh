@@ -343,14 +343,14 @@ EOF
     $2 !~ /^[0-9]+$/ || $3 !~ /^[0-9]+$/ || $4 !~ /^[0-9]+$/ ||
     $5 !~ /^[0-9]+$/ || $6 !~ /^[0-9]+$/ { next }
     {
-      # seen tracks whether the column exists on any row, not whether its
-      # value differs from "-": a row that recorded PROJECTS=on and found no
-      # project name still carries the column, explicitly, as "-", and that
-      # must still surface the block (rendered as "(unnamed)") -- only a row
-      # with no field 7 at all, from before PROJECTS existed, should not.
-      has7 = (NF >= 7 && $7 != "")
-      p = has7 ? $7 : "-"
-      if (has7) seen = 1
+      # seen tracks whether any row named a real project, not merely whether
+      # field 7 is present: a history where PROJECTS was never turned on, or
+      # where TOOL_TIMING alone put a "-" placeholder in field 7 to hold its
+      # place, must show no block at all -- (unnamed) only belongs to a mixed
+      # history where at least one row names a project and another does not.
+      named = (NF >= 7 && $7 != "" && $7 != "-")
+      p = (NF >= 7 && $7 != "") ? $7 : "-"
+      if (named) seen = 1
       secs[p] += $2; n[p]++
     }
     END {

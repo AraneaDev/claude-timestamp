@@ -3551,10 +3551,16 @@ contains "sections: a slowest-tools block appears"   "slowest tools" "$out"
 contains "sections: summing a tool across sessions"  "2m30s" "$out"
 contains "sections: and its call count"              "8 calls" "$out"
 
-printf '2026-09-01T10:00:00\t3600\t10\t600\t0\t0\t-\tBash:100:5\n' \
-  > "$CLAUDE_TIMESTAMP_HISTORY"
-contains "sections: a dash renders as unnamed" "(unnamed)" \
-         "$(bash "$SCRIPTS/setup.sh" --stats 2>&1)"
+# (unnamed) only belongs to a mixed history: one row names a project, another
+# sits beside it with "-" because it predates PROJECTS or found no name. Both
+# must show up in the same table.
+{
+  printf '2026-09-01T10:00:00\t3600\t10\t600\t0\t0\talpha\tBash:100:5\n'
+  printf '2026-09-02T10:00:00\t1800\t5\t300\t0\t0\t-\tBash:50:3\n'
+} > "$CLAUDE_TIMESTAMP_HISTORY"
+out="$(bash "$SCRIPTS/setup.sh" --stats 2>&1)"
+contains "sections: a dash renders as unnamed" "(unnamed)" "$out"
+contains "sections: beside the real project name it sat next to" "alpha" "$out"
 
 printf '2026-09-01T10:00:00\t3600\t10\t600\t0\t0\n' > "$CLAUDE_TIMESTAMP_HISTORY"
 out="$(bash "$SCRIPTS/setup.sh" --stats 2>&1)"
@@ -3562,6 +3568,19 @@ refutes "sections: no project data means no by-project block" \
         grep -q "by project" <<< "$out"
 refutes "sections: no tool data means no slowest-tools block" \
         grep -q "slowest tools" <<< "$out"
+
+# A history where every row carries "-" -- TOOL_TIMING=on but PROJECTS never
+# turned on, so field 7 holds only a placeholder for field 8 -- must not draw
+# a by-project block of one restated total. The slowest-tools block, which
+# depends only on field 8, is unaffected and must still appear: the two
+# sections are independent of each other.
+printf '2026-09-01T10:00:00\t3600\t10\t600\t0\t0\t-\tBash:100:5\n' \
+  > "$CLAUDE_TIMESTAMP_HISTORY"
+out="$(bash "$SCRIPTS/setup.sh" --stats 2>&1)"
+refutes "sections: an all-dashes history means no by-project block" \
+        grep -q "by project" <<< "$out"
+contains "sections: but the slowest-tools block still appears" \
+         "slowest tools" "$out"
 
 # A damaged entry inside field 8 costs its own tools and nothing else. The
 # row's timings are intact and must still be counted.
