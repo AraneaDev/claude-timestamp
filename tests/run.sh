@@ -3476,16 +3476,28 @@ is "the search stops at home"                       "dim 24h "      "$(layered "
 # file that does not exist, and the slash command is told to say a project
 # pins the setting and is usually committed and shared.
 # write_project_config already resolves both sides for exactly this reason.
+#
+# Git Bash creates a copy rather than a link unless Windows is in developer
+# mode, and a copied home is a different directory that the stop is right to
+# walk past. The premise cannot be staged there, so the pair skips rather than
+# asserting something the platform never set up.
 mkdir -p "$PROJ/home/inside"
-ln -sfn "$PROJ/home" "$PROJ/homelink"
+ln -sfn "$PROJ/home" "$PROJ/homelink" 2>/dev/null
 linked() {
   ( unset CLAUDE_TIMESTAMP_CONFIG
     HOME="$PROJ/homelink"
     ct_load_config "$1"
     printf '%s' "${CT_PROJECT_CONFIG:+found}" )
 }
-is "the search stops at a symlinked home"                "" "$(linked "$PROJ/home")"
-is "and does not treat the account config as a project"  "" "$(linked "$PROJ/home/inside")"
+if [ -L "$PROJ/homelink" ]; then
+  is "the search stops at a symlinked home"                "" "$(linked "$PROJ/home")"
+  is "and does not treat the account config as a project"  "" "$(linked "$PROJ/home/inside")"
+else
+  skip "the search stops at a symlinked home" \
+       "ln -s did not produce a link on this filesystem"
+  skip "and does not treat the account config as a project" \
+       "ln -s did not produce a link on this filesystem"
+fi
 
 refutes "no project config is reported as not found" ct_find_project_config "$PROJ/plain"
 refutes "a missing directory is not searched"        ct_find_project_config "$PROJ/nowhere"
