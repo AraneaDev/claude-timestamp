@@ -236,7 +236,18 @@ ct_read_counter() {
   # away a perfectly good read on the file shape this codebase actually
   # writes. The empty-file case is still covered -- value keeps its `local`
   # initial "" when there is nothing to read.
-  IFS= read -r value < "$file" 2>/dev/null
+  #
+  # `|| :` discards that status without touching the value, and it is
+  # load-bearing rather than decoration. Every caller runs under the hooks'
+  # `set -euo pipefail`, where a failing simple command aborts the script. The
+  # only thing that has ever stopped this line from doing that is bash
+  # clearing errexit inside a command substitution -- which every call site
+  # happens to be. That default is not ours to rely on: BASHOPTS carries
+  # inherit_errexit in from the environment, one `shopt` turns it on, and a
+  # caller that reads a counter as a plain statement never had the protection
+  # at all. Without this, all three cases kill the hook at its first state
+  # read and the plugin goes silent with nothing reported.
+  IFS= read -r value < "$file" 2>/dev/null || :
   case "$value" in ''|*[!0-9]*) printf '0' ;; *) printf '%s' "$value" ;; esac
 }
 
