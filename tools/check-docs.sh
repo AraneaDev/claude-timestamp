@@ -121,6 +121,26 @@ done < <(jq -r '.keys | to_entries[] | select(.value.values) |
                 [$e.key, $e.value.validator, .] | @tsv' schema.json)
 [ "$values_ok" -eq 1 ] && note "every listed value passes its validator"
 
+# An alias is a value the validator accepts that the picker does not offer:
+# ct_is_valid_color takes "off" and "grey" as well as "none" and "gray", and
+# for a while schema.json said neither. commands/timestamps.md calls the schema
+# the only source of truth about what a key may hold and tells the model to
+# refuse anything it does not accept, so a user asking for grey was told grey
+# is not a colour. Held to the same standard as `values`: listed here means the
+# validator really takes it.
+aliases_ok=1
+while IFS="$(printf '\t')" read -r key validator value; do
+  [ -n "$key" ] || continue
+  if ! "$validator" "$value"; then
+    note "$key lists the alias '$value' but $validator rejects it"
+    aliases_ok=0
+    status=1
+  fi
+done < <(jq -r '.keys | to_entries[] | select(.value.aliases) |
+                . as $e | .value.aliases[] |
+                [$e.key, $e.value.validator, .] | @tsv' schema.json)
+[ "$aliases_ok" -eq 1 ] && note "every listed alias passes its validator"
+
 # A preset that names a key the loader does not read, or a value its validator
 # rejects, would write a config the plugin then silently ignores.
 presets_ok=1

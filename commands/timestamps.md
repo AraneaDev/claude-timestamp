@@ -102,6 +102,11 @@ Refuse to write a value `schema.json` does not accept, and say what the
 acceptable ones are. A bad value is not silently ignored: the plugin replaces
 it with the default and complains at the next session start.
 
+A key's `values` is what to offer; its `aliases`, where it has one, are extra
+spellings the plugin also accepts but does not put in a picker. `grey` and
+`off` are aliases of `gray` and `none`, so write what the user asked for rather
+than telling them their spelling is not a colour.
+
 Refuse to pin a timezone when `tz_database` is false in the facts file. That
 machine resolves every IANA name to UTC without saying so, which would show a
 confidently wrong time. `UTC` and `GMT` are fine there, since they need no
