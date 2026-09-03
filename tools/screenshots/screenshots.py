@@ -42,7 +42,7 @@ handles extremely well and a lossy setting would only blur; save_image and
 save_animation are the two functions every shot's output passes through, so a
 future shot cannot quietly stay PNG.
 """
-import fcntl, json, os, pickle, pty, select, struct, stat, subprocess, sys, termios, time
+import fcntl, json, os, pty, select, struct, stat, subprocess, sys, termios, time
 from pathlib import Path
 
 import pyte
@@ -563,7 +563,6 @@ def shot_hero():
         env={"CLAUDE_TIMESTAMP_CONFIG": str(conf)}, record=True,
     )
     (work / "hero.raw").write_bytes(raw)
-    (work / "hero.timeline.pkl").write_bytes(pickle.dumps((timeline, elapsed)))
 
     # Crop past the welcome banner and stop before the status line. The banner
     # carries the account's name, email and organisation, which do not belong
