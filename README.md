@@ -8,7 +8,7 @@
 [![Release](https://img.shields.io/github/v/release/AraneaDev/claude-timestamp)](https://github.com/AraneaDev/claude-timestamp/releases)
 [![Tool page](https://img.shields.io/badge/tool%20page-aranea--development.nl-0b7285)](https://aranea-development.nl/en/tools/claude-timestamp)
 [![CI](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml/badge.svg)](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-956%20passing-2b8a3e)](tests/run.sh)
+[![Tests](https://img.shields.io/badge/tests-1036%20passing-2b8a3e)](tests/run.sh)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-364fc7)](#platform-notes)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
@@ -421,8 +421,17 @@ dropped once there are more than `HISTORY_LIMIT` of them.
 The file holds timings only: five numbers and a date per session. The date is
 in whatever timezone you pinned, the same one the markers use, so a session you
 watched happen on the 22nd is recorded on the 22nd. No message text, no tool
-arguments, and no paths, so nothing in it says what you were working on. Switch
-it off entirely with `HISTORY=off`.
+arguments, and no paths. With `PROJECTS=on` each row also carries the project's
+directory name, never the path above it, and with `TOOL_TIMING=on` a list of
+which tools took how long. Switch the record off entirely with `HISTORY=off`.
+
+With those two settings on, the same file answers which project took the week
+and which tool took the waiting:
+
+```bash
+bash "$CLAUDE_PLUGIN_ROOT/hooks/scripts/setup.sh" --stats --since=7d
+bash "$CLAUDE_PLUGIN_ROOT/hooks/scripts/setup.sh" --stats --project=claude-timestamp
+```
 
 ## When something is wrong
 
@@ -498,7 +507,7 @@ no database.
 ## Development
 
 ```bash
-bash tests/run.sh                                    # 956 assertions, no framework
+bash tests/run.sh                                    # 1036 assertions, no framework
 shellcheck -S style -e SC1091 hooks/scripts/**/*.sh  # clean
 bash tools/check-docs.sh                             # README against the code
 ```
