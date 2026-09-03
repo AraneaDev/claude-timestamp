@@ -379,10 +379,13 @@ ROWS
   # costing me", which is the question a hundred rows can answer and one
   # cannot.
   rows="$(awk -F'\t' '
-    # Same validity test again, for the same reason.
-    NF < 8 || $8 == "" { next }
+    # The same shared validity guard as the other two passes, plus one more
+    # rule this pass alone needs: field 8 must actually be present, since a
+    # row can be valid by the shared guard and still carry no tool digest.
+    NF < 6 || NF > 8 { next }
     $2 !~ /^[0-9]+$/ || $3 !~ /^[0-9]+$/ || $4 !~ /^[0-9]+$/ ||
     $5 !~ /^[0-9]+$/ || $6 !~ /^[0-9]+$/ { next }
+    NF < 8 || $8 == "" { next }
     {
       c = split($8, entries, ",")
       for (i = 1; i <= c; i++) {

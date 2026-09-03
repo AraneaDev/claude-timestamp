@@ -3592,6 +3592,22 @@ refutes  "sections: and does not mark the row unreadable" grep -q "unreadable" <
 contains "sections: the usable tool entry survives"       "1m40s" "$out"
 refutes  "sections: the damaged ones do not appear"       grep -q "broken" <<< "$out"
 
+# A row with a 9th field is damaged by the shared validity guard -- reported
+# as unreadable by the totals above -- and must be excluded by BOTH
+# breakdowns below it, not just the by-project one. The slowest-tools pass
+# had its own upper bound missing, which let a malformed row's tool data
+# leak into that table while the same row was being counted as unreadable.
+{
+  printf '2026-09-01T10:00:00\t3600\t10\t600\t0\t0\tgamma\tWrite:20:2\n'
+  printf '2026-09-02T10:00:00\t1800\t5\t300\t0\t0\tdelta\tEdit:30:4\textra\n'
+} > "$CLAUDE_TIMESTAMP_HISTORY"
+out="$(bash "$SCRIPTS/setup.sh" --stats 2>&1)"
+contains "sections: an over-long row is counted as unreadable" "1 unreadable" "$out"
+contains "sections: the well-formed row's project still appears" "gamma" "$out"
+refutes  "sections: the over-long row's project does not appear" grep -q "delta" <<< "$out"
+contains "sections: the well-formed row's tool still appears" "Write" "$out"
+refutes  "sections: the over-long row's tool does not appear" grep -q "Edit" <<< "$out"
+
 echo
 echo "project configuration"
 
