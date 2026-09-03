@@ -5794,15 +5794,19 @@ is "digest: a separator inside a tool name is neutralised" \
 # to "unknown" before it ever reaches the log, and awk's default field
 # splitting treats a tab the same as a space, so a raw tab can never actually
 # land inside field 1 either way. The gsub covers it anyway, as a second line
-# of defense against a future writer that relaxes that guard. Under the
-# default separator, field splitting has already consumed the tab by the time
-# gsub runs, so this fixture cannot actually exercise the \t branch of that
-# gsub -- $1 is already just "Tabbed" before gsub sees it. The \t stays in the
-# character class regardless, for a future where the separator or the writer
-# changes and that branch becomes reachable.
+# of defense against a future writer that relaxes that guard, but under the
+# default separator field splitting has already consumed the tab by the time
+# gsub runs -- $1 is already just "Tabbed" before gsub sees it -- so no
+# fixture reaching ct_tool_digest through awk's own field splitting can
+# exercise the \t branch of that gsub; asserting the gsub's output on one
+# would pass whether or not that branch worked, which is exactly the defect
+# this replaces. What IS observable is the field split itself: a tab in the
+# middle of what was meant to be one field pushes "4.000" into $3 instead of
+# $2, so the duration check on $2 rejects the line and it contributes nothing
+# at all, tab or no tab.
 printf 'Tabbed\tName 4.000 ok\n' > "$log"
-refutes "digest: a tab cannot leak a second field into the digest" \
-        grep -q $'\t' <<< "$(ct_tool_digest "$log")"
+is "digest: a tab splits the line instead of landing in a tool name" \
+   "" "$(ct_tool_digest "$log")"
 
 : > "$log"
 is "digest: an empty log yields nothing" "" "$(ct_tool_digest "$log")"
