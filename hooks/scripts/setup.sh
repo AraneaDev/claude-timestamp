@@ -488,8 +488,35 @@ conf_value() {
 #
 # The temp file sits beside the target rather than in a temp directory, because
 # a rename across filesystems is not atomic and is not even the same syscall.
+# That is also why the link is resolved before the temp name is chosen: the
+# file a link names can live on another filesystem than the link itself.
+#
+# A symlinked target is followed to the file it names rather than renamed over.
+# Renaming replaces the name, so an unresolved link is itself replaced by a
+# regular file: the wizard reports success, and the file the link pointed at
+# keeps the old settings until the next relink throws the new ones away.
+# Symlinking the config into a dotfiles repository is the ordinary way to
+# version it, so that detachment is silent and costs the user their settings.
+#
+# readlink -f resolves a chain in one call but is GNU-only, and this has to run
+# on macOS and Git Bash, so the chain is walked here. A relative target is
+# relative to the directory the link sits in. The hop limit ends a symlink
+# loop; a target still unresolved after it is refused rather than written over,
+# because writing at that point would replace the last link in the loop.
 _ct_write_atomic() {
-  local file="$1" tmp
+  local file="$1" tmp target hops=0
+  while [ -L "$file" ]; do
+    if [ "$hops" -ge 40 ]; then return 1; fi
+    target="$(readlink "$file")" || return 1
+    case "$target" in
+      /*) file="$target" ;;
+      *)  case "$file" in
+            */*) file="${file%/*}/$target" ;;
+            *)   file="$target" ;;
+          esac ;;
+    esac
+    hops=$((hops + 1))
+  done
   tmp="$file.$$"
   cat > "$tmp" || { rm -f "$tmp" 2>/dev/null; return 1; }
   mv "$tmp" "$file" || { rm -f "$tmp" 2>/dev/null; return 1; }
