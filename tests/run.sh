@@ -3704,6 +3704,38 @@ out="$(bash "$SCRIPTS/setup.sh" --stats --project=nope 2>&1)"
 contains "filters: an unmatched project says so"      "No sessions match in nope" "$out"
 contains "filters: and names the ones that do exist"  "alpha" "$out"
 
+# Three similar flags: bare --project selects project scope for a setting
+# being WRITTEN; --project=NAME filters --stats; --projects=on|off is the
+# setting itself. Combined with a flag that writes a setting, --project=NAME
+# used to silently pick the --stats action over the write and discard it with
+# no error, and --project=on -- a plausible typo for --projects=on -- used to
+# search for a project literally named "on" instead of being refused.
+refutes "filters: --project=NAME cannot be combined with a setting to write" \
+        bash "$SCRIPTS/setup.sh" --config="$WORK/f-ambiguous.conf" \
+        --project=myrepo --history=on
+out="$(bash "$SCRIPTS/setup.sh" --config="$WORK/f-ambiguous.conf" \
+       --project=myrepo --history=on 2>&1)"
+contains "filters: and the message distinguishes the three forms" \
+         "does not write a setting" "$out"
+
+refutes "filters: --project=on is refused rather than searched for" \
+        bash "$SCRIPTS/setup.sh" --project=on
+out="$(bash "$SCRIPTS/setup.sh" --project=on 2>&1)"
+contains "filters: and suggests --projects= instead" "--projects=on" "$out"
+refutes "filters: --project=off is refused the same way" \
+        bash "$SCRIPTS/setup.sh" --project=off
+
+# The combinations that must still work.
+rm -rf "$WORK/f-still-project"; mkdir -p "$WORK/f-still-project"
+( cd "$WORK/f-still-project" && unset CLAUDE_TIMESTAMP_CONFIG && HOME="$WORK/f-still-home" \
+    bash "$SCRIPTS/setup.sh" --project --history=on >/dev/null 2>&1 )
+is "filters: bare --project still works with a setting to write" \
+   "1" "$(grep -c '^HISTORY=on' "$WORK/f-still-project/.claude/claude-timestamp.conf")"
+asserts "filters: --projects=on alone still works" \
+        bash "$SCRIPTS/setup.sh" --config="$WORK/f-still-projects.conf" --projects=on
+asserts "filters: --project=NAME alone with --stats still works" \
+        bash "$SCRIPTS/setup.sh" --stats --project=alpha
+
 out="$(bash "$SCRIPTS/setup.sh" --stats --since=soon 2>&1)"
 contains "filters: an unparseable since is refused"   "--since takes" "$out"
 refutes  "filters: and is not silently ignored" \

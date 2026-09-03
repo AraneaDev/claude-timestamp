@@ -1359,6 +1359,30 @@ main() {
     shift
   done
 
+  # Three flags share a name and nothing else: bare --project selects
+  # project scope for a setting being WRITTEN; --project=NAME is a --stats
+  # filter; --projects=on|off is the setting that turns recording project
+  # names on or off. Left unchecked, --project=NAME combined with a setting
+  # to write silently picked the --stats action over the write, discarding
+  # the write with no error -- and no project is plausibly named "on" or
+  # "off", so that value is almost always a typo for --projects=.
+  if [ -n "${CT_STATS_PROJECT:-}" ]; then
+    case "$CT_STATS_PROJECT" in
+      on|off)
+        echo "--project=$CT_STATS_PROJECT looks like a typo for --projects=$CT_STATS_PROJECT." >&2
+        echo "--project=NAME filters --stats by name; --projects=on|off is the setting" >&2
+        echo "that turns recording project names on or off. No project is named '$CT_STATS_PROJECT'." >&2
+        exit 2
+        ;;
+    esac
+    if [ "$project_scope" = "1" ] || [ "$named_count" -gt 0 ]; then
+      echo "--project=$CT_STATS_PROJECT filters --stats; it does not write a setting." >&2
+      echo "Use bare --project to write a setting for the current project, or" >&2
+      echo "--projects=on|off to change whether project names are recorded." >&2
+      exit 2
+    fi
+  fi
+
   if [ "$action" = "show" ]; then show_config; exit 0; fi
   if [ "$action" = "doctor" ]; then doctor; exit $?; fi
   if [ "$action" = "stats" ]; then stats; exit $?; fi
