@@ -291,6 +291,32 @@ else
     "write_config writes every key CT_FLAG_TABLE names"
 fi
 
+echo "show_config displays every key the flag table names"
+# show_config is the second place, besides write_config, that claims to list
+# every setting, and had the identical defect: PROJECTS reached
+# CT_FLAG_TABLE and write_config's heredoc but never show_config, so --show
+# could not confirm the setting took without reading the config file by
+# hand. Modelled on the write-config-completeness gate above: extract
+# show_config's own body by its braces, and check that each flag table
+# row's variable is actually referenced somewhere in it. The boundary after
+# the var name rules out CT_ELAPSED matching inside CT_ELAPSED_COLOR, and
+# CT_HISTORY matching inside CT_HISTORY_LIMIT, which a plain substring test
+# would miss.
+sc_body="$(sed -n '/^show_config() {$/,/^}$/p' hooks/scripts/setup.sh | sed '1d;$d')"
+sc_missing=""
+while read -r ft_var; do
+  [ -n "$ft_var" ] || continue
+  printf '%s\n' "$sc_body" | grep -qE '\$\{?'"$ft_var"'([^A-Za-z0-9_]|$)' ||
+    sc_missing="$sc_missing $ft_var"
+done < <(printf '%s\n' "$ft_rows" | awk '{ print $3 }')
+if [ -n "$sc_missing" ]; then
+  gate show-config-completeness 0 \
+    "show_config never displays:$sc_missing"
+else
+  gate show-config-completeness 1 \
+    "show_config displays every key CT_FLAG_TABLE names"
+fi
+
 echo "lint file list"
 # The shellcheck and bash -n steps name their files by hand, so a new script
 # is linted by nobody until someone remembers to add it. Compare the tracked

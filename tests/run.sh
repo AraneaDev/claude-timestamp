@@ -1591,6 +1591,14 @@ contains "--show prints the config path" "$(ct_tilde "$CLAUDE_TIMESTAMP_CONFIG")
 # a second surface that also claims to list every setting, and was left behind.
 fresh 'MARKER=%time{ %elapsed}'
 contains "--show mentions the marker template" '%time{ %elapsed}' "$(bash "$SCRIPTS/setup.sh" --show)"
+
+# PROJECTS reached CT_FLAG_TABLE, write_config and the README, but never
+# show_config: every other flag table key has a row there, PROJECTS did not,
+# so there was no way to confirm the setting took without reading the config
+# file by hand.
+fresh 'PROJECTS=on'
+contains "--show mentions PROJECTS" "on" \
+  "$(bash "$SCRIPTS/setup.sh" --show | grep -i project)"
 contains "--help lists the flags" "--elapsed" "$(bash "$SCRIPTS/setup.sh" --help)"
 bash "$SCRIPTS/setup.sh" --date-rollover=off >/dev/null
 ct_load_config

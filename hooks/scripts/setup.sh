@@ -980,6 +980,7 @@ show_config() {
   echo "  Subagents       $CT_SUBAGENTS"
   echo "  Tool timing     $CT_TOOL_TIMING"
   echo "  History         $CT_HISTORY (keeping $CT_HISTORY_LIMIT)"
+  echo "  Projects        $CT_PROJECTS"
   echo "  Inject context  $CT_INJECT_CONTEXT"
   echo
   echo -n "  Preview         "; preview
