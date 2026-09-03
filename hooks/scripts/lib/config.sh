@@ -785,10 +785,15 @@ ct_history_path() {
 # A working directory reduced to a bare project name, for the history's
 # optional project column.
 #
-# The walk is the shape ct_find_project_config uses and is bounded the same
-# way: 40 levels is far past any real checkout, and an unbounded loop on a
-# path that never reaches / would hang a hook. No subprocess, so this costs
-# nothing beyond the directory tests themselves, and it runs once per session.
+# The walk is the shape ct_find_project_config uses, and stops at the same
+# two boundaries: $HOME, because a .git there belongs to a dotfiles checkout
+# rather than to whatever project the session is actually in, and 40 levels,
+# far past any real checkout, so an unbounded loop on a path that never
+# reaches / cannot hang a hook. No subprocess, so this costs nothing beyond
+# the directory tests themselves, and it runs once per session -- unlike
+# ct_find_project_config, the $HOME comparison here is a plain string
+# comparison rather than one resolved through a symlink, since resolving one
+# would need the subprocess this function promises not to spend.
 #
 # Only ever the basename. The parent directories are the part of a path that
 # says who you work for and what you call your clients, and none of it belongs
@@ -817,14 +822,27 @@ _ct_project_basename() {
 }
 
 ct_project_name() {
-  local dir="$1" steps=0 base next
+  local dir="$1" steps=0 base next home
   case "$dir" in
     "" | "/") printf '%s' '-'; return 0 ;;
   esac
   # Trailing slashes would make the basename empty, and "/a/b/" and "/a/b" are
   # the same directory.
   while [ "${dir}" != "/" ] && [ "${dir%/}" != "$dir" ]; do dir="${dir%/}"; done
+  # $HOME, trailing slash stripped the same way, so the comparison below
+  # cannot miss on that alone. Plain string comparison, not the resolved-
+  # symlink comparison ct_find_project_config uses: this function promises no
+  # subprocess, and $(cd ... && pwd -P) is one.
+  home="${HOME:-}"
+  while [ "${home}" != "/" ] && [ -n "$home" ] && [ "${home%/}" != "$home" ]; do home="${home%/}"; done
   while [ -n "$dir" ] && [ "$dir" != "/" ] && [ "$steps" -lt 40 ]; do
+    # Stops the walk before it ever looks at $HOME, the same boundary
+    # ct_find_project_config stops at. A git-managed home directory (a common
+    # dotfiles setup) puts a .git right there, and without this the walk
+    # climbed past a real "no checkout here" answer and reported the home
+    # directory's own basename -- ordinarily the username -- into a history
+    # column the README promises holds no paths.
+    [ -n "$home" ] && [ "$dir" = "$home" ] && break
     if [ -d "$dir/.git" ] || [ -f "$dir/.git" ]; then
       base="${dir##*/}"
       _ct_project_basename "$base"

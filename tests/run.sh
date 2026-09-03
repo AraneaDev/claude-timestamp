@@ -5736,6 +5736,20 @@ else
        "TMPDIR is inside a git repository, so there is always one above"
 fi
 
+# A git-managed home directory (a common dotfiles setup) puts a .git right at
+# $HOME. ct_project_name's own comment says it reuses the shape of
+# ct_find_project_config, which stops its walk at $HOME -- but the walk here
+# never did, so a session under $HOME but outside a real checkout climbed all
+# the way up to $HOME/.git and reported the home directory's own basename,
+# which is ordinarily the username. The README promises the history holds no
+# paths; a username is exactly what that promise exists to keep out.
+fake_home="$WORK/fake-home-$$"
+rm -rf "$fake_home"
+mkdir -p "$fake_home/.git" "$fake_home/work"
+is "project: the walk stops at \$HOME and does not report its basename" \
+   "work" "$(HOME="$fake_home" ct_project_name "$fake_home/work")"
+rm -rf "$fake_home"
+
 rm -rf "$proj"
 
 echo "tool digest"
