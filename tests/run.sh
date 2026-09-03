@@ -5531,6 +5531,13 @@ is "project: a tab in the directory name becomes an underscore" \
 is "project: a newline in the directory name becomes an underscore" \
    "nl_repo" "$(ct_project_name "$proj/$nl_repo")"
 
+# "-" is what ct_project_name itself returns for "no project at all", so a
+# checkout that happens to be named "-" must not come out the same way: every
+# reader of the history's project column treats "-" as the absent sentinel.
+mkdir -p "$proj/-/.git"
+is "project: a repository literally named \"-\" does not collide with the unnamed sentinel" \
+   "_" "$(ct_project_name "$proj/-")"
+
 # The two fallback cases below need no repository ANYWHERE above the fixture,
 # and that is a property of wherever TMPDIR points rather than of anything this
 # suite controls. Under a TMPDIR inside a checkout the walk correctly finds
@@ -5543,15 +5550,20 @@ while [ -n "$pn_dir" ] && [ "$pn_dir" != "/" ]; do
   if [ -d "$pn_dir/.git" ] || [ -f "$pn_dir/.git" ]; then pn_clean=0; break; fi
   pn_dir="${pn_dir%/*}"
 done
+mkdir -p "$proj/loose/-"
 if [ "$pn_clean" -eq 1 ]; then
   is "project: no repository above falls back to the directory itself" \
      "sub" "$(ct_project_name "$proj/loose/sub")"
   is "project: a cwd that does not exist still yields its own basename" \
      "gone" "$(ct_project_name "$proj/gone")"
+  is "project: a non-repository directory literally named \"-\" does not collide either" \
+     "_" "$(ct_project_name "$proj/loose/-")"
 else
   skip "project: no repository above falls back to the directory itself" \
        "TMPDIR is inside a git repository, so there is always one above"
   skip "project: a cwd that does not exist still yields its own basename" \
+       "TMPDIR is inside a git repository, so there is always one above"
+  skip "project: a non-repository directory literally named \"-\" does not collide either" \
        "TMPDIR is inside a git repository, so there is always one above"
 fi
 

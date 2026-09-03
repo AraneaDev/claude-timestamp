@@ -801,6 +801,21 @@ ct_history_path() {
 # data. Neutralised here, at the producer, the same way ct_tool_digest already
 # neutralises its own separators, and through parameter expansion rather than a
 # subprocess, matching the no-subprocess promise above.
+# A real basename, sanitised for the history row: tab and newline neutralised
+# the same way ct_tool_digest neutralises its own separators, and -- since
+# "-" is what every reader of this column treats as the absent-project
+# sentinel returned by ct_project_name itself -- a basename that is exactly
+# "-" mapped away from that value too. A checkout named "-" would otherwise
+# be indistinguishable from having no project at all: it would bucket into
+# "(unnamed)" in --stats, and if it were the only project on record the
+# by-project block would be suppressed entirely, since ct_project_name's own
+# genuine "no project" case is spelled the same way.
+_ct_project_basename() {
+  local b="${1//[$'\t\r\n']/_}"
+  [ "$b" = "-" ] && b="_"
+  printf '%s' "$b"
+}
+
 ct_project_name() {
   local dir="$1" steps=0 base next
   case "$dir" in
@@ -812,7 +827,7 @@ ct_project_name() {
   while [ -n "$dir" ] && [ "$dir" != "/" ] && [ "$steps" -lt 40 ]; do
     if [ -d "$dir/.git" ] || [ -f "$dir/.git" ]; then
       base="${dir##*/}"
-      printf '%s' "${base//[$'\t\r\n']/_}"
+      _ct_project_basename "$base"
       return 0
     fi
     next="${dir%/*}"
@@ -831,8 +846,8 @@ ct_project_name() {
   while [ "${dir}" != "/" ] && [ "${dir%/}" != "$dir" ]; do dir="${dir%/}"; done
   case "$dir" in
     "" | "/") printf '%s' '-' ;;
-    */*)      base="${dir##*/}"; printf '%s' "${base//[$'\t\r\n']/_}" ;;
-    *)        printf '%s' "${dir//[$'\t\r\n']/_}" ;;
+    */*)      base="${dir##*/}"; _ct_project_basename "$base" ;;
+    *)        _ct_project_basename "$dir" ;;
   esac
 }
 
