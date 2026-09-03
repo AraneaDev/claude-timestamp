@@ -3498,6 +3498,28 @@ lacks    "stats: a mixed file prints no shell error"       "integer expression" 
 contains "stats: and still reports the true longest"       "1m40s"              "$out"
 contains "stats: and counts both rows"                     "sessions        2"  "$out"
 
+echo "stats reads a widened row"
+
+sw() { bash "$SCRIPTS/setup.sh" --stats 2>&1; }
+
+printf '2026-09-01T10:00:00\t3600\t10\t600\t0\t0\tone\tBash:100:5\n' \
+  > "$CLAUDE_TIMESTAMP_HISTORY"
+printf '2026-09-02T10:00:00\t1800\t5\t300\t0\t0\n' \
+  >> "$CLAUDE_TIMESTAMP_HISTORY"
+out="$(sw)"
+contains "reader: counts both a widened and a plain row" "sessions        2" "$out"
+refutes  "reader: and calls neither one damaged" grep -q "unreadable" <<< "$out"
+
+printf '2026-09-01T10:00:00\t3600\t10\t600\t0\n' > "$CLAUDE_TIMESTAMP_HISTORY"
+contains "reader: five fields is still damage" "unreadable" "$(sw)"
+
+printf '2026-09-01T10:00:00\t3600\t10\t600\t0\t0\ta\tb\tc\n' > "$CLAUDE_TIMESTAMP_HISTORY"
+contains "reader: nine fields is damage" "unreadable" "$(sw)"
+
+printf '2026-09-01T10:00:00\t3600\tten\t600\t0\t0\n' > "$CLAUDE_TIMESTAMP_HISTORY"
+contains "reader: a non-numeric timing field is damage the count alone missed" \
+         "unreadable" "$(sw)"
+
 bash "$SCRIPTS/setup.sh" --history=off --history-limit=50 >/dev/null
 ct_load_config
 is "--history is accepted"       "off" "$CT_HISTORY"

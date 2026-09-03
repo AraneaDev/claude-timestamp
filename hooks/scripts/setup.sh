@@ -264,10 +264,14 @@ stats() {
   local n total turns waited idle failed maxd maxwhen maxturns first last bad
   read -r n total turns waited idle failed maxd maxwhen maxturns first last bad <<EOF
 $(awk -F'\t' '
-  # Six fields, or the row is not a session. A partial write or a hand edit
-  # used to shift every field after the damaged one, which printed a total
-  # that was wrong rather than a message saying the file was.
-  NF != 6 { bad++; next }
+  # Six to eight fields, the last two being optional columns a row carries
+  # only when the setting that fills them was on. Widening the count alone
+  # would weaken the check, so the timings are checked for being timings:
+  # a partially written line usually still lands on some field count, and
+  # only this catches that.
+  NF < 6 || NF > 8 { bad++; next }
+  $2 !~ /^[0-9]+$/ || $3 !~ /^[0-9]+$/ || $4 !~ /^[0-9]+$/ ||
+  $5 !~ /^[0-9]+$/ || $6 !~ /^[0-9]+$/ { bad++; next }
   {
     n++; total += $2; turns += $3; waited += $4; idle += $5; failed += $6
     # Seeded on the first row rather than only when a row beats the running
