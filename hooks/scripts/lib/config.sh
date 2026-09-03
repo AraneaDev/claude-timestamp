@@ -794,6 +794,41 @@ ct_project_name() {
   esac
 }
 
+# One session's tool log reduced to the history row's tool column:
+# Name:seconds:calls, comma separated, worst first.
+#
+# Whole seconds. The per-call millisecond precision the log keeps is what makes
+# a single slow call findable; summed over a session and then over a hundred
+# sessions it is noise, and dropping it keeps the field readable by eye, which
+# is the property /timestamps depends on.
+#
+# Eight tools, where the session summary keeps three. Three is right for "what
+# made this session slow", which wants a headline. This field feeds totals
+# across every recorded session, and a top-three cut biases those totals toward
+# whichever tools place in a top three often rather than toward the ones that
+# actually cost the most.
+#
+# A comma or colon in a tool name would split a field that is parsed on both.
+# No tool is named that way today, MCP names being mcp__server__tool, but the
+# format should not depend on that staying true.
+ct_tool_digest() {
+  local file="$1"
+  [ -n "$file" ] && [ -s "$file" ] || return 0
+  awk -F'\t' '
+    {
+      name = $1
+      gsub(/[,:\t]/, "_", name)
+      sum[name] += $2 + 0
+      n[name]++
+    }
+    END {
+      for (t in sum) printf "%018d\t%s\t%d\n", sum[t], t, n[t]
+    }' "$file" \
+  | sort -rn \
+  | head -8 \
+  | awk -F'\t' '{ printf "%s%s:%d:%d", (NR > 1 ? "," : ""), $2, $1 + 0, $3 }'
+}
+
 # Machine-level facts, published for whoever configures the plugin from inside
 # Claude Code so they need no subprocess to learn them. Only things that cannot
 # be read out of the config files belong here: the effective settings do not,

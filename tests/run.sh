@@ -5261,6 +5261,38 @@ fi
 
 rm -rf "$proj"
 
+echo "tool digest"
+
+log="$WORK/digest.log"
+printf 'Bash\t12.500\tok\nRead\t0.250\tok\nBash\t7.500\tok\n' > "$log"
+is "digest: sums per tool and sorts worst first" \
+   "Bash:20:2,Read:0:1" "$(ct_tool_digest "$log")"
+
+printf 'Weird,Name\t3.000\tok\nOther:Tool\t2.000\tok\n' > "$log"
+is "digest: a separator inside a tool name is neutralised" \
+   "Weird_Name:3:1,Other_Tool:2:1" "$(ct_tool_digest "$log")"
+
+# A tab cannot reach field 1 through the log's own writer, which is tab
+# separated, but the gsub covers all three separators and the test says so.
+printf 'Tabbed\tName\t4.000\tok\n' > "$log"
+refutes "digest: a tab cannot leak a second field into the digest" \
+        grep -q $'\t' <<< "$(ct_tool_digest "$log")"
+
+: > "$log"
+is "digest: an empty log yields nothing" "" "$(ct_tool_digest "$log")"
+is "digest: a missing log yields nothing" "" "$(ct_tool_digest "$WORK/no-such-log")"
+
+: > "$log"
+for i in 1 2 3 4 5 6 7 8 9 10; do printf 'T%s\t%s.000\tok\n' "$i" "$i" >> "$log"; done
+is "digest: keeps at most eight tools" \
+   "8" "$(ct_tool_digest "$log" | awk -F',' '{print NF}')"
+is "digest: and keeps the costliest ones" \
+   "T10:10:1" "$(ct_tool_digest "$log" | cut -d, -f1)"
+
+printf 'Bash\tnot-a-number\tok\n' > "$log"
+is "digest: a row with no usable duration contributes nothing" \
+   "Bash:0:1" "$(ct_tool_digest "$log")"
+
 echo
 echo "----"
 printf '%d passed, %d failed\n' "$PASS" "$FAIL"
