@@ -279,6 +279,19 @@ ct_close_turn() {
   # nothing to contribute. It is still closed: it is over either way.
   if [ "$ended" -gt "$started" ]; then
     printf '%s' "$(( $(ct_read_counter "${state_file}.wait") + ended - started ))" > "${state_file}.wait"
+  else
+    # ...but it is not closed at that earlier time. The end passed in here is
+    # the last message drawn on screen, and a turn that drew nothing at all --
+    # straight into a long tool call, then an interrupt -- leaves that pointing
+    # at the PREVIOUS turn. ct_record_away measures the user's break from
+    # .closed, so stamping it with a time before this turn even opened hands
+    # the gap this turn's entire duration on top of the real break: twenty
+    # minutes spent watching a build, reported as twenty minutes away.
+    #
+    # The turn still contributes no waiting time, because none was observed.
+    # Closing at its own start is simply the earliest moment that was
+    # certainly not a gap.
+    ended="$started"
   fi
   printf '%s' "$ended" > "${state_file}.closed"
   return 0
