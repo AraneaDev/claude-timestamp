@@ -5321,6 +5321,52 @@ printf 'Bash\tnot-a-number\tok\n' > "$log"
 is "digest: a row with no usable duration contributes nothing" \
    "Bash:0:1" "$(ct_tool_digest "$log")"
 
+echo "history columns at session end"
+
+hc_run() {  # hc_run <config lines> ; plants one turn and ends the session
+  local sid="hc-$$-$RANDOM"
+  printf '%s\n' "$1" > "$CLAUDE_TIMESTAMP_CONFIG"
+  : > "$CLAUDE_TIMESTAMP_HISTORY"
+  local sf; sf="$(ct_state_file "$sid")"
+  printf '%s' "$(( $(date +%s) - 100 ))" > "${sf}.start"
+  printf '1'   > "${sf}.turns"
+  printf '40'  > "${sf}.wait"
+  printf '0'   > "${sf}.idle"
+  printf 'Bash\t12.500\tok\nRead\t0.250\tok\n' > "${sf}.tools"
+  printf '{"session_id":"%s","cwd":"%s"}' "$sid" "$2" \
+    | bash "$SCRIPTS/session-end.sh" >/dev/null 2>&1
+}
+
+hc_repo="$WORK/hc-repo"
+mkdir -p "$hc_repo/.git"
+
+hc_run "PROJECTS=off"$'\n'"TOOL_TIMING=off" "$hc_repo"
+is "columns: both off writes six fields" \
+   "6" "$(awk -F'\t' 'NR==1{print NF}' "$CLAUDE_TIMESTAMP_HISTORY")"
+
+hc_run "PROJECTS=on"$'\n'"TOOL_TIMING=off" "$hc_repo"
+is "columns: PROJECTS on writes the project" \
+   "hc-repo" "$(cut -f7 "$CLAUDE_TIMESTAMP_HISTORY")"
+
+hc_run "PROJECTS=off"$'\n'"TOOL_TIMING=on" "$hc_repo"
+is "columns: TOOL_TIMING on writes the digest" \
+   "Bash:12:1,Read:0:1" "$(cut -f8 "$CLAUDE_TIMESTAMP_HISTORY")"
+is "columns: with no project recorded beside it" \
+   "-" "$(cut -f7 "$CLAUDE_TIMESTAMP_HISTORY")"
+
+# The regression at state.sh:402, in the one place it can come back.
+hc_run "SUMMARY=off"$'\n'"TOOL_TIMING=on"$'\n'"PROJECTS=on" "$hc_repo"
+is "columns: SUMMARY=off still records the row" \
+   "1" "$(wc -l < "$CLAUDE_TIMESTAMP_HISTORY" | tr -d ' ')"
+is "columns: and still records the tool digest" \
+   "Bash:12:1,Read:0:1" "$(cut -f8 "$CLAUDE_TIMESTAMP_HISTORY")"
+
+hc_run "PROJECTS=on"$'\n'"TOOL_TIMING=on"$'\n'"HISTORY=off" "$hc_repo"
+is "columns: HISTORY=off records nothing at all" \
+   "0" "$(wc -c < "$CLAUDE_TIMESTAMP_HISTORY" | tr -d ' ')"
+
+rm -rf "$hc_repo"
+
 echo
 echo "----"
 printf '%d passed, %d failed\n' "$PASS" "$FAIL"

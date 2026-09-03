@@ -101,7 +101,19 @@ fi
 # something to work from once the session is gone. Independent of SUMMARY:
 # they are separate settings and share only the counters underneath.
 if [ "$CT_HISTORY" = "on" ] && [ "$_CT_START" -gt 0 ] && [ "$_CT_TURNS" -gt 0 ]; then
-  ct_history_append "$total" "$_CT_TURNS" "$_CT_WAIT" "$_CT_IDLE" "$failed"
+  # Each column is gated on the setting that fills it and on nothing else.
+  #
+  # In particular the digest is gated on TOOL_TIMING alone, never on SUMMARY.
+  # The aggregation above shares this log and does test SUMMARY, because it
+  # feeds a line printed on screen. This one feeds the history, which is a
+  # separate setting: see state.sh:402 for what coupling the two cost the
+  # last time it happened.
+  hist_project=""
+  [ "$CT_PROJECTS" = "on" ] && hist_project="$(ct_project_name "$cwd")"
+  hist_tools=""
+  [ "$CT_TOOL_TIMING" = "on" ] && hist_tools="$(ct_tool_digest "$log")"
+  ct_history_append "$total" "$_CT_TURNS" "$_CT_WAIT" "$_CT_IDLE" "$failed" \
+    "$hist_project" "$hist_tools"
 fi
 
 ct_clear_state "$session_id"
