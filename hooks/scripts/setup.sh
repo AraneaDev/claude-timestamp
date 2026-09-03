@@ -310,7 +310,7 @@ $(awk -F'\t' -v since="${CT_STATS_SINCE:-}" -v want="${CT_STATS_PROJECT:-}" '
   # Filtered rows are skipped, not counted as unreadable: they were read
   # fine, they simply fall outside what was asked for.
   since != "" && $1 "" < since "" { next }
-  want  != "" && ((NF >= 7 && $7 != "" ? $7 : "-") != want) { next }
+  want  != "" && ((NF >= 7 && $7 != "" ? $7 : "-") "" != want "") { next }
   {
     n++; total += $2; turns += $3; waited += $4; idle += $5; failed += $6
     # Seeded on the first row rather than only when a row beats the running
@@ -407,7 +407,7 @@ EOF
     $2 !~ /^[0-9]+$/ || $3 !~ /^[0-9]+$/ || $4 !~ /^[0-9]+$/ ||
     $5 !~ /^[0-9]+$/ || $6 !~ /^[0-9]+$/ { next }
     since != "" && $1 "" < since "" { next }
-    want  != "" && ((NF >= 7 && $7 != "" ? $7 : "-") != want) { next }
+    want  != "" && ((NF >= 7 && $7 != "" ? $7 : "-") "" != want "") { next }
     {
       # seen tracks whether any row named a real project, not merely whether
       # field 7 is present: a history where PROJECTS was never turned on, or
@@ -452,7 +452,7 @@ ROWS
     $2 !~ /^[0-9]+$/ || $3 !~ /^[0-9]+$/ || $4 !~ /^[0-9]+$/ ||
     $5 !~ /^[0-9]+$/ || $6 !~ /^[0-9]+$/ { next }
     since != "" && $1 "" < since "" { next }
-    want  != "" && ((NF >= 7 && $7 != "" ? $7 : "-") != want) { next }
+    want  != "" && ((NF >= 7 && $7 != "" ? $7 : "-") "" != want "") { next }
     NF < 8 || $8 == "" { next }
     {
       c = split($8, entries, ",")

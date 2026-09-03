@@ -3736,6 +3736,38 @@ asserts "filters: --projects=on alone still works" \
 asserts "filters: --project=NAME alone with --stats still works" \
         bash "$SCRIPTS/setup.sh" --stats --project=alpha
 
+# awk compares two strnums numerically when both look like numbers, and both
+# a field and a -v assignment are strnums. Left unguarded, --project=7 also
+# matched a project named "007" and --project=1000 also matched "1e3" --
+# merging unrelated projects' totals, by-project rows and slowest-tools rows
+# into one another with no error.
+{
+  printf '2026-09-01T10:00:00\t100\t1\t10\t0\t0\t007\tAlphaTool:10:1\n'
+  printf '2026-09-01T11:00:00\t200\t1\t10\t0\t0\t7\tBetaTool:20:1\n'
+  printf '2026-09-01T12:00:00\t300\t1\t10\t0\t0\t1e3\tGammaTool:30:1\n'
+  printf '2026-09-01T13:00:00\t400\t1\t10\t0\t0\t1000\tDeltaTool:40:1\n'
+} > "$CLAUDE_TIMESTAMP_HISTORY"
+
+out="$(bash "$SCRIPTS/setup.sh" --stats --project=7 2>&1)"
+contains "filters: --project=7 narrows the total to exactly one session" \
+         "sessions        1" "$out"
+refutes  "filters: --project=7 does not pull in a project named 007" \
+         grep -q "AlphaTool" <<< "$out"
+refutes  "filters: --project=7 does not list 007 by project either" \
+         grep -q "007" <<< "$out"
+contains "filters: --project=7 keeps the session named plain 7" \
+         "BetaTool" "$out"
+
+out="$(bash "$SCRIPTS/setup.sh" --stats --project=1000 2>&1)"
+contains "filters: --project=1000 narrows the total to exactly one session" \
+         "sessions        1" "$out"
+refutes  "filters: --project=1000 does not pull in a project named 1e3" \
+         grep -q "GammaTool" <<< "$out"
+refutes  "filters: --project=1000 does not list 1e3 by project either" \
+         grep -q "1e3" <<< "$out"
+contains "filters: --project=1000 keeps the session named plain 1000" \
+         "DeltaTool" "$out"
+
 out="$(bash "$SCRIPTS/setup.sh" --stats --since=soon 2>&1)"
 contains "filters: an unparseable since is refused"   "--since takes" "$out"
 refutes  "filters: and is not silently ignored" \
