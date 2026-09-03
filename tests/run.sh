@@ -3524,6 +3524,16 @@ bash "$SCRIPTS/setup.sh" --history=off --history-limit=50 >/dev/null
 ct_load_config
 is "--history is accepted"       "off" "$CT_HISTORY"
 is "--history-limit is accepted" "50"  "$CT_HISTORY_LIMIT"
+
+# write_config's account-level heredoc used to be hand-written with no line
+# for PROJECTS, so this flag parsed, validated and reported success while
+# writing nothing. Round-tripped through a real write and a real reload,
+# rather than just checking the flag is accepted, because the flag path
+# accepting a value was never the part that was broken.
+bash "$SCRIPTS/setup.sh" --projects=on >/dev/null
+ct_load_config
+is "--projects is persisted by the account-level writer" "on" "$CT_PROJECTS"
+
 refutes "a non on/off history is refused" bash "$SCRIPTS/setup.sh" --history=sometimes
 refutes "a non-numeric limit is refused"  bash "$SCRIPTS/setup.sh" --history-limit=lots
 

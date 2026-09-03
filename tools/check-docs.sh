@@ -258,6 +258,39 @@ else
   gate setup-flag-table 0 "setup.sh's flag table drifts from schema.json:$ft_detail"
 fi
 
+echo "write_config writes every key the flag table names"
+# write_project_config walks CT_FLAG_TABLE through _ct_flag_row_for_key, so
+# every row it names reaches a project file automatically. write_config, the
+# account-level writer, is a hand-written heredoc with no such loop -- a row
+# can be added to the table and never make it into the heredoc, which is
+# exactly what happened to PROJECTS: it parsed, validated and reported
+# success while writing nothing, through three reviews and a full run of this
+# file, because nothing compared the two lists.
+#
+# The heredoc's body is extracted by its own delimiters rather than by line
+# number, so this keeps working as write_config grows.
+wc_body="$(sed -n '/<<CONF$/,/^CONF$/p' hooks/scripts/setup.sh | sed '1d;$d')"
+wc_written="$(printf '%s\n' "$wc_body" | grep -oE '^[A-Z_]+=' | sed 's/=$//' | sort -u)"
+wc_missing=""
+while read -r ft_key; do
+  [ -n "$ft_key" ] || continue
+  case "
+$wc_written
+" in
+    *"
+$ft_key
+"*) ;;
+    *) wc_missing="$wc_missing $ft_key" ;;
+  esac
+done < <(printf '%s\n' "$ft_rows" | awk '{ print $2 }')
+if [ -n "$wc_missing" ]; then
+  gate write-config-completeness 0 \
+    "write_config's heredoc never writes:$wc_missing"
+else
+  gate write-config-completeness 1 \
+    "write_config writes every key CT_FLAG_TABLE names"
+fi
+
 echo "lint file list"
 # The shellcheck and bash -n steps name their files by hand, so a new script
 # is linted by nobody until someone remembers to add it. Compare the tracked

@@ -745,9 +745,11 @@ SUBAGENTS=$CT_SUBAGENTS
 TOOL_TIMING=$CT_TOOL_TIMING
 
 # Record each finished session, and how many to keep. Timings only: no message
-# text, no tool arguments, no paths.
+# text, no tool arguments, no paths. PROJECTS additionally names the project
+# directory in each row -- never the path above it.
 HISTORY=$CT_HISTORY
 HISTORY_LIMIT=$CT_HISTORY_LIMIT
+PROJECTS=$CT_PROJECTS
 
 # Tell Claude the local time each prompt was sent.
 INJECT_CONTEXT=$CT_INJECT_CONTEXT
