@@ -92,8 +92,8 @@ value, so it carries no residue either way, and leaving it out means a
 deliberate `COLOR=none` survives switching presets. `off` writes `ENABLED`
 alone, deliberately, so switching back on restores everything else as it was.
 
-`default` is the default marker, not a factory reset. It leaves the other
-eleven keys as they are, `TZ` and `INJECT_CONTEXT` among them. That is usually
+`default` is the default marker, not a factory reset. It leaves every other
+key as it is, `TZ` and `INJECT_CONTEXT` among them. That is usually
 what someone asking for the defaults back wants, a pinned timezone especially, but
 say which settings it left alone when you report, or the name promises more
 than it delivered.
