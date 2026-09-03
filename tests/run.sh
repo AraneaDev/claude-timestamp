@@ -5782,11 +5782,20 @@ fi
 # the way up to $HOME/.git and reported the home directory's own basename,
 # which is ordinarily the username. The README promises the history holds no
 # paths; a username is exactly what that promise exists to keep out.
+#
+# That walk-stop closes the climb-past-$HOME case, but not the cwd-IS-$HOME
+# case: a cwd equal to $HOME breaks out of the walk on its very first
+# iteration and never reaches a .git test, so it falls through to the
+# fallback that re-derives a basename from the original argument -- which,
+# for this cwd, IS $HOME's own basename. That second case needed its own
+# check, asserted separately below.
 fake_home="$WORK/fake-home-$$"
 rm -rf "$fake_home"
 mkdir -p "$fake_home/.git" "$fake_home/work"
 is "project: the walk stops at \$HOME and does not report its basename" \
    "work" "$(HOME="$fake_home" ct_project_name "$fake_home/work")"
+is "project: a cwd equal to \$HOME itself yields the unnamed sentinel" \
+   "-" "$(HOME="$fake_home" ct_project_name "$fake_home")"
 rm -rf "$fake_home"
 
 rm -rf "$proj"

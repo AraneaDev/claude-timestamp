@@ -843,12 +843,17 @@ ct_project_name() {
   home="${HOME:-}"
   while [ "${home}" != "/" ] && [ -n "$home" ] && [ "${home%/}" != "$home" ]; do home="${home%/}"; done
   while [ -n "$dir" ] && [ "$dir" != "/" ] && [ "$steps" -lt 40 ]; do
-    # Stops the walk before it ever looks at $HOME, the same boundary
+    # Stops the walk before it ever looks inside $HOME, the same boundary
     # ct_find_project_config stops at. A git-managed home directory (a common
     # dotfiles setup) puts a .git right there, and without this the walk
     # climbed past a real "no checkout here" answer and reported the home
     # directory's own basename -- ordinarily the username -- into a history
-    # column the README promises holds no paths.
+    # column the README promises holds no paths. This break only stops the
+    # walk from looking AT $HOME once it reaches it; it does nothing for a
+    # cwd that already equals $HOME on entry, since the loop breaks on the
+    # very first iteration without ever reaching the fallback below. That
+    # case is handled separately, right where the fallback re-derives its
+    # basename from the original argument.
     [ -n "$home" ] && [ "$dir" = "$home" ] && break
     if [ -d "$dir/.git" ] || [ -f "$dir/.git" ]; then
       base="${dir##*/}"
@@ -866,9 +871,19 @@ ct_project_name() {
     steps=$((steps + 1))
   done
   # No repository above it. The directory is still the best available answer,
-  # so fall back to the original rather than reporting nothing.
+  # so fall back to the original rather than reporting nothing -- unless that
+  # original argument IS $HOME itself. A cwd equal to $HOME never enters the
+  # walk above (the break at the top of the loop fires on the first
+  # iteration), so without this check the fallback would report $HOME's own
+  # basename -- ordinarily the username -- into a history column the README
+  # promises holds no paths. $HOME/work is a different string from $HOME, so
+  # it still falls through to the basename case below and reports "work".
   dir="$1"
   while [ "${dir}" != "/" ] && [ "${dir%/}" != "$dir" ]; do dir="${dir%/}"; done
+  if [ -n "$home" ] && [ "$dir" = "$home" ]; then
+    printf '%s' '-'
+    return 0
+  fi
   case "$dir" in
     "" | "/") printf '%s' '-' ;;
     */*)      base="${dir##*/}"; _ct_project_basename "$base" ;;
