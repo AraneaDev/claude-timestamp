@@ -1272,8 +1272,19 @@ if command -v jq >/dev/null 2>&1; then
   printf '%s' "$(( $(date +%s) - 134 ))" > "$base"
   out="$(printf '{"session_id":"acct","index":0,"delta":"x"}' \
          | env BASHOPTS=inherit_errexit bash "$SCRIPTS/message-display.sh" 2>/dev/null)"
-  contains "the marker still shows a duration under inherit_errexit" "+2m14s" \
-    "$(strip_ansi "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.displayContent')")"
+  # The seeded 134s can tick over to 135 between the write and the hook reading
+  # it, which a slow runner does often enough to have failed CI on Windows at
+  # +2m15s. Either rendering is the clock moving rather than the duration being
+  # wrong, so both are accepted, and the pair still pins the value to the
+  # seeded file: a hook that lost the duration prints no +NmNNs at all, which
+  # is the regression this case is here for.
+  errx_marker="$(strip_ansi "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.displayContent')")"
+  case "$errx_marker" in
+    *"+2m14s"*|*"+2m15s"*)
+      pass "the marker still shows a duration under inherit_errexit" ;;
+    *) fail "the marker still shows a duration under inherit_errexit" \
+            "something containing '+2m14s' or '+2m15s'" "$errx_marker" ;;
+  esac
   fresh
 
   # The ordering every normal session takes: Stop closes the turn, then
