@@ -1,5 +1,45 @@
 # Changelog
 
+## [0.0.16](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.15...v0.0.16) (2026-09-03)
+
+
+### Fixes
+
+* **check-docs:** fail closed when values or aliases is not an array ([4c76591](https://github.com/AraneaDev/claude-timestamp/commit/4c765917df447358a74d38675c286367664d33ce))
+* **config:** resolve the search directory the same way as home ([1e67d53](https://github.com/AraneaDev/claude-timestamp/commit/1e67d53eb61e4a8929b8e794abadf73bb836b8ee))
+* **config:** stop the project search at a symlinked home directory ([ff45982](https://github.com/AraneaDev/claude-timestamp/commit/ff459826ffb620f58a59ac5507e43041d15c3930))
+* **marker:** refuse a group that holds no part, and a timezone opening with .. ([863d8f1](https://github.com/AraneaDev/claude-timestamp/commit/863d8f106b076916588a18c6cca128a81c3a9ee5))
+* **schema:** list the colour aliases the validator has always accepted ([c81375a](https://github.com/AraneaDev/claude-timestamp/commit/c81375a45c68b3a63ca28bcb00d83bb581dabc97))
+* **setup:** validate the display and context format flags ([b90493a](https://github.com/AraneaDev/claude-timestamp/commit/b90493a6919d6dcb54198fc07dc2a6641d1b306a))
+* **setup:** write both config files atomically ([c4ba913](https://github.com/AraneaDev/claude-timestamp/commit/c4ba913296f370af2da66a75f2a02530058fadfd))
+* **setup:** write through a symlinked config instead of replacing it ([e08317f](https://github.com/AraneaDev/claude-timestamp/commit/e08317fd57f7c4ab3f13194094999a350150822c))
+* **state:** expire a tool-timing sentinel left by a session that never ended ([60a1427](https://github.com/AraneaDev/claude-timestamp/commit/60a1427c3bdc18365dc5bf2e8967fe1813d5f04c))
+* **state:** keep a counter read from aborting its hook under inherit_errexit ([1f69025](https://github.com/AraneaDev/claude-timestamp/commit/1f69025ae1691cb9fc1b315fba543d0cf0ee79d2))
+* **state:** keep a long session's start time from being pruned under it ([e32c2e9](https://github.com/AraneaDev/claude-timestamp/commit/e32c2e93e0e5957988bb240453de2d4641a88980))
+* **state:** stop an abandoned turn from being booked as time away ([ff74c16](https://github.com/AraneaDev/claude-timestamp/commit/ff74c161eb2f85cedf97cd87332126ca843deaba))
+* **stats:** report a row that carries six fields but no date ([d4530ef](https://github.com/AraneaDev/claude-timestamp/commit/d4530ef0946d588047b10aa10378fe1187c05f6a))
+* **stats:** stop a zero-length session shifting every field after it ([0dadba2](https://github.com/AraneaDev/claude-timestamp/commit/0dadba29a08e2e308e149f9f9724c0f167a303cc))
+
+
+### Performance
+
+* **config:** walk the project search without forking dirname ([7cd0316](https://github.com/AraneaDev/claude-timestamp/commit/7cd03165b8d789107021ee50b24cd4e51290a482))
+* **state:** resolve a session's state path without forking ([ca14091](https://github.com/AraneaDev/claude-timestamp/commit/ca140913095217ef0b2f8a1cbde52d9d901497f9))
+
+
+### Tests
+
+* ask the platform what it calls UTC instead of pinning the name ([7f93c2b](https://github.com/AraneaDev/claude-timestamp/commit/7f93c2b714b006334af2a974590b658f74475ea1))
+* cover atomic writes, turn close, and the context injection string ([e30f062](https://github.com/AraneaDev/claude-timestamp/commit/e30f062954f193586bdca21c8842d95879ebbbc7))
+* cover the config parser, its validator, and the subagent guard ([5588532](https://github.com/AraneaDev/claude-timestamp/commit/5588532e9792918c4051ff2cb96e5f5008c539c7))
+* let the inherit_errexit duration tick a second ([716a3ae](https://github.com/AraneaDev/claude-timestamp/commit/716a3ae1e063695bc863a2f408403c14b16cc24f))
+* skip the symlinked-home pair where ln -s makes a copy ([1019792](https://github.com/AraneaDev/claude-timestamp/commit/101979289ee5789dc76a1c18ba3fdea6237147ca))
+
+
+### Refactoring
+
+* **setup:** drive every flag from one table ([0f6a0a6](https://github.com/AraneaDev/claude-timestamp/commit/0f6a0a6db3a8be6f176cc45fcbc062d6a5658451))
+
 ## [0.0.15](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.14...v0.0.15) (2026-09-01)
 
 
