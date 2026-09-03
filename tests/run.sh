@@ -358,6 +358,24 @@ is "traversal characters are stripped from the session id" "$(ct_state_dir)/etcp
 refutes "empty session id is refused" ct_state_file ""
 refutes "session id of only separators is refused" ct_state_file "///"
 
+# The assigning form the hot paths use, so the two cannot drift apart: the
+# printing one costs a subshell at every call site, and post-tool-use.sh
+# reaches this four times per timed tool call.
+ct_state_file_var "abc-123"
+is "the assigning form agrees with the printing one" "$(ct_state_file "abc-123")" "$_CT_STATE_FILE"
+refutes "the assigning form refuses an empty id" ct_state_file_var ""
+
+# The staged flags the tool hook reads instead of resolving configuration
+# itself. Round-tripped here so the helpers have cover of their own rather
+# than only being exercised through a hook.
+mkdir -p "$(ct_state_dir)"
+ct_stage_flag "flagrt" "tooltiming" "on"
+is "a staged flag reads back"        "on" "$(ct_read_flag "flagrt" "tooltiming")"
+is "an unstaged flag reads as empty" ""   "$(ct_read_flag "flagrt" "nosuchflag")"
+ct_clear_flag "flagrt" "tooltiming"
+is "a cleared flag reads as empty"   ""   "$(ct_read_flag "flagrt" "tooltiming")"
+ct_clear_state "flagrt"
+
 # The state directory is shared ground on any machine without a per-user
 # TMPDIR. A directory somebody else owns is refused rather than written into,
 # and no filename in it is predictable enough to be pre-planted as a symlink.

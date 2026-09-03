@@ -131,32 +131,48 @@ ct_state_ready() {
   return 0
 }
 
+# Assign a session's state file path into _CT_STATE_FILE, without forking.
+#
 # Session ids come from the hook payload, so they are reduced to a safe
 # character set before being used as a filename -- an id containing ../ must
 # never be able to steer a write outside the state directory. Dots are dropped
 # rather than kept, so no id can collapse to "." or ".." and address the state
 # directory itself or its parent.
-ct_state_file() {
-  local sid
-  sid="$(printf '%s' "${1:-}" | tr -cd 'A-Za-z0-9_-')"
+#
+# The reduction is a bash pattern substitution rather than `printf | tr`, which
+# cost a subshell and an external binary at every call. Six functions in this
+# file resolve a path this way, and post-tool-use.sh reaches them four times
+# per timed tool call -- through ct_read_flag twice, ct_tool_log and
+# ct_turn_tool_log -- on the one hook the README singles out as the only
+# per-call cost. Same assign-don't-print shape as ct_state_dir_var and
+# ct_color_seq, for the same reason.
+ct_state_file_var() {
+  local sid="${1:-}"
+  sid="${sid//[!A-Za-z0-9_-]/}"
+  _CT_STATE_FILE=""
   [ -n "$sid" ] || return 1
-  printf '%s/%s' "$(ct_state_dir)" "$sid"
+  ct_state_dir_var
+  _CT_STATE_FILE="$_CT_STATE_DIR/$sid"
+  return 0
+}
+
+ct_state_file() {
+  ct_state_file_var "${1:-}" || return 1
+  printf '%s' "$_CT_STATE_FILE"
 }
 
 # The append-only log of completed tool calls for a session.
 ct_tool_log() {
-  local base
-  base="$(ct_state_file "${1:-}")" || return 1
-  printf '%s.tools' "$base"
+  ct_state_file_var "${1:-}" || return 1
+  printf '%s.tools' "$_CT_STATE_FILE"
 }
 
 # The tool log for the current turn only. The session-wide log answers "what
 # made this session slow"; this one answers "what made this reply slow", which
 # is a different question and needs a log that starts empty at every prompt.
 ct_turn_tool_log() {
-  local base
-  base="$(ct_state_file "${1:-}")" || return 1
-  printf '%s.turntools' "$base"
+  ct_state_file_var "${1:-}" || return 1
+  printf '%s.turntools' "$_CT_STATE_FILE"
 }
 
 # Name the tool responsible for a slow turn, or say nothing.
@@ -271,25 +287,33 @@ ct_timing_wanted() {
 ct_stage_flag() {
   local sid="${1:-}" name="${2:-}" value="${3:-}" base
   [ -n "$name" ] || return 0
-  base="$(ct_state_file "$sid")" || return 0
+  ct_state_file_var "$sid" || return 0
+  base="$_CT_STATE_FILE"
   ct_state_ready || return 0
   printf '%s' "$value" > "${base}.${name}"
   return 0
 }
 
 ct_read_flag() {
-  local sid="${1:-}" name="${2:-}" base
+  local sid="${1:-}" name="${2:-}" base value=""
   [ -n "$name" ] || return 0
-  base="$(ct_state_file "$sid")" || return 0
+  ct_state_file_var "$sid" || return 0
+  base="$_CT_STATE_FILE"
   [ -r "${base}.${name}" ] || return 0
-  cat "${base}.${name}" 2>/dev/null
+  # `read` rather than `cat`, for the reason ct_read_counter gives: post-tool-use
+  # calls this twice on every timed tool call, and a builtin costs no process.
+  # Flags are written with printf '%s' and carry no trailing newline, so the
+  # read reports failure having already assigned -- discarded, not acted on.
+  IFS= read -r value < "${base}.${name}" 2>/dev/null || :
+  printf '%s' "$value"
   return 0
 }
 
 ct_clear_flag() {
   local sid="${1:-}" name="${2:-}" base
   [ -n "$name" ] || return 0
-  base="$(ct_state_file "$sid")" || return 0
+  ct_state_file_var "$sid" || return 0
+  base="$_CT_STATE_FILE"
   rm -f "${base}.${name}" 2>/dev/null || true
   return 0
 }
@@ -379,7 +403,8 @@ ct_close_turn() {
 # for it.
 ct_turn_open() {
   local sid="${1:-}" now="${2:-0}" base start
-  base="$(ct_state_file "$sid")" || return 0
+  ct_state_file_var "$sid" || return 0
+  base="$_CT_STATE_FILE"
   case "$now" in ''|*[!0-9]*) return 0 ;; esac
   ct_state_ready || return 0
 
@@ -412,7 +437,8 @@ ct_turn_open() {
 # two closes is a case to survive rather than one to assume away.
 ct_turn_close() {
   local sid="${1:-}" ended="${2:-0}" base
-  base="$(ct_state_file "$sid")" || return 0
+  ct_state_file_var "$sid" || return 0
+  base="$_CT_STATE_FILE"
   ct_close_turn "$base" "$ended"
   return 0
 }
@@ -430,7 +456,8 @@ ct_turn_close() {
 # than accumulating into a divider that claims a break that never happened.
 ct_record_away() {
   local sid="${1:-}" now="${2:-0}" base closed gap
-  base="$(ct_state_file "$sid")" || return 0
+  ct_state_file_var "$sid" || return 0
+  base="$_CT_STATE_FILE"
 
   # Clear first, unconditionally, so that every path through this function
   # positively decides what `.away` holds. Leaving the early returns silent
@@ -461,7 +488,8 @@ ct_record_away() {
 # a divider is drawn exactly once per break.
 ct_take_away() {
   local sid="${1:-}" base gap
-  base="$(ct_state_file "$sid")" || return 0
+  ct_state_file_var "$sid" || return 0
+  base="$_CT_STATE_FILE"
   gap="$(ct_read_counter "${base}.away")"
   rm -f "${base}.away" 2>/dev/null || true
   [ "$gap" -gt 0 ] || return 0
@@ -473,7 +501,8 @@ ct_take_away() {
 # close a turn that ended in an interrupt rather than a Stop.
 ct_note_message() {
   local sid="${1:-}" now="${2:-0}" base
-  base="$(ct_state_file "$sid")" || return 0
+  ct_state_file_var "$sid" || return 0
+  base="$_CT_STATE_FILE"
   case "$now" in ''|*[!0-9]*) return 0 ;; esac
   ct_state_ready || return 0
   printf '%s' "$now" > "${base}.last"
@@ -489,7 +518,8 @@ ct_note_message() {
 ct_session_totals() {
   local sid="${1:-}" base now elapsed
   _CT_START=0; _CT_TURNS=0; _CT_WAIT=0; _CT_IDLE=0
-  base="$(ct_state_file "$sid")" || return 0
+  ct_state_file_var "$sid" || return 0
+  base="$_CT_STATE_FILE"
   _CT_START="$(ct_read_counter "${base}.start")"
   _CT_TURNS="$(ct_read_counter "${base}.turns")"
   _CT_WAIT="$(ct_read_counter "${base}.wait")"
@@ -508,7 +538,8 @@ ct_session_totals() {
 # the state directory does not accumulate a file set per session forever.
 ct_clear_state() {
   local base
-  base="$(ct_state_file "${1:-}")" || return 0
+  ct_state_file_var "${1:-}" || return 0
+  base="$_CT_STATE_FILE"
   rm -f "$base" "$base".* 2>/dev/null
   return 0
 }
