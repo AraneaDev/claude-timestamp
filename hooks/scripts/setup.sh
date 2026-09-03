@@ -79,16 +79,97 @@ Formats
 USAGE
 }
 
+# --- the flag table ---------------------------------------------------------
+#
+# One row per setting, and the only place a flag's name, the key it writes, the
+# variable it loads into, the validator it has to pass, its sentinel word and
+# its empty-value policy are written down.
+#
+# This is what stops a setting being added without its validation. Every flag
+# used to be parsed into a local of its own and then applied by a hand-written
+# `if` that had to remember to call a validator -- and two of them, --display
+# and --context, did not, which put an unvalidated value straight into the
+# config file and let a newline in one write a second setting nobody named. The
+# key list was also spelled out four more times: in main's locals, in
+# write_project_config's twenty-one positional parameters, in the `set --` that
+# re-paired them with their names on arrival, and in the `known` string beside
+# it. Five copies of one list is five places to forget.
+#
+# The table is here rather than read out of schema.json because setup.sh must
+# work on a machine with no jq -- that is the machine --doctor exists to
+# diagnose. tools/check-docs.sh asserts every row against schema.json instead,
+# so a row naming the wrong validator, or a schema key with no row, fails CI.
+#
+# The empty policy is what a flag given as `--x=` with nothing after it means:
+#   ignore  not named at all, which is what every flag but the four below did
+#   value   a real empty value; an empty MARKER is legal and renders no prefix
+#   error   refused, because this flag's empty value already means "inherit"
+CT_FLAG_TABLE="
+enabled         ENABLED         CT_ENABLED          ct_is_onoff             -        ignore
+tz              TZ              CT_TZ               ct_is_valid_tz          local    ignore
+display         DISPLAY_FORMAT  CT_DISPLAY_FORMAT   ct_is_valid_format      -        ignore
+context         CONTEXT_FORMAT  CT_CONTEXT_FORMAT   ct_is_valid_format      -        ignore
+color           COLOR           CT_COLOR            ct_is_valid_color       -        ignore
+marker          MARKER          CT_MARKER_TEMPLATE  ct_is_valid_marker      -        value
+time-color      TIME_COLOR      CT_TIME_COLOR       ct_is_valid_part_color  inherit  error
+elapsed-color   ELAPSED_COLOR   CT_ELAPSED_COLOR    ct_is_valid_part_color  inherit  error
+tool-color      TOOL_COLOR      CT_TOOL_COLOR       ct_is_valid_part_color  inherit  error
+elapsed         ELAPSED         CT_ELAPSED          ct_is_onoff             -        ignore
+slow-after      SLOW_AFTER      CT_SLOW_AFTER       ct_is_seconds           -        ignore
+slow-color      SLOW_COLOR      CT_SLOW_COLOR       ct_is_valid_color       -        ignore
+idle-after      IDLE_AFTER      CT_IDLE_AFTER       ct_is_seconds           -        ignore
+date-rollover   DATE_ROLLOVER   CT_DATE_ROLLOVER    ct_is_onoff             -        ignore
+summary         SUMMARY         CT_SUMMARY          ct_is_onoff             -        ignore
+subagents       SUBAGENTS       CT_SUBAGENTS        ct_is_onoff             -        ignore
+tool-timing     TOOL_TIMING     CT_TOOL_TIMING      ct_is_onoff             -        ignore
+history         HISTORY         CT_HISTORY          ct_is_onoff             -        ignore
+history-limit   HISTORY_LIMIT   CT_HISTORY_LIMIT    ct_is_history_limit     -        ignore
+inject-context  INJECT_CONTEXT  CT_INJECT_CONTEXT   ct_is_bool              -        ignore
+"
+
 # --- validation -------------------------------------------------------------
 # Each validator prints nothing on success and an explanation on failure, so a
 # bad flag from the slash command produces a message worth relaying.
+#
+# The message belongs to the validator rather than to the flag, so the wizard
+# and the flag path say the same thing about the same value. $2 is what to call
+# the setting in the message: a flag as the user typed it, or a key name.
+
+_ct_say_invalid() {
+  local validator="$1" label="$2" value="$3"
+  case "$validator" in
+    ct_is_onoff)
+      echo "$label must be 'on' or 'off', got '$value'." >&2 ;;
+    ct_is_bool)
+      echo "$label must be 'true' or 'false', got '$value'." >&2 ;;
+    ct_is_seconds)
+      echo "$label must be a whole number of seconds, got '$value'." >&2 ;;
+    ct_is_history_limit)
+      echo "$label must be a whole number of 1 or more, got '$value'." >&2
+      echo "To keep no history at all, use --history=off." >&2 ;;
+    ct_is_valid_color)
+      echo "Unknown color '$value'. Pick: none dim gray red green yellow blue magenta cyan." >&2 ;;
+    ct_is_valid_part_color)
+      echo "Unknown colour '$value'. Pick: none dim gray red green yellow blue magenta cyan, or 'inherit' to follow --color." >&2 ;;
+    ct_is_valid_format)
+      echo "$label must be 24h, short, 12h, iso, or a strftime string containing %, got '$value'." >&2 ;;
+    ct_is_valid_marker)
+      echo "That marker template is not usable. The parts are %time, %elapsed, %tool and %date," >&2
+      echo "a {...} group holds at least one of them and disappears when every part inside it is" >&2
+      echo "empty, and braces must balance." >&2 ;;
+    ct_is_valid_tz)
+      echo "Timezone must be an IANA name like Europe/Amsterdam." >&2 ;;
+    *)
+      echo "$label does not accept '$value'." >&2 ;;
+  esac
+}
 
 valid_tz() {
   local tz="$1"
   [ "$tz" = "local" ] && return 0
   [ -z "$tz" ] && return 0
   if ! ct_is_valid_tz "$tz"; then
-    echo "Timezone must be an IANA name like Europe/Amsterdam." >&2
+    _ct_say_invalid ct_is_valid_tz timezone "$tz"
     return 1
   fi
   # Checked functionally rather than by looking for a zoneinfo file, because a
@@ -110,70 +191,19 @@ valid_tz() {
 
 valid_color() {
   ct_is_valid_color "$1" && return 0
-  echo "Unknown color '$1'. Pick: none dim gray red green yellow blue magenta cyan." >&2
-  return 1
-}
-
-# The two format flags reach the config file as free text, which makes this the
-# guard that keeps a control character out of it: write_config interpolates a
-# value into KEY=value with no escaping, so a newline writes a second line the
-# parser reads back as a real setting. ct_is_valid_format has always refused
-# one; for a while nothing on the flag path asked it.
-valid_format() {
-  ct_is_valid_format "$2" && return 0
-  echo "$1 must be 24h, short, 12h, iso, or a strftime string containing %, got '$2'." >&2
+  _ct_say_invalid ct_is_valid_color color "$1"
   return 1
 }
 
 valid_marker() {
   ct_is_valid_marker "$1" && return 0
-  echo "That marker template is not usable. The parts are %time, %elapsed, %tool and %date," >&2
-  echo "a {...} group holds at least one of them and disappears when every part inside it is" >&2
-  echo "empty, and braces must balance." >&2
+  _ct_say_invalid ct_is_valid_marker marker "$1"
   return 1
-}
-
-valid_part_color() {
-  ct_is_valid_part_color "$1" && return 0
-  echo "Unknown colour '$1'. Pick: none dim gray red green yellow blue magenta cyan, or 'inherit' to follow COLOR." >&2
-  return 1
-}
-
-# Apply a --time-color/--elapsed-color/--tool-color flag, distinguishing three
-# cases that all reduce to the empty string once the flag is split on '=':
-# the flag absent entirely (do nothing), --foo=inherit (explicitly follow
-# COLOR, the same sentinel role --tz=local plays for TZ), and a bare --foo=
-# (rejected -- unlike TZ, this flag's empty value already has a meaning of its
-# own, so a bare empty cannot double as "not named" the way it does elsewhere).
-apply_part_color() {
-  local flag="$1" named="$2" value="$3" var="$4"
-  [ "$named" = "1" ] || return 0
-  case "$value" in
-    inherit) value="" ;;
-    '')
-      echo "$flag needs a value: a colour name, or 'inherit' to follow --color." >&2
-      exit 2
-      ;;
-  esac
-  valid_part_color "$value" || exit 2
-  printf -v "$var" '%s' "$value"
 }
 
 valid_seconds() {
   ct_is_seconds "$2" && return 0
-  echo "$1 must be a whole number of seconds, got '$2'." >&2
-  return 1
-}
-
-valid_onoff() {
-  ct_is_onoff "$2" && return 0
-  echo "$1 must be 'on' or 'off', got '$2'." >&2
-  return 1
-}
-
-valid_bool() {
-  ct_is_bool "$2" && return 0
-  echo "$1 must be 'true' or 'false', got '$2'." >&2
+  _ct_say_invalid ct_is_seconds "$1" "$2"
   return 1
 }
 
@@ -533,7 +563,8 @@ CONF
 # today's values. Only the settings named on the command line are written,
 # merged with whatever the file already pinned.
 write_project_config() {
-  local file dir key value existing out="" marker_named named line ekey known carried
+  local file dir key value existing out="" named line ekey known="" carried pair
+  local t_flag t_key t_var t_validator t_sentinel t_empty
   # $PWD/.claude/claude-timestamp.conf is the account config when $PWD is the
   # home directory, and ct_find_project_config refuses to read that file as a
   # project layer. Writing it here would produce a file that calls itself a
@@ -564,49 +595,50 @@ write_project_config() {
   existing=""
   [ -r "$file" ] && existing="$(cat "$file")"
 
-  # Read before `set --` below replaces the positional parameters this came
-  # in on. MARKER is the one key whose legitimately-named value can itself be
-  # the empty string (an empty template renders no prefix at all), so its
-  # caller passes this alongside to say "named, even though empty" -- every
-  # other key can tell "empty" and "not named" apart from the raw value alone
-  # (TZ spells its empty case "local", the part colours spell theirs
-  # "inherit", so an actually-empty value only ever means "not named").
-  marker_named="${21:-}"
+  # "$@" is KEY=value for every setting named on this run, already
+  # sentinel-resolved by main. Presence in that list IS "was it named", which
+  # is what the twenty-one positional parameters and a separate marker_named
+  # flag used to encode -- MARKER needed one because its legitimately-named
+  # value can itself be the empty string, and an empty slot could not tell that
+  # apart from "not named".
+  named=""
+  for pair in "$@"; do
+    named="${named}|${pair%%=*}|"
+  done
 
-  set -- TZ "$1" DISPLAY_FORMAT "$2" CONTEXT_FORMAT "$3" COLOR "$4" \
-         ELAPSED "$5" INJECT_CONTEXT "$6" DATE_ROLLOVER "$7" SLOW_AFTER "$8" \
-         SLOW_COLOR "$9" IDLE_AFTER "${10}" SUMMARY "${11}" SUBAGENTS "${12}" \
-         TOOL_TIMING "${13}" ENABLED "${14}" MARKER "${15}" TIME_COLOR "${16}" \
-         ELAPSED_COLOR "${17}" TOOL_COLOR "${18}" HISTORY "${19}" HISTORY_LIMIT "${20}"
+  # Walked in table order, so the table decides the file's layout too and the
+  # list of keys this function knows about is not a fifth copy of one.
+  # shellcheck disable=SC2034  # the trailing columns are read to consume the
+  # line; only the flag and the key matter to this writer.
+  while read -r t_flag t_key t_var t_validator t_sentinel t_empty; do
+    [ -n "$t_flag" ] || continue
+    key="$t_key"
+    known="${known}${key}|"
 
-  known="|TZ|DISPLAY_FORMAT|CONTEXT_FORMAT|COLOR|ELAPSED|INJECT_CONTEXT|"
-  known="${known}DATE_ROLLOVER|SLOW_AFTER|SLOW_COLOR|IDLE_AFTER|SUMMARY|"
-  known="${known}SUBAGENTS|TOOL_TIMING|ENABLED|MARKER|TIME_COLOR|ELAPSED_COLOR|"
-  known="${known}TOOL_COLOR|HISTORY|HISTORY_LIMIT|"
-
-  while [ "$#" -gt 0 ]; do
-    key="$1"; value="$2"; shift 2
-    named=1
+    value=""
     carried=0
-    [ -n "$value" ] || { [ "$key" = "MARKER" ] && [ "$marker_named" = "1" ]; } || named=0
-    if [ "$named" = "0" ]; then
-      # Not named now. Keep it only if this project already pinned it -- and
-      # test that by whether the key is present in the file, not by whether
-      # the value that comes back is empty. Both an absent key and a key
-      # pinned to the empty string (TZ=, or a colour set to inherit) extract
-      # as "", so emptiness alone cannot tell "nothing to keep" from "keep an
-      # empty pin"; presence can.
-      if printf '%s\n' "$existing" | grep -q "^${key}="; then
-        value="$(printf '%s\n' "$existing" | sed -n "s/^${key}=//p" | tail -1)"
-        carried=1
-      else
-        continue
-      fi
-    fi
-    case "$key" in
-      TZ)                                    [ "$value" = "local" ]    && value="" ;;
-      TIME_COLOR|ELAPSED_COLOR|TOOL_COLOR)   [ "$value" = "inherit" ]  && value="" ;;
+    case "$named" in
+      *"|${key}|"*)
+        for pair in "$@"; do
+          [ "${pair%%=*}" = "$key" ] && value="${pair#*=}"
+        done
+        ;;
+      *)
+        # Not named now. Keep it only if this project already pinned it -- and
+        # test that by whether the key is present in the file, not by whether
+        # the value that comes back is empty. Both an absent key and a key
+        # pinned to the empty string (TZ=, or a colour set to inherit) extract
+        # as "", so emptiness alone cannot tell "nothing to keep" from "keep an
+        # empty pin"; presence can.
+        if printf '%s\n' "$existing" | grep -q "^${key}="; then
+          value="$(printf '%s\n' "$existing" | sed -n "s/^${key}=//p" | tail -1)"
+          carried=1
+        else
+          continue
+        fi
+        ;;
     esac
+
     # A carried value is raw text lifted verbatim out of the existing file --
     # already in its written form, quotes and all. Serialising it again is how
     # one quote pair becomes two, then three on the next unrelated write. Only
@@ -619,7 +651,10 @@ write_project_config() {
       out="${out}${key}=$(conf_value "$value")
 "
     fi
-  done
+  done <<TABLE
+$CT_FLAG_TABLE
+TABLE
+  known="|${known}"
 
   # A key this run does not recognise -- one a newer version of the plugin
   # wrote -- is carried over unchanged rather than dropped. lib/config.sh
@@ -949,43 +984,103 @@ wizard() {
 
 # --- entry point ------------------------------------------------------------
 
+# Look a row up in the table, into _CT_F_*. Returns 1 when there is no row.
+_ct_flag_row() {
+  local want="$1" flag key var validator sentinel empty
+  while read -r flag key var validator sentinel empty; do
+    [ -n "$flag" ] || continue
+    [ "$flag" = "$want" ] || continue
+    _CT_F_FLAG="$flag"; _CT_F_KEY="$key"; _CT_F_VAR="$var"
+    _CT_F_VALIDATOR="$validator"; _CT_F_SENTINEL="$sentinel"; _CT_F_EMPTY="$empty"
+    return 0
+  done <<TABLE
+$CT_FLAG_TABLE
+TABLE
+  return 1
+}
+
+# The same lookup by config key rather than by flag name. Two callers need it:
+# main, to recover a row after parsing, and write_project_config, to walk the
+# settings in table order.
+_ct_flag_row_for_key() {
+  local want="$1" flag key var validator sentinel empty
+  while read -r flag key var validator sentinel empty; do
+    [ -n "$flag" ] || continue
+    [ "$key" = "$want" ] || continue
+    _CT_F_FLAG="$flag"; _CT_F_KEY="$key"; _CT_F_VAR="$var"
+    _CT_F_VALIDATOR="$validator"; _CT_F_SENTINEL="$sentinel"; _CT_F_EMPTY="$empty"
+    return 0
+  done <<TABLE
+$CT_FLAG_TABLE
+TABLE
+  return 1
+}
+
 main() {
   local interactive=1 action="write" project_scope=0
-  local set_tz="" set_display="" set_context="" set_color="" set_elapsed="" set_inject="" set_rollover=""
-  local set_slow="" set_slowcolor="" set_idle="" set_summary="" set_subagents="" set_tooltiming=""
-  local set_history="" set_historylimit="" set_enabled=""
-  local set_marker="" set_timecolor="" set_elapsedcolor="" set_toolcolor=""
-  local marker_named=0 timecolor_named=0 elapsedcolor_named=0 toolcolor_named=0
+  local arg flag value i
+  # Parallel arrays with a counter of their own. bash 3.2 is what macOS ships:
+  # it has no associative arrays, and under `set -u` it treats an empty array
+  # as unset, so neither ${#arr[@]} nor a bare "${arr[@]}" is safe to lean on
+  # there. A plain integer and the ${arr[@]+...} guard are.
+  #
+  # A key present in named_keys was named on this run, which is the whole of
+  # what "named" used to need four separate *_named locals to express.
+  local named_keys=() named_values=() named_count=0
 
   while [ $# -gt 0 ]; do
-    case "$1" in
-      --config=*)         CLAUDE_TIMESTAMP_CONFIG="${1#*=}"; export CLAUDE_TIMESTAMP_CONFIG ;;
-      --project)          project_scope=1; interactive=0 ;;
-      --tz=*)             set_tz="${1#*=}";      interactive=0 ;;
-      --display=*)        set_display="${1#*=}"; interactive=0 ;;
-      --context=*)        set_context="${1#*=}"; interactive=0 ;;
-      --color=*)          set_color="${1#*=}";   interactive=0 ;;
-      --marker=*)         set_marker="${1#*=}";  marker_named=1; interactive=0 ;;
-      --time-color=*)     set_timecolor="${1#*=}";    timecolor_named=1;    interactive=0 ;;
-      --elapsed-color=*)  set_elapsedcolor="${1#*=}"; elapsedcolor_named=1; interactive=0 ;;
-      --tool-color=*)     set_toolcolor="${1#*=}";    toolcolor_named=1;    interactive=0 ;;
-      --elapsed=*)        set_elapsed="${1#*=}"; interactive=0 ;;
-      --enabled=*)        set_enabled="${1#*=}";  interactive=0 ;;
-      --date-rollover=*)  set_rollover="${1#*=}"; interactive=0 ;;
-      --slow-after=*)     set_slow="${1#*=}";      interactive=0 ;;
-      --slow-color=*)     set_slowcolor="${1#*=}"; interactive=0 ;;
-      --idle-after=*)     set_idle="${1#*=}";      interactive=0 ;;
-      --summary=*)        set_summary="${1#*=}";   interactive=0 ;;
-      --subagents=*)      set_subagents="${1#*=}"; interactive=0 ;;
-      --tool-timing=*)    set_tooltiming="${1#*=}"; interactive=0 ;;
-      --history=*)        set_history="${1#*=}"; interactive=0 ;;
-      --history-limit=*)  set_historylimit="${1#*=}"; interactive=0 ;;
-      --inject-context=*) set_inject="${1#*=}";  interactive=0 ;;
-      --show)             action="show"; interactive=0 ;;
-      --doctor)           action="doctor"; interactive=0 ;;
-      --stats)            action="stats"; interactive=0 ;;
-      -h|--help)          usage; exit 0 ;;
-      *) echo "Unknown argument: $1" >&2; echo >&2; usage >&2; exit 2 ;;
+    arg="$1"
+    case "$arg" in
+      --config=*)  CLAUDE_TIMESTAMP_CONFIG="${arg#*=}"; export CLAUDE_TIMESTAMP_CONFIG ;;
+      --project)   project_scope=1; interactive=0 ;;
+      --show)      action="show";   interactive=0 ;;
+      --doctor)    action="doctor"; interactive=0 ;;
+      --stats)     action="stats";  interactive=0 ;;
+      -h|--help)   usage; exit 0 ;;
+      --*=*)
+        flag="${arg#--}"; flag="${flag%%=*}"
+        value="${arg#*=}"
+        if ! _ct_flag_row "$flag"; then
+          echo "Unknown argument: $arg" >&2; echo >&2; usage >&2; exit 2
+        fi
+        interactive=0
+        # An empty value means three different things depending on the flag,
+        # and the table says which. Resolved here so everything downstream --
+        # the validator, the writers, "was it named at all" -- sees one shape.
+        if [ -z "$value" ]; then
+          case "$_CT_F_EMPTY" in
+            ignore) shift; continue ;;
+            error)
+              echo "--$flag needs a value: a colour name, or 'inherit' to follow --color." >&2
+              exit 2
+              ;;
+          esac
+        fi
+        # The sentinel word is how a flag spells its empty value out loud:
+        # --tz=local, --time-color=inherit. Both mean "write nothing here".
+        [ "$_CT_F_SENTINEL" != "-" ] && [ "$value" = "$_CT_F_SENTINEL" ] && value=""
+
+        # Validated as it is parsed, before anything is written, so a run that
+        # names four settings and gets the third wrong changes none of them.
+        # It also means no value reaching the arrays below has ever skipped its
+        # validator, which is the property this table exists to guarantee.
+        if ! "$_CT_F_VALIDATOR" "$value"; then
+          _ct_say_invalid "$_CT_F_VALIDATOR" "--$flag" "$value"
+          exit 2
+        fi
+        # TZ carries one check no other key needs and no validator can express:
+        # whether this machine can resolve the zone at all. A platform without
+        # a timezone database does not fail on an unknown name, it silently
+        # renders UTC, so pinning a zone there would write a config that lies.
+        if [ "$_CT_F_KEY" = "TZ" ] && [ -n "$value" ]; then
+          valid_tz "$value" || exit 2
+        fi
+
+        named_keys[named_count]="$_CT_F_KEY"
+        named_values[named_count]="$value"
+        named_count=$(( named_count + 1 ))
+        ;;
+      *) echo "Unknown argument: $arg" >&2; echo >&2; usage >&2; exit 2 ;;
     esac
     shift
   done
@@ -999,40 +1094,16 @@ main() {
   # targeted change rather than a full overwrite.
   ct_load_config
 
-  if [ -n "$set_tz" ]; then
-    valid_tz "$set_tz" || exit 2
-    [ "$set_tz" = "local" ] && CT_TZ="" || CT_TZ="$set_tz"
-  fi
-  if [ -n "$set_display" ]; then valid_format DISPLAY_FORMAT "$set_display" || exit 2; CT_DISPLAY_FORMAT="$set_display"; fi
-  if [ -n "$set_context" ]; then valid_format CONTEXT_FORMAT "$set_context" || exit 2; CT_CONTEXT_FORMAT="$set_context"; fi
-  if [ -n "$set_color" ];   then valid_color "$set_color" || exit 2; CT_COLOR="$set_color"; fi
-  # A bare --marker= is unlike a bare --time-color=: an empty template is
-  # already a legal, meaningful value (ct_is_valid_marker accepts it, and a
-  # marker that renders empty emits no prefix at all), so it is honoured
-  # rather than rejected -- the same way --tz=local sets an empty TZ.
-  if [ "$marker_named" = "1" ]; then valid_marker "$set_marker" || exit 2; CT_MARKER_TEMPLATE="$set_marker"; fi
-  apply_part_color "--time-color"    "$timecolor_named"    "$set_timecolor"    CT_TIME_COLOR
-  apply_part_color "--elapsed-color" "$elapsedcolor_named" "$set_elapsedcolor" CT_ELAPSED_COLOR
-  apply_part_color "--tool-color"    "$toolcolor_named"    "$set_toolcolor"    CT_TOOL_COLOR
-  if [ -n "$set_elapsed" ]; then valid_onoff ELAPSED "$set_elapsed" || exit 2; CT_ELAPSED="$set_elapsed"; fi
-  if [ -n "$set_inject" ];  then valid_bool INJECT_CONTEXT "$set_inject" || exit 2; CT_INJECT_CONTEXT="$set_inject"; fi
-  if [ -n "$set_rollover" ]; then valid_onoff DATE_ROLLOVER "$set_rollover" || exit 2; CT_DATE_ROLLOVER="$set_rollover"; fi
-  if [ -n "$set_slow" ]; then valid_seconds SLOW_AFTER "$set_slow" || exit 2; CT_SLOW_AFTER="$set_slow"; fi
-  if [ -n "$set_idle" ]; then valid_seconds IDLE_AFTER "$set_idle" || exit 2; CT_IDLE_AFTER="$set_idle"; fi
-  if [ -n "$set_slowcolor" ]; then valid_color "$set_slowcolor" || exit 2; CT_SLOW_COLOR="$set_slowcolor"; fi
-  if [ -n "$set_summary" ]; then valid_onoff SUMMARY "$set_summary" || exit 2; CT_SUMMARY="$set_summary"; fi
-  if [ -n "$set_subagents" ]; then valid_onoff SUBAGENTS "$set_subagents" || exit 2; CT_SUBAGENTS="$set_subagents"; fi
-  if [ -n "$set_tooltiming" ]; then valid_onoff TOOL_TIMING "$set_tooltiming" || exit 2; CT_TOOL_TIMING="$set_tooltiming"; fi
-  if [ -n "$set_history" ]; then valid_onoff HISTORY "$set_history" || exit 2; CT_HISTORY="$set_history"; fi
-  if [ -n "$set_historylimit" ]; then
-    if ! ct_is_history_limit "$set_historylimit"; then
-      echo "--history-limit must be a whole number of 1 or more, got '$set_historylimit'." >&2
-      echo "To keep no history at all, use --history=off." >&2
-      exit 2
-    fi
-    CT_HISTORY_LIMIT="$set_historylimit"
-  fi
-  if [ -n "$set_enabled" ]; then valid_onoff ENABLED "$set_enabled" || exit 2; CT_ENABLED="$set_enabled"; fi
+  # Apply after loading, or ct_load_config would overwrite what was named.
+  local pairs=() pair_count=0
+  i=0
+  while [ "$i" -lt "$named_count" ]; do
+    _ct_flag_row_for_key "${named_keys[$i]}" || exit 2
+    printf -v "$_CT_F_VAR" '%s' "${named_values[$i]}"
+    pairs[pair_count]="${named_keys[$i]}=${named_values[$i]}"
+    pair_count=$(( pair_count + 1 ))
+    i=$(( i + 1 ))
+  done
 
   if [ "$project_scope" = "1" ]; then
     # write_project_config's return already exits the script under set -e with
@@ -1040,11 +1111,10 @@ main() {
     # intent is explicit at the call site: if a later edit ever wraps this
     # call in a condition (an if, a &&, a while), errexit stops applying to it
     # silently, and the refusal's exit code would be lost without this.
-    write_project_config "$set_tz" "$set_display" "$set_context" "$set_color" \
-      "$set_elapsed" "$set_inject" "$set_rollover" "$set_slow" "$set_slowcolor" \
-      "$set_idle" "$set_summary" "$set_subagents" "$set_tooltiming" "$set_enabled" \
-      "$set_marker" "$set_timecolor" "$set_elapsedcolor" "$set_toolcolor" \
-      "$set_history" "$set_historylimit" "$marker_named" || exit $?
+    #
+    # The ${pairs[@]+...} guard is what makes a run that named nothing safe on
+    # bash 3.2, where an empty array under `set -u` aborts the plain form.
+    write_project_config "${pairs[@]+"${pairs[@]}"}" || exit $?
   else
     write_config
   fi

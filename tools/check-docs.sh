@@ -187,6 +187,51 @@ else
   status=1
 fi
 
+echo "setup flags agree with the schema"
+# setup.sh drives its flags from one table, and that table names the validator
+# each flag has to pass. It cannot read schema.json at runtime -- setup.sh has
+# to work on a machine with no jq, which is the machine --doctor exists to
+# diagnose -- so the agreement is asserted here instead.
+#
+# This is the check that would have caught --display and --context reaching the
+# config file with no validator at all: a key with no row, a row for a key the
+# schema does not have, or a row naming a validator the schema does not name,
+# all fail here rather than in somebody's config file.
+ft_ok=1
+ft_detail=""
+ft_rows="$(sed -n '/^CT_FLAG_TABLE="$/,/^"$/p' hooks/scripts/setup.sh | sed '1d;$d')"
+if [ -z "$ft_rows" ]; then
+  ft_ok=0
+  ft_detail=" the flag table could not be read out of setup.sh;"
+else
+  # shellcheck disable=SC2034  # f_var and f_rest are read to consume the line
+  while read -r f_flag f_key f_var f_validator f_rest; do
+    [ -n "$f_flag" ] || continue
+    want="$(jq -r --arg k "$f_key" '.keys[$k].validator // empty' schema.json)"
+    if [ -z "$want" ]; then
+      ft_ok=0; ft_detail="$ft_detail --$f_flag writes $f_key, which is not in schema.json;"
+    elif [ "$want" != "$f_validator" ]; then
+      ft_ok=0; ft_detail="$ft_detail --$f_flag validates with $f_validator, schema.json says $want;"
+    fi
+  done <<FT
+$ft_rows
+FT
+  # ...and the other direction: a setting nobody can reach from the command
+  # line is a setting the slash command can write and setup.sh cannot.
+  while read -r s_key; do
+    [ -n "$s_key" ] || continue
+    printf '%s\n' "$ft_rows" | awk -v k="$s_key" '$2 == k { found = 1 } END { exit !found }' ||
+      { ft_ok=0; ft_detail="$ft_detail $s_key has no flag;"; }
+  done <<FS
+$schema_keys
+FS
+fi
+if [ "$ft_ok" -eq 1 ]; then
+  gate setup-flag-table 1 "every flag validates with the validator schema.json names"
+else
+  gate setup-flag-table 0 "setup.sh's flag table drifts from schema.json:$ft_detail"
+fi
+
 echo "lint file list"
 # The shellcheck and bash -n steps name their files by hand, so a new script
 # is linted by nobody until someone remembers to add it. Compare the tracked
