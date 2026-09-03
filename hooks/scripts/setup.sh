@@ -439,12 +439,31 @@ conf_value() {
   esac
 }
 
+# Write a file by building it beside the target and renaming over it.
+#
+# ct_load_config reads the config from five hooks, and message-display reads it
+# on every displayed message, so a writer that truncates in place can be caught
+# mid-write: the reader sees a partial file and silently falls back to defaults
+# for the keys not written yet. Rename is atomic on every filesystem this runs
+# on, so a reader sees either the whole old file or the whole new one. Same
+# shape ct_write_facts and ct_history_append already use.
+#
+# The temp file sits beside the target rather than in a temp directory, because
+# a rename across filesystems is not atomic and is not even the same syscall.
+_ct_write_atomic() {
+  local file="$1" tmp
+  tmp="$file.$$"
+  cat > "$tmp" || { rm -f "$tmp" 2>/dev/null; return 1; }
+  mv "$tmp" "$file" || { rm -f "$tmp" 2>/dev/null; return 1; }
+  return 0
+}
+
 write_config() {
   local file dir
   file="$(ct_config_path)"
   dir="$(dirname "$file")"
   mkdir -p "$dir"
-  cat > "$file" <<CONF
+  _ct_write_atomic "$file" <<CONF
 # claude-timestamp configuration
 # Written by setup.sh -- safe to edit by hand. Run /timestamps to change it
 # interactively. Unknown keys are ignored.
@@ -647,7 +666,7 @@ write_project_config() {
     echo "# not listed here. Run /timestamps to change it."
     echo
     printf '%s' "$out"
-  } > "$file"
+  } | _ct_write_atomic "$file"
   echo "Wrote $(ct_tilde "$file")"
 }
 
