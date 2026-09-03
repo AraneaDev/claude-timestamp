@@ -845,7 +845,13 @@ ct_project_name() {
 ct_tool_digest() {
   local file="$1"
   [ -n "$file" ] && [ -s "$file" ] || return 0
-  awk -F'\t' '
+  # The log's own writer (post-tool-use.sh) emits space-separated lines --
+  # "<tool name> <seconds> <outcome>" -- and rejects a tool name containing a
+  # space before it ever gets there, so the default field separator is safe
+  # here and is what actually matches what was written. Only the second stage
+  # below reads tab-separated input, because it is reading this awk's own
+  # output, which this awk deliberately emits with a tab.
+  awk '
     {
       name = $1
       gsub(/[,:\t]/, "_", name)

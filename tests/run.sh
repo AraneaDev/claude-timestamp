@@ -5498,17 +5498,27 @@ rm -rf "$proj"
 echo "tool digest"
 
 log="$WORK/digest.log"
-printf 'Bash\t12.500\tok\nRead\t0.250\tok\nBash\t7.500\tok\n' > "$log"
+# The log's own writer, post-tool-use.sh, emits space-separated lines --
+# "<tool name> <seconds> <outcome>" -- so every fixture here uses that format
+# too. See the end-to-end case below, which drives the writer itself instead
+# of fabricating its output, so this suite cannot drift past the real format
+# again the way it did before.
+printf 'Bash 12.500 ok\nRead 0.250 ok\nBash 7.500 ok\n' > "$log"
 is "digest: sums per tool and sorts worst first" \
    "Bash:20:2,Read:0:1" "$(ct_tool_digest "$log")"
 
-printf 'Weird,Name\t3.000\tok\nOther:Tool\t2.000\tok\n' > "$log"
+printf 'Weird,Name 3.000 ok\nOther:Tool 2.000 ok\n' > "$log"
 is "digest: a separator inside a tool name is neutralised" \
    "Weird_Name:3:1,Other_Tool:2:1" "$(ct_tool_digest "$log")"
 
-# A tab cannot reach field 1 through the log's own writer, which is tab
-# separated, but the gsub covers all three separators and the test says so.
-printf 'Tabbed\tName\t4.000\tok\n' > "$log"
+# post-tool-use.sh sanitises any tool name with a byte outside [A-Za-z0-9_-]
+# to "unknown" before it ever reaches the log, and awk's default field
+# splitting treats a tab the same as a space, so a raw tab can never actually
+# land inside field 1 either way. The gsub covers it anyway, as a second line
+# of defense against a future writer that relaxes that guard, and this
+# fixture exercises that gsub directly rather than trusting the guard never
+# lapses.
+printf 'Tabbed\tName 4.000 ok\n' > "$log"
 refutes "digest: a tab cannot leak a second field into the digest" \
         grep -q $'\t' <<< "$(ct_tool_digest "$log")"
 
@@ -5517,15 +5527,34 @@ is "digest: an empty log yields nothing" "" "$(ct_tool_digest "$log")"
 is "digest: a missing log yields nothing" "" "$(ct_tool_digest "$WORK/no-such-log")"
 
 : > "$log"
-for i in 1 2 3 4 5 6 7 8 9 10; do printf 'T%s\t%s.000\tok\n' "$i" "$i" >> "$log"; done
+for i in 1 2 3 4 5 6 7 8 9 10; do printf 'T%s %s.000 ok\n' "$i" "$i" >> "$log"; done
 is "digest: keeps at most eight tools" \
    "8" "$(ct_tool_digest "$log" | awk -F',' '{print NF}')"
 is "digest: and keeps the costliest ones" \
    "T10:10:1" "$(ct_tool_digest "$log" | cut -d, -f1)"
 
-printf 'Bash\tnot-a-number\tok\n' > "$log"
+printf 'Bash not-a-number ok\n' > "$log"
 is "digest: a row with no usable duration contributes nothing" \
    "Bash:0:1" "$(ct_tool_digest "$log")"
+
+if command -v jq >/dev/null 2>&1; then
+  # End to end: drive the real writer, post-tool-use.sh, instead of
+  # fabricating its output. This is the case that would have caught the
+  # space-vs-tab mismatch on its own, and is meant to keep catching it if the
+  # writer's format ever changes again.
+  fresh 'TOOL_TIMING=on'
+  ct_stage_flag "digest-e2e" "timing-on" "1"
+  printf '{"session_id":"digest-e2e","tool_use_id":"d1","tool_name":"Bash","duration_ms":12500}' \
+    | bash "$SCRIPTS/post-tool-use.sh"
+  printf '{"session_id":"digest-e2e","tool_use_id":"d2","tool_name":"Bash","duration_ms":7500}' \
+    | bash "$SCRIPTS/post-tool-use.sh"
+  printf '{"session_id":"digest-e2e","tool_use_id":"d3","tool_name":"Read","duration_ms":250}' \
+    | bash "$SCRIPTS/post-tool-use.sh"
+  is "digest: reads the log post-tool-use.sh actually writes" \
+     "Bash:20:2,Read:0:1" "$(ct_tool_digest "$(ct_tool_log digest-e2e)")"
+else
+  skip "digest: reads the log post-tool-use.sh actually writes" "jq not installed"
+fi
 
 echo "history columns at session end"
 
@@ -5538,7 +5567,7 @@ hc_run() {  # hc_run <config lines> ; plants one turn and ends the session
   printf '1'   > "${sf}.turns"
   printf '40'  > "${sf}.wait"
   printf '0'   > "${sf}.idle"
-  printf 'Bash\t12.500\tok\nRead\t0.250\tok\n' > "${sf}.tools"
+  printf 'Bash 12.500 ok\nRead 0.250 ok\n' > "${sf}.tools"
   printf '{"session_id":"%s","cwd":"%s"}' "$sid" "$2" \
     | bash "$SCRIPTS/session-end.sh" >/dev/null 2>&1
 }
