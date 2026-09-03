@@ -1780,6 +1780,23 @@ else
   pass "pruning removes stale session state"
 fi
 asserts "pruning keeps current session state" test -e "$(ct_state_dir)/recent"
+
+# .start was the one state file written once and never touched again, so a
+# session left open longer than the prune window lost it while still running.
+# _CT_START then reads 0 and session-end skips both the summary and the history
+# row: the longest session on the machine is the one that goes unrecorded.
+# Every other counter is rewritten on each prompt, so only this one aged out.
+ct_clear_state "longrun"
+lbase="$(ct_state_file longrun)"
+longstart="$(( $(date +%s) - 700000 ))"
+ct_turn_open "longrun" "$longstart"
+touch -t 202001010000 "$lbase.start"
+ct_turn_open "longrun" "$(date +%s)"
+ct_prune_state
+asserts "a session running past the prune window keeps its start" test -r "$lbase.start"
+is "and the start time it keeps is the original one" "$longstart" "$(ct_read_counter "$lbase.start")"
+ct_clear_state "longrun"
+
 rm -rf "$(ct_state_dir)"
 ct_prune_state
 pass "pruning a missing state directory is not an error"

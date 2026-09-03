@@ -378,14 +378,31 @@ ct_close_turn() {
 # SUMMARY=off used to do: nothing was ever recorded, and --stats blamed HISTORY
 # for it.
 ct_turn_open() {
-  local sid="${1:-}" now="${2:-0}" base
+  local sid="${1:-}" now="${2:-0}" base start
   base="$(ct_state_file "$sid")" || return 0
   case "$now" in ''|*[!0-9]*) return 0 ;; esac
   ct_state_ready || return 0
 
   printf '%s' "$now" > "$base"
   rm -f "${base}.closed" 2>/dev/null || true
-  [ -r "${base}.start" ] || printf '%s' "$now" > "${base}.start"
+
+  # Rewritten on every prompt rather than only when absent, so its modification
+  # time tracks the session. ct_prune_state deletes by mtime, and this was the
+  # one state file written once and never touched again: a session left open
+  # longer than the prune window lost it while still running, _CT_START then
+  # read 0, and session-end skipped both the summary and the history row. The
+  # longest session on the machine was the one that went unrecorded.
+  #
+  # The value is preserved -- only the timestamp on the file is refreshed. Read
+  # with the builtin rather than through ct_read_counter, which answers 0 for
+  # an absent file and would quietly reset a real start time to the epoch.
+  start=""
+  if [ -r "${base}.start" ]; then
+    IFS= read -r start < "${base}.start" 2>/dev/null || :
+  fi
+  case "$start" in ''|*[!0-9]*) start="$now" ;; esac
+  printf '%s' "$start" > "${base}.start"
+
   printf '%s' "$(( $(ct_read_counter "${base}.turns") + 1 ))" > "${base}.turns"
   return 0
 }
