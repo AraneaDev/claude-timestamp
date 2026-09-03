@@ -113,6 +113,17 @@ valid_color() {
   return 1
 }
 
+# The two format flags reach the config file as free text, which makes this the
+# guard that keeps a control character out of it: write_config interpolates a
+# value into KEY=value with no escaping, so a newline writes a second line the
+# parser reads back as a real setting. ct_is_valid_format has always refused
+# one; for a while nothing on the flag path asked it.
+valid_format() {
+  ct_is_valid_format "$2" && return 0
+  echo "$1 must be 24h, short, 12h, iso, or a strftime string containing %, got '$2'." >&2
+  return 1
+}
+
 valid_marker() {
   ct_is_valid_marker "$1" && return 0
   echo "That marker template is not usable. The parts are %time, %elapsed, %tool and %date," >&2
@@ -970,8 +981,8 @@ main() {
     valid_tz "$set_tz" || exit 2
     [ "$set_tz" = "local" ] && CT_TZ="" || CT_TZ="$set_tz"
   fi
-  [ -n "$set_display" ] && CT_DISPLAY_FORMAT="$set_display"
-  [ -n "$set_context" ] && CT_CONTEXT_FORMAT="$set_context"
+  if [ -n "$set_display" ]; then valid_format DISPLAY_FORMAT "$set_display" || exit 2; CT_DISPLAY_FORMAT="$set_display"; fi
+  if [ -n "$set_context" ]; then valid_format CONTEXT_FORMAT "$set_context" || exit 2; CT_CONTEXT_FORMAT="$set_context"; fi
   if [ -n "$set_color" ];   then valid_color "$set_color" || exit 2; CT_COLOR="$set_color"; fi
   # A bare --marker= is unlike a bare --time-color=: an empty template is
   # already a legal, meaningful value (ct_is_valid_marker accepts it, and a
