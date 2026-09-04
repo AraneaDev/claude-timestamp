@@ -828,6 +828,42 @@ _ct_project_basename() {
   printf '%s' "$b"
 }
 
+# The basename of the git checkout containing DIR, walked upward from it; the
+# basename of DIR itself when no checkout is found above it; or the literal
+# "-" when DIR is empty, "/", or equal to $HOME.
+#
+# Only ever a basename, never a path: the README promises the history file's
+# PROJECTS column holds "the project's directory name, never the path above
+# it" (README.md, the history section). Every value that names a real
+# directory -- the found checkout, or the no-checkout fallback -- is passed
+# through _ct_project_basename, which is where the neutralising described on
+# that helper happens; this function does not repeat it. The "-" sentinel
+# itself bypasses the helper and is emitted directly, because the helper maps
+# a literal "-" to "_" precisely so it can never be mistaken for this
+# sentinel, and routing the sentinel through its own collision guard would
+# defeat that.
+#
+# The walk stops at $HOME rather than climbing into it, because a git-managed
+# home directory (a common dotfiles setup) has a .git right there: without the
+# stop, the walk would report $HOME's own basename -- ordinarily the username
+# -- into a column meant to hold a project name. The stop is a plain string
+# comparison against $HOME with trailing slashes trimmed from both sides,
+# checked before each candidate directory is tested for a .git; the case where
+# the original argument already IS $HOME, which never even enters that loop,
+# is handled separately by the same comparison in the fallback below.
+#
+# Bounded at 40 steps, the cap ct_find_project_config also uses, so a path
+# that never reaches "/" -- a symlink loop, or simply a deep tree -- cannot
+# hang the hook this runs inside.
+#
+# No subprocess: parameter expansion only, cheap enough to run unconditionally
+# once per session rather than only when PROJECTS=on. Resolving symlinks the
+# way ct_find_project_config does would need one, so this deliberately does
+# not.
+#
+# ".git" is tested as both a directory and a file: a linked git worktree's
+# .git is a file, not a directory, and a checkout opened as a worktree would
+# otherwise never be recognised as one.
 ct_project_name() {
   local dir="$1" steps=0 base next home
   case "$dir" in

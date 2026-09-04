@@ -1087,6 +1087,17 @@ TABLE
   echo "Wrote $(ct_tilde "$file")"
 }
 
+# Prints the effective settings for whoever ran --show (or the /timestamps
+# slash command's "how it looks" path) to confirm what is actually configured,
+# without reading the config file -- or two, once a project layer is
+# involved -- by hand.
+#
+# tools/check-docs.sh's show-config-completeness gate asserts every
+# CT_FLAG_TABLE row's variable is referenced somewhere in this function's
+# body. It exists because PROJECTS once reached the flag table and
+# write_config's heredoc but never this function: the setting parsed, wrote,
+# and validated correctly, yet --show had no line for it, so nothing could
+# confirm from the command line that it had taken.
 show_config() {
   ct_load_config
   local file
@@ -1192,6 +1203,14 @@ ask() {
   return 0
 }
 
+# A curated walkthrough, not a complete one. It asks about the settings that
+# change what a session actually shows -- ENABLED, TZ, the clock format,
+# ELAPSED and its threshold, IDLE_AFTER, SUMMARY, TOOL_TIMING, COLOR, the
+# marker template, HISTORY and PROJECTS -- plus the one model-facing setting,
+# INJECT_CONTEXT and its format. Finer controls such as the per-part colours,
+# SLOW_COLOR, DATE_ROLLOVER, SUBAGENTS and HISTORY_LIMIT are reachable only
+# through their own flags; a curated set of ready-made marker templates is
+# offered separately, through the /timestamps slash command's looks picker.
 wizard() {
   ct_load_config
 
@@ -1437,6 +1456,16 @@ TABLE
   return 1
 }
 
+# Parses argv into one action -- show, doctor, stats, wizard, or a write --
+# then dispatches to exactly one of them.
+#
+# Configuration is not loaded yet while parsing runs, so nothing in the loop
+# below may depend on it; --config=* is the one exception, since it only
+# decides where a later ct_load_config will look. --since=Nd used to violate
+# this by resolving its relative cutoff immediately, against whatever CT_TZ
+# happened to be in scope at parse time rather than the one the config file
+# names; it now stores the raw day count and defers resolution to stats(),
+# which runs after configuration has loaded.
 main() {
   local interactive=1 action="write" project_scope=0
   local arg flag value i days

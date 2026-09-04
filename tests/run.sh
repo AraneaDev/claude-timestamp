@@ -3568,6 +3568,7 @@ contains "stats: and counts both rows"                     "sessions        2"  
 
 echo "stats reads a widened row"
 
+# Shorthand for the --stats run the next several assertions repeat.
 sw() { bash "$SCRIPTS/setup.sh" --stats 2>&1; }
 
 printf '2026-09-01T10:00:00\t3600\t10\t600\t0\t0\tone\tBash:100:5\n' \
@@ -6117,7 +6118,18 @@ fi
 
 echo "history columns at session end"
 
-hc_run() {  # hc_run <config lines> ; plants one turn and ends the session
+# Plants one finished turn's counters by hand, then drives the real
+# session-end.sh over stdin so the history row this feeds comes from the
+# actual writer rather than from a fabricated one. $1 is one or more config
+# lines to write first (embed a literal newline to set more than one); $2 is
+# the cwd session-end.sh receives, which is what PROJECTS=on records from.
+#
+# Deliberately does not create the turn's own base state file, only its
+# .start, .turns, .wait, .idle and .tools siblings -- so there is no open
+# turn for session-end.sh's own ct_turn_close to close: ct_close_turn returns
+# at once when that base file is absent, and the counters planted here are
+# what session-end.sh reads regardless.
+hc_run() {
   local sid="hc-$$-$RANDOM"
   printf '%s\n' "$1" > "$CLAUDE_TIMESTAMP_CONFIG"
   : > "$CLAUDE_TIMESTAMP_HISTORY"
