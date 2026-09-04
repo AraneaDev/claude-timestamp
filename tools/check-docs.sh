@@ -258,6 +258,90 @@ else
   gate setup-flag-table 0 "setup.sh's flag table drifts from schema.json:$ft_detail"
 fi
 
+echo "write_config writes every key the flag table names"
+# write_project_config walks CT_FLAG_TABLE through _ct_flag_row_for_key, so
+# every row it names reaches a project file automatically. write_config, the
+# account-level writer, is a hand-written heredoc with no such loop -- a row
+# can be added to the table and never make it into the heredoc, which is
+# exactly what happened to PROJECTS: it parsed, validated and reported
+# success while writing nothing, through three reviews and a full run of this
+# file, because nothing compared the two lists.
+#
+# The heredoc's body is extracted by its own delimiters rather than by line
+# number, so this keeps working as write_config grows.
+wc_body="$(sed -n '/<<CONF$/,/^CONF$/p' hooks/scripts/setup.sh | sed '1d;$d')"
+wc_written="$(printf '%s\n' "$wc_body" | grep -oE '^[A-Z_]+=' | sed 's/=$//' | sort -u)"
+wc_missing=""
+while read -r ft_key; do
+  [ -n "$ft_key" ] || continue
+  case "
+$wc_written
+" in
+    *"
+$ft_key
+"*) ;;
+    *) wc_missing="$wc_missing $ft_key" ;;
+  esac
+done < <(printf '%s\n' "$ft_rows" | awk '{ print $2 }')
+if [ -n "$wc_missing" ]; then
+  gate write-config-completeness 0 \
+    "write_config's heredoc never writes:$wc_missing"
+else
+  gate write-config-completeness 1 \
+    "write_config writes every key CT_FLAG_TABLE names"
+fi
+
+echo "show_config displays every key the flag table names"
+# show_config is the second place, besides write_config, that claims to list
+# every setting, and had the identical defect: PROJECTS reached
+# CT_FLAG_TABLE and write_config's heredoc but never show_config, so --show
+# could not confirm the setting took without reading the config file by
+# hand. Modelled on the write-config-completeness gate above: extract
+# show_config's own body by its braces, and check that each flag table
+# row's variable is actually referenced somewhere in it. The boundary after
+# the var name rules out CT_ELAPSED matching inside CT_ELAPSED_COLOR, and
+# CT_HISTORY matching inside CT_HISTORY_LIMIT, which a plain substring test
+# would miss.
+sc_body="$(sed -n '/^show_config() {$/,/^}$/p' hooks/scripts/setup.sh | sed '1d;$d')"
+sc_missing=""
+while read -r ft_var; do
+  [ -n "$ft_var" ] || continue
+  printf '%s\n' "$sc_body" | grep -qE '\$\{?'"$ft_var"'([^A-Za-z0-9_]|$)' ||
+    sc_missing="$sc_missing $ft_var"
+done < <(printf '%s\n' "$ft_rows" | awk '{ print $3 }')
+if [ -n "$sc_missing" ]; then
+  gate show-config-completeness 0 \
+    "show_config never displays:$sc_missing"
+else
+  gate show-config-completeness 1 \
+    "show_config displays every key CT_FLAG_TABLE names"
+fi
+
+echo "every flag has a help line in usage()"
+# The help-schema gate above checks that a handful of colour flags' help
+# lines name the right placeholders; it has never checked that a flag has a
+# help line at all. A design document for this branch claimed check-docs
+# already covered a new CT_FLAG_TABLE key reaching --help, which is why
+# nobody wrote this gate sooner -- the claim was false. Extract usage()'s
+# own heredoc body and check that each flag table row's flag name is
+# actually named there. The boundary after the flag rules out --history
+# matching inside --history-limit, the same class of false pass the
+# show-config-completeness gate above guards against for variable names.
+us_body="$(sed -n "/cat <<'USAGE'\$/,/^USAGE\$/p" hooks/scripts/setup.sh | sed '1d;$d')"
+us_missing=""
+while read -r ft_flag; do
+  [ -n "$ft_flag" ] || continue
+  printf '%s\n' "$us_body" | grep -qE -- "--${ft_flag}([^A-Za-z0-9_-]|\$)" ||
+    us_missing="$us_missing --$ft_flag"
+done < <(printf '%s\n' "$ft_rows" | awk '{ print $1 }')
+if [ -n "$us_missing" ]; then
+  gate usage-completeness 0 \
+    "usage() never mentions:$us_missing"
+else
+  gate usage-completeness 1 \
+    "usage() has a help line for every flag CT_FLAG_TABLE names"
+fi
+
 echo "lint file list"
 # The shellcheck and bash -n steps name their files by hand, so a new script
 # is linted by nobody until someone remembers to add it. Compare the tracked

@@ -162,6 +162,7 @@ _ct_read_config_file() {
       TOOL_TIMING)    CT_TOOL_TIMING="$value" ;;
       HISTORY)        CT_HISTORY="$value" ;;
       HISTORY_LIMIT)  CT_HISTORY_LIMIT="$value" ;;
+      PROJECTS)       CT_PROJECTS="$value" ;;
       INJECT_CONTEXT) CT_INJECT_CONTEXT="$value" ;;
     esac
   done < "$file"
@@ -190,6 +191,7 @@ ct_load_config() {
   CT_TOOL_TIMING="off"        # adds two forks per tool call, so opt-in
   CT_HISTORY="on"
   CT_HISTORY_LIMIT="200"      # sessions kept; older ones are dropped
+  CT_PROJECTS="off"           # record the project name in the history row
   CT_INJECT_CONTEXT="true"
 
   CT_CONFIG_PROBLEMS=""
@@ -312,6 +314,7 @@ ct_validate_config() {
   _ct_require TOOL_TIMING    ct_is_onoff        off
   _ct_require HISTORY        ct_is_onoff        on
   _ct_require HISTORY_LIMIT  ct_is_history_limit 200
+  _ct_require PROJECTS       ct_is_onoff        off
   _ct_require INJECT_CONTEXT ct_is_bool         true
 }
 
@@ -374,6 +377,32 @@ ct_now() {
   # %I is zero-padded and BSD date has no %-I, so trim the pad by hand.
   [ "$1" = "12h" ] && out="${out#0}"
   printf '%s' "$out"
+}
+
+# A date N days before now, as YYYY-MM-DD in the configured zone, for the
+# history filter. The two date implementations disagree on how to format an
+# epoch that is not now: GNU takes -d @EPOCH, BSD takes -r EPOCH. Both are
+# tried, and neither working prints nothing, which the caller reads as "no
+# cutoff could be computed" rather than as a cutoff of zero.
+#
+# CT_TZ is applied per call rather than exported, as ct_now does, so the
+# cutoff lands in the same zone the rows were written in.
+ct_date_days_ago() {
+  local days="$1" target
+  case "$days" in ''|*[!0-9]*) return 1 ;; esac
+  # Force base 10. "$days" is all digits at this point, but a leading zero --
+  # e.g. "08" -- makes bash arithmetic read it as octal, where 8 is not a
+  # valid digit, aborting the caller; "10#" pins the base so the digits are
+  # read as the decimal --since=Nd meant. Do not remove this as noise.
+  target=$(( $(date +%s) - 10#$days * 86400 ))
+  if ct_tz_honoured; then
+    TZ="$CT_TZ" date -d "@$target" +%Y-%m-%d 2>/dev/null && return 0
+    TZ="$CT_TZ" date -r "$target"  +%Y-%m-%d 2>/dev/null && return 0
+  else
+    date -d "@$target" +%Y-%m-%d 2>/dev/null && return 0
+    date -r "$target"  +%Y-%m-%d 2>/dev/null && return 0
+  fi
+  return 1
 }
 
 # Current timezone abbreviation (CEST, JST...) for the model-facing string.
@@ -753,6 +782,228 @@ ct_history_path() {
   printf '%s' "${CLAUDE_TIMESTAMP_HISTORY:-${HOME}/.claude/claude-timestamp-history.tsv}"
 }
 
+# A working directory reduced to a bare project name, for the history's
+# optional project column.
+#
+# The walk is the shape ct_find_project_config uses, and stops at the same
+# two boundaries: $HOME, because a .git there belongs to a dotfiles checkout
+# rather than to whatever project the session is actually in, and 40 levels,
+# far past any real checkout, so an unbounded loop on a path that never
+# reaches / cannot hang a hook. No subprocess, so this costs nothing beyond
+# the directory tests themselves, and it runs once per session -- unlike
+# ct_find_project_config, the $HOME comparison here is a plain string
+# comparison rather than one resolved through a symlink, since resolving one
+# would need the subprocess this function promises not to spend.
+#
+# Only ever the basename. The parent directories are the part of a path that
+# says who you work for and what you call your clients, and none of it belongs
+# in a file that accumulates indefinitely.
+#
+# A directory name may legally contain a tab or a newline -- mkdir does not
+# reject either -- and either one would corrupt the history row this feeds: a
+# newline splits one row into two physical lines, and a tab forges an extra
+# field that can pass the reader's field-count check while carrying shifted
+# data. Neutralised here, at the producer, the same way ct_tool_digest already
+# neutralises its own separators, and through parameter expansion rather than a
+# subprocess, matching the no-subprocess promise above.
+# A real basename, sanitised for the history row: tab and newline neutralised
+# the same way ct_tool_digest neutralises its own separators, and -- since
+# "-" is what every reader of this column treats as the absent-project
+# sentinel returned by ct_project_name itself -- a basename that is exactly
+# "-" mapped away from that value too. A checkout named "-" would otherwise
+# be indistinguishable from having no project at all: it would bucket into
+# "(unnamed)" in --stats, and if it were the only project on record the
+# by-project block would be suppressed entirely, since ct_project_name's own
+# genuine "no project" case is spelled the same way.
+#
+# Not lossless: this maps a checkout literally named "-" onto the same "_"
+# a checkout literally named "_" already produces on its own, and --stats
+# then merges the two under one "_" total. Every mapping from an unbounded
+# name space onto a smaller one collides somewhere; "-" colliding with a
+# literal "_" is the one this function accepts, in exchange for never
+# emitting the sentinel by accident.
+_ct_project_basename() {
+  local b="${1//[$'\t\r\n']/_}"
+  [ "$b" = "-" ] && b="_"
+  printf '%s' "$b"
+}
+
+# The basename of the git checkout containing DIR, walked upward from it; the
+# basename of DIR itself when no checkout is found above it; or the literal
+# "-" when DIR is empty, "/", or equal to $HOME.
+#
+# Only ever a basename, never a path: the README promises the history file's
+# PROJECTS column holds "the project's directory name, never the path above
+# it" (README.md, the history section). Every value that names a real
+# directory -- the found checkout, or the no-checkout fallback -- is passed
+# through _ct_project_basename, which is where the neutralising described on
+# that helper happens; this function does not repeat it. The "-" sentinel
+# itself bypasses the helper and is emitted directly, because the helper maps
+# a literal "-" to "_" precisely so it can never be mistaken for this
+# sentinel, and routing the sentinel through its own collision guard would
+# defeat that.
+#
+# The walk stops at $HOME rather than climbing into it, because a git-managed
+# home directory (a common dotfiles setup) has a .git right there: without the
+# stop, the walk would report $HOME's own basename -- ordinarily the username
+# -- into a column meant to hold a project name. The stop is a plain string
+# comparison against $HOME with trailing slashes trimmed from both sides,
+# checked before each candidate directory is tested for a .git; the case where
+# the original argument already IS $HOME, which never even enters that loop,
+# is handled separately by the same comparison in the fallback below.
+#
+# Bounded at 40 steps, the cap ct_find_project_config also uses, so a path
+# that never reaches "/" -- a symlink loop, or simply a deep tree -- cannot
+# hang the hook this runs inside.
+#
+# No subprocess: parameter expansion and directory tests only. Resolving
+# symlinks the way ct_find_project_config does would need one, so this
+# deliberately does not. Its only caller runs it once per session and only
+# when PROJECTS=on (session-end.sh), so the cost never falls on anyone who
+# has not asked for the column.
+#
+# ".git" is tested as both a directory and a file: a linked git worktree's
+# .git is a file, not a directory, and a checkout opened as a worktree would
+# otherwise never be recognised as one.
+ct_project_name() {
+  local dir="$1" steps=0 base next home
+  case "$dir" in
+    "" | "/") printf '%s' '-'; return 0 ;;
+  esac
+  # Trailing slashes would make the basename empty, and "/a/b/" and "/a/b" are
+  # the same directory.
+  while [ "${dir}" != "/" ] && [ "${dir%/}" != "$dir" ]; do dir="${dir%/}"; done
+  # $HOME, trailing slash stripped the same way, so the comparison below
+  # cannot miss on that alone. Plain string comparison, not the resolved-
+  # symlink comparison ct_find_project_config uses: this function promises no
+  # subprocess, and $(cd ... && pwd -P) is one.
+  home="${HOME:-}"
+  while [ "${home}" != "/" ] && [ -n "$home" ] && [ "${home%/}" != "$home" ]; do home="${home%/}"; done
+  while [ -n "$dir" ] && [ "$dir" != "/" ] && [ "$steps" -lt 40 ]; do
+    # Stops the walk before it ever looks inside $HOME, the same boundary
+    # ct_find_project_config stops at. A git-managed home directory (a common
+    # dotfiles setup) puts a .git right there, and without this the walk
+    # climbed past a real "no checkout here" answer and reported the home
+    # directory's own basename -- ordinarily the username -- into a history
+    # column the README promises holds no paths. This break only stops the
+    # walk from looking AT $HOME once it reaches it; it does nothing for a
+    # cwd that already equals $HOME on entry, since the loop breaks on the
+    # very first iteration without ever reaching the fallback below. That
+    # case is handled separately, right where the fallback re-derives its
+    # basename from the original argument.
+    [ -n "$home" ] && [ "$dir" = "$home" ] && break
+    if [ -d "$dir/.git" ] || [ -f "$dir/.git" ]; then
+      base="${dir##*/}"
+      _ct_project_basename "$base"
+      return 0
+    fi
+    next="${dir%/*}"
+    # A path with no slash left in it -- "foo", or what a leading path
+    # component like "/foo" reduces to once that slash is stripped below --
+    # makes "${dir%/*}" a no-op, so without this check the loop would spend
+    # its remaining steps re-testing the same directory for no reason, up to
+    # the 40-step cap, before falling through to the same answer either way.
+    [ "$next" = "$dir" ] && break
+    dir="$next"
+    steps=$((steps + 1))
+  done
+  # No repository above it. The directory is still the best available answer,
+  # so fall back to the original rather than reporting nothing -- unless that
+  # original argument IS $HOME itself. A cwd equal to $HOME never enters the
+  # walk above (the break at the top of the loop fires on the first
+  # iteration), so without this check the fallback would report $HOME's own
+  # basename -- ordinarily the username -- into a history column the README
+  # promises holds no paths. $HOME/work is a different string from $HOME, so
+  # it still falls through to the basename case below and reports "work".
+  dir="$1"
+  while [ "${dir}" != "/" ] && [ "${dir%/}" != "$dir" ]; do dir="${dir%/}"; done
+  if [ -n "$home" ] && [ "$dir" = "$home" ]; then
+    printf '%s' '-'
+    return 0
+  fi
+  case "$dir" in
+    "" | "/") printf '%s' '-' ;;
+    */*)      base="${dir##*/}"; _ct_project_basename "$base" ;;
+    *)        _ct_project_basename "$dir" ;;
+  esac
+}
+
+# One session's tool log reduced to the history row's tool column:
+# Name:seconds:calls, comma separated, worst first.
+#
+# Whole seconds. The per-call millisecond precision the log keeps is what makes
+# a single slow call findable; summed over a session and then over a hundred
+# sessions it is noise, and dropping it keeps the field readable by eye, which
+# is the property /timestamps depends on.
+#
+# Eight tools, where the session summary keeps three. Three is right for "what
+# made this session slow", which wants a headline. This field feeds totals
+# across every recorded session, and a top-three cut biases those totals toward
+# whichever tools place in a top three often rather than toward the ones that
+# actually cost the most.
+#
+# A comma or colon in a tool name would split a field that is parsed on both.
+# No tool is named that way today, MCP names being mcp__server__tool, but the
+# format should not depend on that staying true.
+ct_tool_digest() {
+  local file="$1"
+  [ -n "$file" ] && [ -s "$file" ] || return 0
+  # The log's own writer (post-tool-use.sh) emits space-separated lines --
+  # "<tool name> <seconds> <outcome>" -- and rejects a tool name containing a
+  # space before it ever gets there, so the default field separator is safe
+  # here and is what actually matches what was written. Only the second stage
+  # below reads tab-separated input, because it is reading this awk's own
+  # output, which this awk deliberately emits with a tab.
+  awk '
+    # A blank line, or one with too few fields, has no tool name and no
+    # usable duration -- skip it rather than aggregating it into an entry
+    # with an empty name, which the digest would otherwise carry all the way
+    # into the history row as a meaningless "" entry.
+    $1 == "" || $2 !~ /^[0-9]+(\.[0-9]+)?$/ { next }
+    {
+      name = $1
+      gsub(/[,:\t]/, "_", name)
+      sum[name] += $2 + 0
+      n[name]++
+    }
+    END {
+      # Milliseconds, not seconds: %018d truncates its argument to an
+      # integer, and a sort key truncated to whole seconds ties two tools at,
+      # say, 1.2s and 1.9s at "1" -- `sort -rn` then breaks the tie on the
+      # rest of the line, reverse-alphabetically, which can drop the
+      # genuinely costlier tool from the eight-entry cap below in favour of
+      # the cheaper one. Scaling to milliseconds keeps every tie the on-screen
+      # aggregation in session-end.sh (which sorts on "%.3f", millisecond
+      # precision)
+      # would also call a tie, while the zero-padded width keeps the plain
+      # `sort -rn` correct on GNU and BSD alike. `+ 0.5` rounds rather than
+      # truncating a second time, so float error in `sum[t]` cannot shave a
+      # whole millisecond off a value that was exact in the log.
+      for (t in sum) printf "%018d\t%s\t%d\n", int(sum[t] * 1000 + 0.5), t, n[t]
+    }' "$file" \
+  |
+  # `|| true` at the very end of this pipeline: on a log with many distinct
+  # tools, `head -8` below closes the pipe once it has its eight lines, and
+  # `sort` -- which may still have more to write -- gets SIGPIPE for it, even
+  # though every line `head` needed had already been delivered. That makes
+  # the pipeline's exit status nonzero for reasons that have nothing to do
+  # with the output being wrong. This function runs under a caller's
+  # `errexit`/`pipefail` (session-end.sh), so without `|| true`, a large
+  # enough log would abort that caller before it appends to history or clears
+  # session state. The printed output is unaffected either way.
+  sort -rn \
+  | head -8 \
+  | awk -F'\t' '{
+      # $1 is milliseconds here, the same scaling the first stage applied to
+      # the sort key; converted back to whole seconds only now, for the one
+      # part of the output format that has not changed: still whole seconds,
+      # still truncated, since /timestamps and the history documentation both
+      # read this field that way.
+      printf "%s%s:%d:%d", (NR > 1 ? "," : ""), $2, int($1 / 1000), $3
+    }' \
+  || true
+}
+
 # Machine-level facts, published for whoever configures the plugin from inside
 # Claude Code so they need no subprocess to learn them. Only things that cannot
 # be read out of the config files belong here: the effective settings do not,
@@ -832,7 +1083,8 @@ ct_note_drawn() {
 }
 
 # Append one finished session and drop anything past the retention limit.
-# Fields: when, seconds, turns, waited, idle, failed tools.
+# Fields: when, seconds, turns, waited, idle, failed tools, project, tool
+# digest. The last two are optional.
 ct_history_append() {
   local file limit tmp lock dead have_lock=0 tries
   file="$(ct_history_path)"
@@ -895,8 +1147,24 @@ ct_history_append() {
   # after half a second of contention on an operation that takes about a
   # millisecond. So: with the lock, no append can be lost. Without it, this
   # one might be. What cannot happen is the record never being written.
-  printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
-    "$(ct_now iso)" "${1:-0}" "${2:-0}" "${3:-0}" "${4:-0}" "${5:-0}" >> "$file" 2>/dev/null || {
+  # Trailing columns are omitted rather than written empty, so an installation
+  # that has opted into neither keeps producing exactly the six-field row it
+  # produced before they existed. Nothing on disk has to be migrated because
+  # nothing on disk moves.
+  #
+  # A project that is absent while tools are present writes "-", never "".
+  # Two adjacent tabs are the input the field-shifting bug in setup.sh's
+  # reader needs, and not emitting one is cheaper than defending against it
+  # twice more.
+  local row
+  row="$(printf '%s\t%s\t%s\t%s\t%s\t%s' \
+    "$(ct_now iso)" "${1:-0}" "${2:-0}" "${3:-0}" "${4:-0}" "${5:-0}")"
+  if [ -n "${7:-}" ]; then
+    row="$(printf '%s\t%s\t%s' "$row" "${6:--}" "$7")"
+  elif [ -n "${6:-}" ]; then
+    row="$(printf '%s\t%s' "$row" "$6")"
+  fi
+  printf '%s\n' "$row" >> "$file" 2>/dev/null || {
       if [ "$have_lock" -eq 1 ]; then rmdir "$lock" 2>/dev/null || true; fi
       return 0
     }

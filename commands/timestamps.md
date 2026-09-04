@@ -92,8 +92,8 @@ value, so it carries no residue either way, and leaving it out means a
 deliberate `COLOR=none` survives switching presets. `off` writes `ENABLED`
 alone, deliberately, so switching back on restores everything else as it was.
 
-`default` is the default marker, not a factory reset. It leaves the other
-eleven keys as they are, `TZ` and `INJECT_CONTEXT` among them. That is usually
+`default` is the default marker, not a factory reset. It leaves every other
+key as it is, `TZ` and `INJECT_CONTEXT` among them. That is usually
 what someone asking for the defaults back wants, a pinned timezone especially, but
 say which settings it left alone when you report, or the name promises more
 than it delivered.
@@ -311,15 +311,41 @@ preview that is a guess is worse than no picker at all.
 ## Showing what the sessions add up to
 
 If the user asks how long they have been spending, or how much of it was
-waiting, read `~/.claude/claude-timestamp-history.tsv`. One finished session per
-line, tab separated: when, seconds, turns, waited, idle, failed tools. The
-timestamp is in the configured timezone, the same one the markers use. A line
-that does not have six fields has been damaged and should be reported rather
-than counted. It is capped at `HISTORY_LIMIT` lines, 200 by default, so it fits
-in one read and the totals are yours to add up.
+waiting, or which project or tool took it, read
+`~/.claude/claude-timestamp-history.tsv`. One finished session per line, tab
+separated:
 
-It holds timings only, no message text and no paths, which is worth saying if
-they ask what is stored.
+1. when, in the configured timezone
+2. seconds
+3. turns
+4. waited
+5. idle
+6. failed tools
+7. project, when `PROJECTS=on` was set (`-` means unnamed); `TOOL_TIMING=on`
+   alone also writes `-` here, as a placeholder holding field 8's place
+8. tool digest, only when `TOOL_TIMING=on` was set
+
+A row carries six, seven or eight fields. Six is a session recorded before
+either optional column was switched on, or by someone who has switched on
+neither, and it counts like any other. A row with fewer than six, more than
+eight, or a non-numeric value in fields two through six has been damaged and
+should be reported rather than counted.
+
+Field 8 reads `Bash:412:18,Read:20:37`: tool name, whole seconds, calls,
+worst first, at most eight tools. To answer which tool has been costing the
+most, sum the seconds per name across rows. An entry that does not split into
+exactly three parts is damaged: skip that entry and keep the rest of the row.
+
+To answer a question about one project, match field 7 exactly. To answer one
+about a period, compare field 1 as a string: it is ISO, so `2026-09-01` sorts
+before every timestamp on or after that day.
+
+It is capped at `HISTORY_LIMIT` lines, 200 by default, so it fits in one read
+and the totals are yours to add up.
+
+It holds timings only. No message text, no tool arguments, and no paths. With
+`PROJECTS=on` it also holds the project's directory name, and nothing deeper.
+That is worth saying if they ask what is stored.
 
 ## When something is not working
 

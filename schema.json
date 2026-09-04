@@ -205,6 +205,12 @@
       "minimum": 1,
       "describes": "how many recorded sessions to keep; 1 or more, and HISTORY=off is how you keep none"
     },
+    "PROJECTS": {
+      "default": "off",
+      "validator": "ct_is_onoff",
+      "values": ["on", "off"],
+      "describes": "record the project's directory name in each history row; off by default, and never records a path"
+    },
     "INJECT_CONTEXT": {
       "default": "true",
       "validator": "ct_is_bool",

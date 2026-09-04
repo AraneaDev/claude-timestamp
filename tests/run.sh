@@ -1591,6 +1591,14 @@ contains "--show prints the config path" "$(ct_tilde "$CLAUDE_TIMESTAMP_CONFIG")
 # a second surface that also claims to list every setting, and was left behind.
 fresh 'MARKER=%time{ %elapsed}'
 contains "--show mentions the marker template" '%time{ %elapsed}' "$(bash "$SCRIPTS/setup.sh" --show)"
+
+# PROJECTS reached CT_FLAG_TABLE, write_config and the README, but never
+# show_config: every other flag table key has a row there, PROJECTS did not,
+# so there was no way to confirm the setting took without reading the config
+# file by hand.
+fresh 'PROJECTS=on'
+contains "--show mentions PROJECTS" "on" \
+  "$(bash "$SCRIPTS/setup.sh" --show | grep -i project)"
 contains "--help lists the flags" "--elapsed" "$(bash "$SCRIPTS/setup.sh" --help)"
 bash "$SCRIPTS/setup.sh" --date-rollover=off >/dev/null
 ct_load_config
@@ -1644,7 +1652,7 @@ is "a rejected format cannot smuggle a second setting into the file" "on" "$CT_E
 # to be wrong, so flag twenty-one is covered the day it is added.
 fresh 'ENABLED=on'
 flag_table="$(sed -n '/^CT_FLAG_TABLE="$/,/^"$/p' "$SCRIPTS/setup.sh" | sed '1d;$d')"
-is "every setting has a flag in the table" "20" \
+is "every setting has a flag in the table" "21" \
   "$(printf '%s\n' "$flag_table" | grep -c '^[a-z]')"
 # shellcheck disable=SC2034  # t_rest is read to consume the rest of the row
 while read -r t_flag t_rest; do
@@ -1872,7 +1880,7 @@ is "invalid: a refusal writes nothing to stdout" "" \
 # --slow-after to correct, so naming one would send them looking for a flag
 # they did not type.
 fresh
-wiz="$(printf 'on\nlocal\n24h\non\nsoon\n30\nlater\n600\noff\nnone\n\nfalse\nn\n' \
+wiz="$(printf 'on\nlocal\n24h\non\nsoon\n30\nlater\n600\noff\noff\nnone\n\nfalse\nn\n' \
         | bash "$SCRIPTS/setup.sh" 2>&1 >/dev/null)"
 contains "invalid: the wizard labels a bad slow-after with the key" \
          "SLOW_AFTER must be a whole number of seconds, got 'soon'." "$wiz"
@@ -2640,6 +2648,22 @@ contains "validate: and the TOOL_TIMING problem names its own key and default" \
 is "validate: ten unusable settings make ten problems" "10" \
   "$(printf '%s\n' "$CT_CONFIG_PROBLEMS" | grep -c 'is not valid')"
 
+echo
+echo "projects setting"
+
+: > "$CLAUDE_TIMESTAMP_CONFIG"
+ct_load_config
+is "projects: defaults to off" "off" "$CT_PROJECTS"
+
+printf 'PROJECTS=on\n' > "$CLAUDE_TIMESTAMP_CONFIG"
+ct_load_config
+is "projects: on is read" "on" "$CT_PROJECTS"
+
+printf 'PROJECTS=maybe\n' > "$CLAUDE_TIMESTAMP_CONFIG"
+ct_load_config
+is "projects: an invalid value falls back to the default" "off" "$CT_PROJECTS"
+contains "projects: and says so" "PROJECTS=maybe is not valid" "$CT_CONFIG_PROBLEMS"
+
 # ct_is_valid_tz is the only thing between a hand-edited file and a zone name
 # that walks out of the zoneinfo directory.
 fresh 'TZ=../etc'
@@ -2923,10 +2947,12 @@ else
 fi
 
 # Answers in prompt order: enabled, timezone, display format, elapsed, slow
-# after, idle after, summary, colour, marker (blank keeps the default), tell-
-# Claude, write. Tool timing and context format are skipped because summary
-# and tell-Claude are answered off and false.
-printf 'off\n%s\nshort\non\n30\n0\noff\ncyan\n\nfalse\ny\n' "$tz_answer" \
+# after, idle after, summary, tool timing, history, projects, colour, marker
+# (blank keeps the default), tell-Claude, write. Tool timing is asked
+# unconditionally now, regardless of what summary answered -- it feeds the
+# session history and --stats, not just the on-screen summary any more.
+# Context format is skipped because tell-Claude is answered false.
+printf 'off\n%s\nshort\non\n30\n0\noff\noff\non\noff\ncyan\n\nfalse\ny\n' "$tz_answer" \
   | bash "$SCRIPTS/setup.sh" >/dev/null 2>&1
 ct_load_config
 is "the wizard writes enabled"        "off"        "$CT_ENABLED"
@@ -2937,20 +2963,65 @@ is "the wizard writes the colour"     "cyan"       "$CT_COLOR"
 is "the wizard writes the summary"    "off"        "$CT_SUMMARY"
 is "the wizard writes the injection"  "false"      "$CT_INJECT_CONTEXT"
 
+# A broad enough search term can match more zoneinfo entries than `head -25`
+# keeps, closing the pipe on `sort` before it is done writing and sending it
+# SIGPIPE. This machine's own zoneinfo may be too small to reproduce that --
+# a reviewer could not -- so the search is pointed at a synthetic tree large
+# enough to guarantee it instead: 20000 matches reliably overflows the pipe
+# buffer that lets a shorter list slip through unnoticed. The answer after
+# "list" is "local" rather than a real zone, so this does not also depend on
+# the fake tree containing the real answer.
+zs_zoneinfo="$WORK/zs-zoneinfo"
+rm -rf "$zs_zoneinfo"
+mkdir -p "$zs_zoneinfo/Zone"
+seq 1 20000 | awk -v base="$zs_zoneinfo/Zone/City" '{ print base $1 }' | xargs touch
+fresh
+zs_out="$WORK/zone-search.out"
+zs_rc=0
+printf 'off\nlist\nZone\nlocal\nshort\non\n30\n0\noff\noff\non\noff\ncyan\n\nfalse\ny\n' \
+  | CLAUDE_TIMESTAMP_ZONEINFO="$zs_zoneinfo" bash "$SCRIPTS/setup.sh" > "$zs_out" 2>&1 \
+  || zs_rc=$?
+is "the wizard's zone search survives a closed pipe on a large zoneinfo" \
+   "0" "$zs_rc"
+contains "and still reaches the write confirmation" \
+   "Write this configuration?" "$(cat "$zs_out")"
+rm -rf "$zs_zoneinfo"
+
 # Answering off then back on in a fresh run proves the question round-trips
 # rather than only ever moving in one direction.
 fresh 'ENABLED=off'
-printf 'on\n%s\nshort\non\n30\n0\noff\ncyan\n\nfalse\ny\n' "$tz_answer" \
+printf 'on\n%s\nshort\non\n30\n0\noff\noff\non\noff\ncyan\n\nfalse\ny\n' "$tz_answer" \
   | bash "$SCRIPTS/setup.sh" >/dev/null 2>&1
 ct_load_config
 is "the wizard round-trips enabled back on" "on" "$CT_ENABLED"
 
+# Summary is answered on here, so tool timing was already being asked at this
+# point before this fix -- nothing about this fixture's answer count changes.
 fresh 'COLOR=green'
-printf 'off\nlocal\niso\non\n0\n0\non\non\nred\n\ntrue\n24h\nn\n' \
+printf 'off\nlocal\niso\non\n0\n0\non\non\non\non\nred\n\ntrue\n24h\nn\n' \
   | bash "$SCRIPTS/setup.sh" >/dev/null 2>&1
 ct_load_config
 is "answering no writes nothing"          "green" "$CT_COLOR"
 is "answering no leaves enabled untouched" "on"    "$CT_ENABLED"
+
+fresh
+printf 'on\nlocal\nshort\non\n30\n0\noff\noff\non\non\ncyan\n\nfalse\ny\n' \
+  | bash "$SCRIPTS/setup.sh" >/dev/null 2>&1
+ct_load_config
+is "the wizard writes history"  "on" "$CT_HISTORY"
+is "the wizard writes projects" "on" "$CT_PROJECTS"
+
+# Answering the history question off must skip the projects question rather
+# than ask one whose answer cannot take effect. If it were asked anyway, the
+# colour answer below would be swallowed by it and the colour assertion would
+# catch that.
+fresh
+printf 'on\nlocal\nshort\non\n30\n0\noff\noff\noff\ncyan\n\nfalse\ny\n' \
+  | bash "$SCRIPTS/setup.sh" >/dev/null 2>&1
+ct_load_config
+is "the wizard writes history off"            "off"   "$CT_HISTORY"
+is "history off skips the projects question"  "cyan"  "$CT_COLOR"
+is "and leaves projects at its default"       "off"   "$CT_PROJECTS"
 
 # Input running out must not leave the wizard asking forever.
 fresh
@@ -3012,6 +3083,34 @@ is "a row carries six fields"  "6" "$(awk -F'\t' 'NR==1{print NF}' "$CLAUDE_TIME
 is "the duration is recorded"  "3600" "$(awk -F'\t' 'NR==1{print $2}' "$CLAUDE_TIMESTAMP_HISTORY")"
 is "the turns are recorded"    "12"   "$(awk -F'\t' 'NR==1{print $3}' "$CLAUDE_TIMESTAMP_HISTORY")"
 is "the failures are recorded" "2"    "$(awk -F'\t' 'NR==1{print $6}' "$CLAUDE_TIMESTAMP_HISTORY")"
+
+: > "$CLAUDE_TIMESTAMP_HISTORY"
+ct_history_append 3600 12 900 300 2
+is "row: five arguments still write six fields" \
+   "6" "$(awk -F'\t' 'NR==1{print NF}' "$CLAUDE_TIMESTAMP_HISTORY")"
+
+: > "$CLAUDE_TIMESTAMP_HISTORY"
+ct_history_append 3600 12 900 300 2 "myrepo"
+is "row: a project makes it seven fields" \
+   "7" "$(awk -F'\t' 'NR==1{print NF}' "$CLAUDE_TIMESTAMP_HISTORY")"
+is "row: and the project lands in field seven" \
+   "myrepo" "$(cut -f7 "$CLAUDE_TIMESTAMP_HISTORY")"
+
+: > "$CLAUDE_TIMESTAMP_HISTORY"
+ct_history_append 3600 12 900 300 2 "" "Bash:20:2"
+is "row: tools without a project still make it eight fields" \
+   "8" "$(awk -F'\t' 'NR==1{print NF}' "$CLAUDE_TIMESTAMP_HISTORY")"
+is "row: and field seven is a dash rather than empty" \
+   "-" "$(cut -f7 "$CLAUDE_TIMESTAMP_HISTORY")"
+is "row: and the digest lands in field eight" \
+   "Bash:20:2" "$(cut -f8 "$CLAUDE_TIMESTAMP_HISTORY")"
+
+: > "$CLAUDE_TIMESTAMP_HISTORY"
+ct_history_append 3600 12 900 300 2 "myrepo" "Bash:20:2"
+is "row: both make it eight fields" \
+   "8" "$(awk -F'\t' 'NR==1{print NF}' "$CLAUDE_TIMESTAMP_HISTORY")"
+is "row: no field is ever written empty" \
+   "0" "$(grep -c $'\t\t' "$CLAUDE_TIMESTAMP_HISTORY" || true)"
 
 fresh 'HISTORY_LIMIT=3'
 for i in 1 2 3 4 5 6; do ct_history_append "$i" 1 0 0 0; done
@@ -3408,6 +3507,19 @@ out="$(bash "$SCRIPTS/setup.sh" --stats 2>&1)"
 contains "stats: reports the damaged row"    "1 unreadable" "$out"
 contains "stats: still totals the good ones" "sessions        1" "$out"
 
+# Field 1 (the date) is never validated for shape, only fields 2-6 are. A
+# space inside it is emitted through a bare %s into the totals' space-
+# separated line, which a positional `read` downstream consumes -- so a
+# date field carrying a stray word reads as extra fields, shifting every
+# later one left and printing a raw shell error in front of the user.
+fresh 'HISTORY=on'
+printf '2026-09-01 EXTRA\t100\t5\t20\t0\t0\n'    >  "$CLAUDE_TIMESTAMP_HISTORY"
+printf '2026-08-20T10:00:00\t100\t5\t20\t0\t0\n' >> "$CLAUDE_TIMESTAMP_HISTORY"
+out="$(bash "$SCRIPTS/setup.sh" --stats 2>&1)"
+lacks    "stats: a whitespace-bearing date prints no shell error" "integer expression" "$out"
+contains "stats: and is reported as damage"                       "1 unreadable" "$out"
+contains "stats: while the valid row alongside it still counts"   "sessions        1" "$out"
+
 # A file with rows but none of them readable was unreachable before this
 # task; the early return must land before the heading, not after it.
 fresh 'HISTORY=on'
@@ -3454,10 +3566,43 @@ lacks    "stats: a mixed file prints no shell error"       "integer expression" 
 contains "stats: and still reports the true longest"       "1m40s"              "$out"
 contains "stats: and counts both rows"                     "sessions        2"  "$out"
 
+echo "stats reads a widened row"
+
+# Shorthand for the --stats run the next several assertions repeat.
+sw() { bash "$SCRIPTS/setup.sh" --stats 2>&1; }
+
+printf '2026-09-01T10:00:00\t3600\t10\t600\t0\t0\tone\tBash:100:5\n' \
+  > "$CLAUDE_TIMESTAMP_HISTORY"
+printf '2026-09-02T10:00:00\t1800\t5\t300\t0\t0\n' \
+  >> "$CLAUDE_TIMESTAMP_HISTORY"
+out="$(sw)"
+contains "reader: counts both a widened and a plain row" "sessions        2" "$out"
+refutes  "reader: and calls neither one damaged" grep -q "unreadable" <<< "$out"
+
+printf '2026-09-01T10:00:00\t3600\t10\t600\t0\n' > "$CLAUDE_TIMESTAMP_HISTORY"
+contains "reader: five fields is still damage" "unreadable" "$(sw)"
+
+printf '2026-09-01T10:00:00\t3600\t10\t600\t0\t0\ta\tb\tc\n' > "$CLAUDE_TIMESTAMP_HISTORY"
+contains "reader: nine fields is damage" "unreadable" "$(sw)"
+
+printf '2026-09-01T10:00:00\t3600\tten\t600\t0\t0\n' > "$CLAUDE_TIMESTAMP_HISTORY"
+contains "reader: a non-numeric timing field is damage the count alone missed" \
+         "unreadable" "$(sw)"
+
 bash "$SCRIPTS/setup.sh" --history=off --history-limit=50 >/dev/null
 ct_load_config
 is "--history is accepted"       "off" "$CT_HISTORY"
 is "--history-limit is accepted" "50"  "$CT_HISTORY_LIMIT"
+
+# write_config's account-level heredoc used to be hand-written with no line
+# for PROJECTS, so this flag parsed, validated and reported success while
+# writing nothing. Round-tripped through a real write and a real reload,
+# rather than just checking the flag is accepted, because the flag path
+# accepting a value was never the part that was broken.
+bash "$SCRIPTS/setup.sh" --projects=on >/dev/null
+ct_load_config
+is "--projects is persisted by the account-level writer" "on" "$CT_PROJECTS"
+
 refutes "a non on/off history is refused" bash "$SCRIPTS/setup.sh" --history=sometimes
 refutes "a non-numeric limit is refused"  bash "$SCRIPTS/setup.sh" --history-limit=lots
 
@@ -3469,6 +3614,469 @@ out="$( CLAUDE_TIMESTAMP_CONFIG="$WORK/hl.conf" \
         bash "$SCRIPTS/setup.sh" --history-limit=0 2>&1 )" && rc=0 || rc=$?
 is "history limit: setup refuses 0" "2" "$rc"
 contains "history limit: and points at the real off switch" "--history=off" "$out"
+
+echo "stats sections"
+
+{
+  printf '2026-09-01T10:00:00\t3600\t10\t600\t0\t0\talpha\tBash:100:5\n'
+  printf '2026-09-02T10:00:00\t1800\t5\t300\t0\t0\talpha\tBash:50:3,Read:10:9\n'
+  printf '2026-09-03T10:00:00\t900\t2\t100\t0\t0\tbeta\tRead:5:2\n'
+} > "$CLAUDE_TIMESTAMP_HISTORY"
+out="$(bash "$SCRIPTS/setup.sh" --stats 2>&1)"
+contains "sections: a by-project block appears"      "by project" "$out"
+# "leads" means first in the table, not merely present -- alpha (2 sessions,
+# 1h30m total) must sort ahead of beta (1 session, 15m), so the assertion has
+# to compare where each name's row falls, not just that alpha appears
+# somewhere in output that also happens to include the word "by project".
+alpha_line="$(grep -n "alpha" <<< "$out" | head -1 | cut -d: -f1)"
+beta_line="$(grep -n "beta"  <<< "$out" | head -1 | cut -d: -f1)"
+asserts "sections: the busiest project leads" \
+        test "${alpha_line:-0}" -lt "${beta_line:-0}"
+contains "sections: with its total"                  "1h30m" "$out"
+contains "sections: and its count"                    "2 sessions" "$out"
+contains "sections: a slowest-tools block appears"   "slowest tools" "$out"
+contains "sections: summing a tool across sessions"  "2m30s" "$out"
+contains "sections: and its call count"              "8 calls" "$out"
+
+# (unnamed) only belongs to a mixed history: one row names a project, another
+# sits beside it with "-" because it predates PROJECTS or found no name. Both
+# must show up in the same table.
+{
+  printf '2026-09-01T10:00:00\t3600\t10\t600\t0\t0\talpha\tBash:100:5\n'
+  printf '2026-09-02T10:00:00\t1800\t5\t300\t0\t0\t-\tBash:50:3\n'
+} > "$CLAUDE_TIMESTAMP_HISTORY"
+out="$(bash "$SCRIPTS/setup.sh" --stats 2>&1)"
+contains "sections: a dash renders as unnamed" "(unnamed)" "$out"
+contains "sections: beside the real project name it sat next to" "alpha" "$out"
+
+printf '2026-09-01T10:00:00\t3600\t10\t600\t0\t0\n' > "$CLAUDE_TIMESTAMP_HISTORY"
+out="$(bash "$SCRIPTS/setup.sh" --stats 2>&1)"
+refutes "sections: no project data means no by-project block" \
+        grep -q "by project" <<< "$out"
+refutes "sections: no tool data means no slowest-tools block" \
+        grep -q "slowest tools" <<< "$out"
+
+# A history where every row carries "-" -- TOOL_TIMING=on but PROJECTS never
+# turned on, so field 7 holds only a placeholder for field 8 -- must not draw
+# a by-project block of one restated total. The slowest-tools block, which
+# depends only on field 8, is unaffected and must still appear: the two
+# sections are independent of each other.
+printf '2026-09-01T10:00:00\t3600\t10\t600\t0\t0\t-\tBash:100:5\n' \
+  > "$CLAUDE_TIMESTAMP_HISTORY"
+out="$(bash "$SCRIPTS/setup.sh" --stats 2>&1)"
+refutes "sections: an all-dashes history means no by-project block" \
+        grep -q "by project" <<< "$out"
+contains "sections: but the slowest-tools block still appears" \
+         "slowest tools" "$out"
+
+# A damaged entry inside field 8 costs its own tools and nothing else. The
+# row's timings are intact and must still be counted.
+printf '2026-09-01T10:00:00\t3600\t10\t600\t0\t0\talpha\tBash:100:5,broken,Read:x:y\n' \
+  > "$CLAUDE_TIMESTAMP_HISTORY"
+out="$(bash "$SCRIPTS/setup.sh" --stats 2>&1)"
+contains "sections: a damaged tool entry leaves the row counted" "sessions        1" "$out"
+refutes  "sections: and does not mark the row unreadable" grep -q "unreadable" <<< "$out"
+contains "sections: the usable tool entry survives"       "1m40s" "$out"
+refutes  "sections: the damaged ones do not appear"       grep -q "broken" <<< "$out"
+
+# A row with a 9th field is damaged by the shared validity guard -- reported
+# as unreadable by the totals above -- and must be excluded by BOTH
+# breakdowns below it, not just the by-project one. The slowest-tools pass
+# had its own upper bound missing, which let a malformed row's tool data
+# leak into that table while the same row was being counted as unreadable.
+{
+  printf '2026-09-01T10:00:00\t3600\t10\t600\t0\t0\tgamma\tWrite:20:2\n'
+  printf '2026-09-02T10:00:00\t1800\t5\t300\t0\t0\tdelta\tEdit:30:4\textra\n'
+} > "$CLAUDE_TIMESTAMP_HISTORY"
+out="$(bash "$SCRIPTS/setup.sh" --stats 2>&1)"
+contains "sections: an over-long row is counted as unreadable" "1 unreadable" "$out"
+contains "sections: the well-formed row's project still appears" "gamma" "$out"
+refutes  "sections: the over-long row's project does not appear" grep -q "delta" <<< "$out"
+contains "sections: the well-formed row's tool still appears" "Write" "$out"
+refutes  "sections: the over-long row's tool does not appear" grep -q "Edit" <<< "$out"
+
+# An empty tool name inside field 8, such as ":0:1", used to survive into the
+# slowest-tools render loop and break there: `while IFS=$'\t' read` collapses
+# adjacent tabs no matter what IFS is set to, since tab counts as "IFS
+# whitespace" -- so the empty name shifted the call count into the name slot
+# and left the call count blank, and comparing that blank against an integer
+# put a raw shell error inside the printed report.
+printf '2026-09-01T10:00:00\t100\t1\t10\t0\t0\talpha\tBash:5:2,:0:1\n' \
+  > "$CLAUDE_TIMESTAMP_HISTORY"
+out="$(bash "$SCRIPTS/setup.sh" --stats 2>&1)"
+refutes  "sections: an empty-named tool entry prints no raw shell error" \
+         grep -q "integer expression expected" <<< "$out"
+
+# A field this long overflows the shell's 64-bit arithmetic downstream --
+# ct_format_duration and the `$((10#...))` reads that feed it both choke on
+# it -- turning the report into a wall of raw shell errors and a nonsense
+# duration instead of treating the row as unreadable.
+printf '2026-09-01T10:00:00\t99999999999999999999999\t1\t10\t0\t0\talpha\t\n' \
+  > "$CLAUDE_TIMESTAMP_HISTORY"
+out="$(bash "$SCRIPTS/setup.sh" --stats 2>&1)"
+contains "sections: an oversized field is treated as damage, not counted" \
+         "1 unreadable" "$out"
+refutes  "sections: and prints no raw shell error either" \
+         grep -q "integer expression expected" <<< "$out"
+
+# The same bound applies to a tool-entry number inside field 8, not just to
+# the row's own timing fields.
+printf '2026-09-01T10:00:00\t100\t1\t10\t0\t0\talpha\tBash:99999999999999999999999:1\n' \
+  > "$CLAUDE_TIMESTAMP_HISTORY"
+out="$(bash "$SCRIPTS/setup.sh" --stats 2>&1)"
+refutes  "sections: the oversized tool entry itself is skipped" \
+         grep -q "Bash" <<< "$out"
+
+# The 15-digit bound above keeps any one row's duration inside the shell's
+# 64-bit range, but total/waited/idle/turns/failed are the SUM of every
+# matching row, and a sum of many 15-digit values can overflow that range
+# even though no single value in it broke the per-value bound. 9300 rows
+# each at the 15-digit ceiling is enough: summed, they land well past
+# INT64_MAX, and without a bound on the accumulator itself that used to
+# print a raw shell error from the `[ "$total" -gt 0 ]` test and a negative,
+# nonsensical total duration.
+awk 'BEGIN {
+  for (i = 0; i < 9300; i++)
+    printf "2026-01-01T00:00:00\t999999999999999\t1\t999999999999999\t0\t0\n"
+}' > "$CLAUDE_TIMESTAMP_HISTORY"
+out="$(bash "$SCRIPTS/setup.sh" --stats 2>&1)"
+refutes "sections: an overflowed total prints no raw shell error" \
+        grep -q "integer expression expected" <<< "$out"
+refutes "sections: and the total is not reported as negative" \
+        grep -q ' -[0-9]*h' <<< "$out"
+
+# The by-project pass has its own accumulator, secs[p], summed across every
+# row naming the same project -- the identical shape of bug as the totals
+# pass above, just keyed by project instead of global. Without a bound on
+# secs[p] itself, 9300 rows all naming "alpha" at the 15-digit ceiling summed
+# past the 64-bit range of the shell downstream; ct_format_duration then saw
+# a negative value, refused it (its own input guard rejects a leading "-"),
+# and printed nothing where the duration belongs -- silently, with no error,
+# which is worse than an error would have been.
+awk 'BEGIN {
+  for (i = 0; i < 9300; i++)
+    printf "2026-01-01T00:00:00\t999999999999999\t1\t999999999999999\t0\t0\talpha\n"
+}' > "$CLAUDE_TIMESTAMP_HISTORY"
+out="$(bash "$SCRIPTS/setup.sh" --stats 2>&1)"
+asserts "sections: an overflowed by-project total still renders a duration" \
+        grep -qE 'alpha +[0-9]+h[0-9]+m' <<< "$out"
+
+# The slowest-tools pass has two accumulators of the same shape, secs[t] and
+# calls[t], both summed across every occurrence of the same tool name. 9300
+# rows all naming "Bash" with a digest entry at the 15-digit ceiling for both
+# its seconds and its call count summed past the 64-bit range of the shell on
+# both accumulators at once, and without a bound on them this used to raise
+# the shell's own "integer expression expected" from the `[ "$t_calls" -eq 1 ]`
+# test below and leave the duration column blank the same way the by-project
+# case does.
+awk 'BEGIN {
+  for (i = 0; i < 9300; i++)
+    printf "2026-01-01T00:00:00\t100\t1\t10\t0\t0\t-\tBash:999999999999999:999999999999999\n"
+}' > "$CLAUDE_TIMESTAMP_HISTORY"
+out="$(bash "$SCRIPTS/setup.sh" --stats 2>&1)"
+refutes "sections: an overflowed slowest-tools total prints no raw shell error" \
+        grep -q "integer expression expected" <<< "$out"
+asserts "sections: and it still renders a duration for the tool" \
+        grep -qE 'Bash +[0-9]+h[0-9]+m' <<< "$out"
+
+# `--stats`'s slowest-tools pass ends its awk with `sort -rn | head -10`. A
+# history with enough distinct tool names makes `head -10` close the pipe on
+# `sort` before `sort` is done writing, sending it SIGPIPE; under this
+# script's own errexit/pipefail that used to abort the whole report right
+# there, silently truncating it with no error message and no slowest-tools
+# table. 2000 distinct tools is enough to reproduce it -- the same volume the
+# session-end.sh regression below uses for the same-shaped bug.
+awk 'BEGIN {
+  for (i = 0; i < 2000; i++)
+    printf "2026-01-01T10:00:00\t100\t1\t10\t0\t0\talpha\tTool%04d:%d:1\n", i, 2000 - i
+}' > "$CLAUDE_TIMESTAMP_HISTORY"
+out="$(bash "$SCRIPTS/setup.sh" --stats 2>&1)" && big_stats_rc=0 || big_stats_rc=$?
+is       "sections: a history with 2000 distinct tools still exits 0" \
+         "0" "$big_stats_rc"
+contains "sections: and the slowest-tools table still appears" \
+         "slowest tools" "$out"
+contains "sections: with the actual busiest tool named" "Tool0000" "$out"
+contains "sections: and its correct summed duration" "33m20s" "$out"
+contains "sections: and its correct call count" "(1 call)" "$out"
+
+echo "stats filters"
+
+{
+  printf '2026-08-01T10:00:00\t3600\t10\t600\t0\t0\talpha\n'
+  printf '2026-09-02T10:00:00\t1800\t5\t300\t0\t0\tbeta\n'
+} > "$CLAUDE_TIMESTAMP_HISTORY"
+
+out="$(bash "$SCRIPTS/setup.sh" --stats --since=2026-09-01 2>&1)"
+contains "filters: since narrows the count"  "sessions        1" "$out"
+contains "filters: and says so in the header" "since 2026-09-01" "$out"
+
+out="$(bash "$SCRIPTS/setup.sh" --stats --project=alpha 2>&1)"
+contains "filters: project narrows the count" "sessions        1" "$out"
+contains "filters: and says which"            "alpha" "$out"
+
+out="$(bash "$SCRIPTS/setup.sh" --stats --project=nope 2>&1)"
+contains "filters: an unmatched project says so"      "No sessions match in nope" "$out"
+contains "filters: and names the ones that do exist"  "alpha" "$out"
+
+# The "projects recorded" hint is a fourth pass over the history and used to
+# apply neither the NF bound nor the timing guard its three siblings share,
+# so a damaged row's field 7 could be offered as a suggestion and then
+# refused when the reader actually tried it with --project.
+{
+  printf '2026-09-01T10:00:00\t3600\t10\t600\t0\t0\treal\n'
+  printf '2026-09-02T10:00:00\t99999999999999999999999\t1\t10\t0\t0\tghost-project\n'
+} > "$CLAUDE_TIMESTAMP_HISTORY"
+out="$(bash "$SCRIPTS/setup.sh" --stats --project=nope 2>&1)"
+contains "filters: the hint names a project a valid row recorded" "real" "$out"
+refutes  "filters: but not one only a damaged row recorded" \
+         grep -q "ghost-project" <<< "$out"
+
+# The hint pass shares the NF/timing/whitespace validity guard with its three
+# siblings, but --since is a separate matter from that guard: a row can be
+# perfectly valid and still fall outside --since. Naming its project anyway
+# was a dead end -- retrying the suggestion hit the same "no sessions match",
+# since the project it named is precisely what --since had already excluded.
+{
+  printf '2020-01-01T10:00:00\t3600\t10\t600\t0\t0\told\n'
+} > "$CLAUDE_TIMESTAMP_HISTORY"
+out="$(bash "$SCRIPTS/setup.sh" --stats --since=7d --project=nope 2>&1)"
+contains "filters: a since-and-project miss still explains itself" \
+         "No sessions match" "$out"
+refutes  "filters: but the hint does not suggest a project since excludes" \
+         grep -q "old" <<< "$out"
+
+# Three similar flags: bare --project selects project scope for a setting
+# being WRITTEN; --project=NAME filters --stats; --projects=on|off is the
+# setting itself. Combined with a flag that writes a setting, --project=NAME
+# used to silently pick the --stats action over the write and discard it with
+# no error, and --project=on -- a plausible typo for --projects=on -- used to
+# search for a project literally named "on" instead of being refused.
+refutes "filters: --project=NAME cannot be combined with a setting to write" \
+        bash "$SCRIPTS/setup.sh" --config="$WORK/f-ambiguous.conf" \
+        --project=myrepo --history=on
+out="$(bash "$SCRIPTS/setup.sh" --config="$WORK/f-ambiguous.conf" \
+       --project=myrepo --history=on 2>&1)"
+contains "filters: and the message distinguishes the three forms" \
+         "does not write a setting" "$out"
+
+refutes "filters: --project=on is refused rather than searched for" \
+        bash "$SCRIPTS/setup.sh" --project=on
+out="$(bash "$SCRIPTS/setup.sh" --project=on 2>&1)"
+contains "filters: and suggests --projects= instead" "--projects=on" "$out"
+refutes "filters: --project=off is refused the same way" \
+        bash "$SCRIPTS/setup.sh" --project=off
+
+# --stats and --since=* have the identical conflict --project=NAME had: each
+# sets action="stats" unconditionally, and the guard above only ever tested
+# CT_STATS_PROJECT, so a setting flag riding along with --since, or with a
+# --project= that named no project at all, used to be written straight past
+# with no error and no file written.
+rm -f "$WORK/f-since-conflict.conf"
+refutes "filters: --since=7d cannot be combined with a setting to write" \
+        bash "$SCRIPTS/setup.sh" --config="$WORK/f-since-conflict.conf" \
+        --history=off --since=7d
+out="$(bash "$SCRIPTS/setup.sh" --config="$WORK/f-since-conflict.conf" \
+       --history=off --since=7d 2>&1)"
+contains "filters: and the message names --since" \
+         "--since=7d filters --stats" "$out"
+
+rm -f "$WORK/f-since-date-conflict.conf"
+refutes "filters: --since=YYYY-MM-DD cannot be combined with a setting to write" \
+        bash "$SCRIPTS/setup.sh" --config="$WORK/f-since-date-conflict.conf" \
+        --history=off --since=2026-09-01
+out="$(bash "$SCRIPTS/setup.sh" --config="$WORK/f-since-date-conflict.conf" \
+       --history=off --since=2026-09-01 2>&1)"
+contains "filters: and names --since for the date form too" \
+         "--since=2026-09-01 filters --stats" "$out"
+
+rm -f "$WORK/f-empty-project-conflict.conf"
+refutes "filters: an empty --project= is refused outright, even with a setting to write" \
+        bash "$SCRIPTS/setup.sh" --config="$WORK/f-empty-project-conflict.conf" \
+        --history=off --project=
+out="$(bash "$SCRIPTS/setup.sh" --config="$WORK/f-empty-project-conflict.conf" \
+       --history=off --project= 2>&1)"
+contains "filters: and the message names the empty value, not the write conflict" \
+         "cannot be empty" "$out"
+
+# --project= with nothing after the = used to read as "no filter", not as an
+# empty one, so --stats --project= silently reported on everything instead of
+# refusing the way --since= already refuses an empty or malformed value.
+refutes "filters: --project= alone is refused rather than reporting everything" \
+        bash "$SCRIPTS/setup.sh" --stats --project=
+out="$(bash "$SCRIPTS/setup.sh" --stats --project= 2>&1)"
+contains "filters: and says the value cannot be empty" \
+         "cannot be empty" "$out"
+
+rm -f "$WORK/f-stats-conflict.conf"
+refutes "filters: bare --stats cannot be combined with a setting to write" \
+        bash "$SCRIPTS/setup.sh" --config="$WORK/f-stats-conflict.conf" \
+        --history=off --stats
+out="$(bash "$SCRIPTS/setup.sh" --config="$WORK/f-stats-conflict.conf" \
+       --history=off --stats 2>&1)"
+contains "filters: and the message names --stats" \
+         "--stats reports" "$out"
+
+# The combinations that must still work.
+rm -rf "$WORK/f-still-project"; mkdir -p "$WORK/f-still-project"
+( cd "$WORK/f-still-project" && unset CLAUDE_TIMESTAMP_CONFIG && HOME="$WORK/f-still-home" \
+    bash "$SCRIPTS/setup.sh" --project --history=on >/dev/null 2>&1 )
+is "filters: bare --project still works with a setting to write" \
+   "1" "$(grep -c '^HISTORY=on' "$WORK/f-still-project/.claude/claude-timestamp.conf")"
+asserts "filters: --projects=on alone still works" \
+        bash "$SCRIPTS/setup.sh" --config="$WORK/f-still-projects.conf" --projects=on
+asserts "filters: --project=NAME alone with --stats still works" \
+        bash "$SCRIPTS/setup.sh" --stats --project=alpha
+
+# awk compares two strnums numerically when both look like numbers, and both
+# a field and a -v assignment are strnums. Left unguarded, --project=7 also
+# matched a project named "007" and --project=1000 also matched "1e3" --
+# merging unrelated projects' totals, by-project rows and slowest-tools rows
+# into one another with no error.
+{
+  printf '2026-09-01T10:00:00\t100\t1\t10\t0\t0\t007\tAlphaTool:10:1\n'
+  printf '2026-09-01T11:00:00\t200\t1\t10\t0\t0\t7\tBetaTool:20:1\n'
+  printf '2026-09-01T12:00:00\t300\t1\t10\t0\t0\t1e3\tGammaTool:30:1\n'
+  printf '2026-09-01T13:00:00\t400\t1\t10\t0\t0\t1000\tDeltaTool:40:1\n'
+} > "$CLAUDE_TIMESTAMP_HISTORY"
+
+out="$(bash "$SCRIPTS/setup.sh" --stats --project=7 2>&1)"
+contains "filters: --project=7 narrows the total to exactly one session" \
+         "sessions        1" "$out"
+refutes  "filters: --project=7 does not pull in a project named 007" \
+         grep -q "AlphaTool" <<< "$out"
+refutes  "filters: --project=7 does not list 007 by project either" \
+         grep -q "007" <<< "$out"
+contains "filters: --project=7 keeps the session named plain 7" \
+         "BetaTool" "$out"
+
+out="$(bash "$SCRIPTS/setup.sh" --stats --project=1000 2>&1)"
+contains "filters: --project=1000 narrows the total to exactly one session" \
+         "sessions        1" "$out"
+refutes  "filters: --project=1000 does not pull in a project named 1e3" \
+         grep -q "GammaTool" <<< "$out"
+refutes  "filters: --project=1000 does not list 1e3 by project either" \
+         grep -q "1e3" <<< "$out"
+contains "filters: --project=1000 keeps the session named plain 1000" \
+         "DeltaTool" "$out"
+
+# POSIX -v assignment runs escape-sequence processing on its value, so a
+# filter value carrying a backslash escape sequence -- a project checked out
+# as "back\tslash" -- arrived inside awk as "back<TAB>slash" via -v, even
+# though the history stores (and the by-project table must print) the name
+# unprocessed. Every filter site is fed through ENVIRON instead, which
+# performs no such processing.
+{
+  printf '2026-09-01T10:00:00\t100\t1\t10\t0\t0\t%s\n' 'back\tslash'
+} > "$CLAUDE_TIMESTAMP_HISTORY"
+out="$(bash "$SCRIPTS/setup.sh" --stats --project='back\tslash' 2>&1)"
+contains "filters: a project name with a backslash escape still matches" \
+         "sessions        1" "$out"
+contains "filters: and the by-project table prints it unprocessed" \
+         'back\tslash' "$out"
+
+# A filtered miss used to say only "No sessions match", even when bad had
+# already been computed and the unfiltered branch reports it in the same
+# spot. A history with damaged rows then read as merely unmatched rather
+# than as damaged.
+{
+  printf '2026-09-01T10:00:00\t999999999999999999999\t1\t10\t0\t0\talpha\n'
+  printf '2026-09-02T10:00:00\t100\t1\t10\t0\t0\talpha\n'
+} > "$CLAUDE_TIMESTAMP_HISTORY"
+out="$(bash "$SCRIPTS/setup.sh" --stats --project=nope 2>&1)"
+contains "filters: a filtered miss still explains itself" \
+         "No sessions match in nope" "$out"
+contains "filters: and now also reports the damaged row" \
+         "1 unreadable row(s)" "$out"
+
+out="$(bash "$SCRIPTS/setup.sh" --stats --since=soon 2>&1)"
+contains "filters: an unparseable since is refused"   "--since takes" "$out"
+refutes  "filters: and is not silently ignored" \
+         bash "$SCRIPTS/setup.sh" --stats --since=soon
+
+is "filters: days ago renders ten digits" "10" \
+   "$(ct_date_days_ago 7 | tr -d '\n' | wc -c | tr -d ' ')"
+
+# The relative form end to end, not just the helper underneath it. The fixture
+# rows carry fixed dates while "now" moves, so asserting which of them survive
+# a seven-day window would start failing on its own. What is stable is that the
+# form is accepted and resolves to a cutoff that gets named either way, which
+# is why the unmatched branch names its filter too.
+out="$(bash "$SCRIPTS/setup.sh" --stats --since=7d 2>&1)"
+asserts  "filters: the relative form is accepted" \
+         bash "$SCRIPTS/setup.sh" --stats --since=7d
+contains "filters: and resolves to a dated cutoff" \
+         "since $(ct_date_days_ago 7)" "$out"
+
+# A leading zero must be read as decimal, not as octal by the shell
+# arithmetic that multiplies it by 86400. "01d" through "07d" happen to be
+# valid octal and so worked by accident; "08d" and "09d" are not valid octal
+# and used to abort with a raw shell error instead of resolving a cutoff.
+out="$(bash "$SCRIPTS/setup.sh" --stats --since=08d 2>&1)"
+asserts  "filters: a leading-zero relative form is accepted (08d)" \
+         bash "$SCRIPTS/setup.sh" --stats --since=08d
+contains "filters: 08d resolves to a dated cutoff, not an octal error" \
+         "since $(ct_date_days_ago 8)" "$out"
+refutes  "filters: 08d does not surface a shell arithmetic error" \
+         grep -q "value too great for base" <<< "$out"
+
+out="$(bash "$SCRIPTS/setup.sh" --stats --since=09d 2>&1)"
+asserts  "filters: a leading-zero relative form is accepted (09d)" \
+         bash "$SCRIPTS/setup.sh" --stats --since=09d
+contains "filters: 09d resolves to a dated cutoff, not an octal error" \
+         "since $(ct_date_days_ago 9)" "$out"
+
+# [0-9]*d as a glob is "one digit, then anything, then a literal d" -- the
+# middle * matches any character, not just digits -- so "7dd" and "7x1d" both
+# matched it too. ${value%d} then stripped only the trailing d, handing
+# ct_date_days_ago a string it could not parse ("7d" or "7x1"), which failed
+# there and blamed the platform ("This system's date cannot compute a
+# cutoff") instead of the *) branch's own, correct message about the flag.
+out="$(bash "$SCRIPTS/setup.sh" --stats --since=7dd 2>&1)"
+contains "filters: 7dd's message is about the flag" "--since takes" "$out"
+refutes  "filters: not about the platform's date command" \
+         grep -q "This system's date" <<< "$out"
+
+out="$(bash "$SCRIPTS/setup.sh" --stats --since=7x1d 2>&1)"
+contains "filters: 7x1d's message names the flag rather than the platform" \
+         "--since takes" "$out"
+
+# A run of digits long enough overflows days * 86400 well before it ever
+# reaches ct_date_days_ago -- refused here, at the digit count, rather than
+# computed into a nonsense cutoff or a raw arithmetic error.
+out="$(bash "$SCRIPTS/setup.sh" --stats --since=99999999999999999999d 2>&1)"
+contains "filters: an absurd day count's message names the flag, not an overflow" \
+         "--since takes" "$out"
+
+# The relative form has to resolve in the CONFIGURED zone, not the machine's:
+# the parser that reads --since=Nd runs before ct_load_config, so a cutoff
+# computed right there would be rendered in whichever zone the machine
+# happens to sit in. Every other assertion in this file leaves TZ unset, so
+# machine and configured zone silently coincide and would never catch that.
+# Pacific/Kiritimati (UTC+14) and Etc/GMT+12 (UTC-12) are 26 hours apart, more
+# than a full day, so at least one of them is always on a different calendar
+# date than any machine zone right now. Picked dynamically -- rather than
+# hardcoding one -- so this cannot start silently asserting nothing the day
+# somebody runs the suite from a machine that already sits in the zone
+# chosen here.
+if ct_tz_supported; then
+  ct_machine_date="$(date +%Y-%m-%d)"
+  ct_kiri_date="$(TZ=Pacific/Kiritimati date +%Y-%m-%d)"
+  if [ "$ct_kiri_date" != "$ct_machine_date" ]; then
+    ct_pinned_zone="Pacific/Kiritimati"; ct_pinned_date="$ct_kiri_date"
+  else
+    ct_pinned_zone="Etc/GMT+12"; ct_pinned_date="$(TZ=Etc/GMT+12 date +%Y-%m-%d)"
+  fi
+
+  fresh "TZ=$ct_pinned_zone" 'HISTORY=on'
+  printf '%sT10:00:00\t3600\t10\t600\t0\t0\n' "$ct_pinned_date" > "$CLAUDE_TIMESTAMP_HISTORY"
+  out="$(bash "$SCRIPTS/setup.sh" --stats --since=0d 2>&1)"
+  contains "filters: the relative form resolves in the configured zone, not the machine's" \
+           "since $ct_pinned_date" "$out"
+  fresh 'HISTORY=on'
+else
+  skip "filters: the relative form resolves in the configured zone, not the machine's" \
+       "no timezone database"
+fi
 
 echo
 echo "project configuration"
@@ -3753,6 +4361,24 @@ is "--project --tz=local pins an empty TZ" "1" "$(grep -c '^TZ=$' "$written_tzlo
     bash "$SCRIPTS/setup.sh" --project --color=none >/dev/null 2>&1 )
 is "an unrelated --project write keeps a pinned TZ=local" "1" "$(grep -c '^TZ=$' "$written_tzlocal")"
 is "and still writes the unrelated setting"               "1" "$(grep -c '^COLOR=none$' "$written_tzlocal")"
+
+# write_project_config tests whether an already-pinned key is present with
+# `printf '%s\n' "$existing" | grep -q "^${key}="`, under this script's own
+# pipefail. grep -q exits as soon as it finds a match, closing its end of the
+# pipe; on a config bigger than the pipe buffer, with the key near the front,
+# printf can still be writing the rest when that happens and gets SIGPIPE --
+# and pipefail reports the PIPELINE as failed even though grep found exactly
+# what it was looking for. The `if` then took the "not present" branch and
+# dropped the key from the rewrite an unrelated flag triggers.
+rm -rf "$PROJ/writable-big"; mkdir -p "$PROJ/writable-big/.claude"
+{ echo "COLOR=cyan"; awk 'BEGIN{for(i=1;i<=10000;i++) print "FILLER" i "=x"}'; } \
+  > "$PROJ/writable-big/.claude/claude-timestamp.conf"
+( cd "$PROJ/writable-big" && unset CLAUDE_TIMESTAMP_CONFIG && HOME="$PROJ/home" \
+    bash "$SCRIPTS/setup.sh" --project --tz=UTC >/dev/null 2>&1 )
+written_big="$PROJ/writable-big/.claude/claude-timestamp.conf"
+is "an unrelated write does not lose a key to a closed pipe on a large config" \
+   "1" "$(grep -c '^COLOR=cyan$' "$written_big")"
+is "and still writes the unrelated setting" "1" "$(grep -c '^TZ=UTC$' "$written_big")"
 
 rm -rf "$PROJ/writable-tcinherit"; mkdir -p "$PROJ/writable-tcinherit"
 ( cd "$PROJ/writable-tcinherit" && unset CLAUDE_TIMESTAMP_CONFIG && HOME="$PROJ/home" \
@@ -4595,7 +5221,7 @@ skip "width: a combining accent draws no column of its own" \
 # column. Measured through the wizard rather than asserted against fixed text,
 # because the markers contain the current clock.
 fresh
-dw_out="$(printf 'off\nlocal\nshort\non\n30\n0\noff\ncyan\n\nfalse\nn\n' \
+dw_out="$(printf 'off\nlocal\nshort\non\n30\n0\noff\noff\ncyan\n\nfalse\nn\n' \
   | bash "$SCRIPTS/setup.sh" 2>/dev/null)"
 dw_cols=""
 # The expected column is derived from constants, not from _ct_display_width, so
@@ -5204,6 +5830,376 @@ done
 is "atomic write: a raced target still carries every key" "" "$wa_lost"
 is "atomic write: and is exactly one writer's file, never a blend" "" "$wa_torn"
 rm -rf "$WA"
+
+echo "project naming"
+
+proj="$WORK/proj-$$"
+mkdir -p "$proj/repo/deep/deeper/.keep" "$proj/repo/.git" "$proj/loose/sub"
+
+is "project: a repository root is named after itself" \
+   "repo" "$(ct_project_name "$proj/repo")"
+is "project: a directory inside a repository takes the repository's name" \
+   "repo" "$(ct_project_name "$proj/repo/deep/deeper")"
+is "project: an empty cwd is unnamed" \
+   "-" "$(ct_project_name "")"
+is "project: the filesystem root is unnamed" \
+   "-" "$(ct_project_name "/")"
+
+# A slash-free argument makes "${dir%/*}" a no-op, which used to leave the
+# walk re-testing the same directory on every one of its 40 steps instead of
+# recognising at once that there is nowhere left to shorten to.
+is "project: a slash-free input still resolves correctly" \
+   "no-such-project-xyz123" "$(ct_project_name "no-such-project-xyz123")"
+
+# The assertion above passes either way -- the walk was always bounded and
+# always fell through to the same right answer, slash-free path or not. What
+# changed is how many times it tested the same directory on the way there.
+# Traced by counting how often the loop actually tests "-d .../.git", the
+# only way to observe that from outside the function: 40 times before this
+# fix (one per step, since the path never got any shorter), once after.
+pn_walk_steps="$(bash -c '
+  source "'"$SCRIPTS"'/lib/config.sh"
+  set -x
+  ct_project_name "no-such-project-xyz123" >/dev/null
+' 2>&1 | grep -c -- "-d no-such-project-xyz123/.git")"
+is "project: a slash-free input no longer spins through all 40 steps" \
+   "1" "$pn_walk_steps"
+
+# A directory name may legally contain a tab or a newline (mkdir does not
+# reject either), and either would corrupt a history row: a tab forges an
+# extra field, a newline splits the row into two lines. The character sits in
+# the MIDDLE of the basename here, not at the end -- $(...) strips a trailing
+# newline regardless of whether the fix ran, which would let a broken
+# implementation pass this assertion for the wrong reason.
+tab_repo="tab"$'\t'"repo"
+nl_repo="nl"$'\n'"repo"
+mkdir -p "$proj/$tab_repo/.git" "$proj/$nl_repo/.git"
+is "project: a tab in the directory name becomes an underscore" \
+   "tab_repo" "$(ct_project_name "$proj/$tab_repo")"
+is "project: a newline in the directory name becomes an underscore" \
+   "nl_repo" "$(ct_project_name "$proj/$nl_repo")"
+
+# "-" is what ct_project_name itself returns for "no project at all", so a
+# checkout that happens to be named "-" must not come out the same way: every
+# reader of the history's project column treats "-" as the absent sentinel.
+mkdir -p "$proj/-/.git"
+is "project: a repository literally named \"-\" does not collide with the unnamed sentinel" \
+   "_" "$(ct_project_name "$proj/-")"
+
+# The two fallback cases below need no repository ANYWHERE above the fixture,
+# and that is a property of wherever TMPDIR points rather than of anything this
+# suite controls. Under a TMPDIR inside a checkout the walk correctly finds
+# that checkout, and the assertions would fail for a reason that has nothing to
+# do with the code. Checked, and skipped rather than asserted when the
+# environment cannot answer, which is what skip() exists for.
+pn_clean=1
+pn_dir="$proj"
+while [ -n "$pn_dir" ] && [ "$pn_dir" != "/" ]; do
+  if [ -d "$pn_dir/.git" ] || [ -f "$pn_dir/.git" ]; then pn_clean=0; break; fi
+  pn_dir="${pn_dir%/*}"
+done
+mkdir -p "$proj/loose/-"
+if [ "$pn_clean" -eq 1 ]; then
+  is "project: no repository above falls back to the directory itself" \
+     "sub" "$(ct_project_name "$proj/loose/sub")"
+  is "project: a cwd that does not exist still yields its own basename" \
+     "gone" "$(ct_project_name "$proj/gone")"
+  is "project: a non-repository directory literally named \"-\" does not collide either" \
+     "_" "$(ct_project_name "$proj/loose/-")"
+else
+  skip "project: no repository above falls back to the directory itself" \
+       "TMPDIR is inside a git repository, so there is always one above"
+  skip "project: a cwd that does not exist still yields its own basename" \
+       "TMPDIR is inside a git repository, so there is always one above"
+  skip "project: a non-repository directory literally named \"-\" does not collide either" \
+       "TMPDIR is inside a git repository, so there is always one above"
+fi
+
+# A git-managed home directory (a common dotfiles setup) puts a .git right at
+# $HOME. ct_project_name's own comment says it reuses the shape of
+# ct_find_project_config, which stops its walk at $HOME -- but the walk here
+# never did, so a session under $HOME but outside a real checkout climbed all
+# the way up to $HOME/.git and reported the home directory's own basename,
+# which is ordinarily the username. The README promises the history holds no
+# paths; a username is exactly what that promise exists to keep out.
+#
+# That walk-stop closes the climb-past-$HOME case, but not the cwd-IS-$HOME
+# case: a cwd equal to $HOME breaks out of the walk on its very first
+# iteration and never reaches a .git test, so it falls through to the
+# fallback that re-derives a basename from the original argument -- which,
+# for this cwd, IS $HOME's own basename. That second case needed its own
+# check, asserted separately below.
+fake_home="$WORK/fake-home-$$"
+rm -rf "$fake_home"
+mkdir -p "$fake_home/.git" "$fake_home/work"
+is "project: the walk stops at \$HOME and does not report its basename" \
+   "work" "$(HOME="$fake_home" ct_project_name "$fake_home/work")"
+is "project: a cwd equal to \$HOME itself yields the unnamed sentinel" \
+   "-" "$(HOME="$fake_home" ct_project_name "$fake_home")"
+rm -rf "$fake_home"
+
+rm -rf "$proj"
+
+echo "tool digest"
+
+log="$WORK/digest.log"
+# The log's own writer, post-tool-use.sh, emits space-separated lines --
+# "<tool name> <seconds> <outcome>" -- so every fixture here uses that format
+# too. See the end-to-end case below, which drives the writer itself instead
+# of fabricating its output, so this suite cannot drift past the real format
+# again the way it did before.
+printf 'Bash 12.500 ok\nRead 0.250 ok\nBash 7.500 ok\n' > "$log"
+is "digest: sums per tool and sorts worst first" \
+   "Bash:20:2,Read:0:1" "$(ct_tool_digest "$log")"
+
+printf 'Weird,Name 3.000 ok\nOther:Tool 2.000 ok\n' > "$log"
+is "digest: a separator inside a tool name is neutralised" \
+   "Weird_Name:3:1,Other_Tool:2:1" "$(ct_tool_digest "$log")"
+
+# post-tool-use.sh sanitises any tool name with a byte outside [A-Za-z0-9_-]
+# to "unknown" before it ever reaches the log, and awk's default field
+# splitting treats a tab the same as a space, so a raw tab can never actually
+# land inside field 1 either way. The gsub covers it anyway, as a second line
+# of defense against a future writer that relaxes that guard, but under the
+# default separator field splitting has already consumed the tab by the time
+# gsub runs -- $1 is already just "Tabbed" before gsub sees it -- so no
+# fixture reaching ct_tool_digest through awk's own field splitting can
+# exercise the \t branch of that gsub; asserting the gsub's output on one
+# would pass whether or not that branch worked, which is exactly the defect
+# this replaces. What IS observable is the field split itself: a tab in the
+# middle of what was meant to be one field pushes "4.000" into $3 instead of
+# $2, so the duration check on $2 rejects the line and it contributes nothing
+# at all, tab or no tab.
+printf 'Tabbed\tName 4.000 ok\n' > "$log"
+is "digest: a tab splits the line instead of landing in a tool name" \
+   "" "$(ct_tool_digest "$log")"
+
+: > "$log"
+is "digest: an empty log yields nothing" "" "$(ct_tool_digest "$log")"
+is "digest: a missing log yields nothing" "" "$(ct_tool_digest "$WORK/no-such-log")"
+
+: > "$log"
+for i in 1 2 3 4 5 6 7 8 9 10; do printf 'T%s %s.000 ok\n' "$i" "$i" >> "$log"; done
+is "digest: keeps at most eight tools" \
+   "8" "$(ct_tool_digest "$log" | awk -F',' '{print NF}')"
+is "digest: and keeps the costliest ones" \
+   "T10:10:1" "$(ct_tool_digest "$log" | cut -d, -f1)"
+
+printf 'Bash not-a-number ok\n' > "$log"
+is "digest: a row with no usable duration contributes nothing" \
+   "" "$(ct_tool_digest "$log")"
+
+# A blank line has neither a tool name nor a duration; a line with too few
+# fields has a name but no duration. Both used to be aggregated into an entry
+# with an empty tool name, such as ":0:1", which rode along into the history
+# row and then into --stats' slowest-tools table -- NOT harmlessly: `while
+# IFS=$'\t' read` there collapses adjacent tabs, because tab counts as "IFS
+# whitespace" no matter what IFS is set to, so the empty name shifted the
+# call count into the name slot and left the call count empty, producing a
+# raw shell error ("integer expression expected") printed inside the report.
+# Valid lines elsewhere in the same log must still aggregate normally.
+printf '\nBash 1.000 ok\n' > "$log"
+is "digest: a bare blank line contributes nothing, valid lines still aggregate" \
+   "Bash:1:1" "$(ct_tool_digest "$log")"
+
+printf 'Bash\nRead 2.000 ok\n' > "$log"
+is "digest: a line with too few fields contributes nothing, valid lines still aggregate" \
+   "Read:2:1" "$(ct_tool_digest "$log")"
+
+# %018d on a sum still carrying its fractional seconds truncates it away, so
+# two tools whose sums differ only below the whole second used to tie on the
+# sort key and have `sort -rn` break the tie on the rest of the line,
+# reverse-alphabetically. Named so alphabetical order runs the opposite way
+# from the real one -- "Alpha" costs more than "Zulu" here -- so a
+# reverse-alphabetical tie-break cannot accidentally land on the right answer
+# the way a pair named "Costly"/"Cheap" would.
+printf 'Alpha 1.900 ok\nZulu 1.200 ok\n' > "$log"
+is "digest: a sub-second difference still orders the costlier tool first" \
+   "Alpha:1:1,Zulu:1:1" "$(ct_tool_digest "$log")"
+
+# The same failure also reached the eight-entry cap: two tools separated only
+# below the whole second could tie there too, and `head -8` could keep the
+# cheaper one instead of the one that actually cost more. Seven fillers, far
+# enough above both contenders to always claim the first seven places, plus
+# a pair separated only by fractional seconds for the eighth -- again named
+# so alphabetical order opposes the real one.
+: > "$log"
+for i in 1 2 3 4 5 6 7; do printf 'Filler%s 100.000 ok\n' "$i" >> "$log"; done
+printf 'Alpha 5.900 ok\nZulu 5.200 ok\n' >> "$log"
+is "digest: the 8-cap keeps the costlier of two sub-second-separated tools" \
+   "1" "$(ct_tool_digest "$log" | tr ',' '\n' | grep -c '^Alpha:')"
+is "digest: and drops the cheaper one instead" \
+   "0" "$(ct_tool_digest "$log" | tr ',' '\n' | grep -c '^Zulu:')"
+
+if command -v jq >/dev/null 2>&1; then
+  # The on-screen aggregation in session-end.sh sorts on "%.3f" -- millisecond
+  # precision -- and was never affected by this bug, so it is the reference
+  # the digest's own ordering is checked against for the very same log. Names
+  # chosen so neither an alphabetical nor a reverse-alphabetical tie-break
+  # would accidentally land on the right answer: by value, Kilo (1.9s) >
+  # Alpha (1.5s) > Zulu (1.2s), which is neither name order.
+  do_sid="digest-order-$$-$RANDOM"
+  fresh 'TOOL_TIMING=on'
+  do_sf="$(ct_state_file "$do_sid")"
+  printf '%s' "$(( $(date +%s) - 100 ))" > "${do_sf}.start"
+  printf '1'  > "${do_sf}.turns"
+  printf '40' > "${do_sf}.wait"
+  printf '0'  > "${do_sf}.idle"
+  printf 'Kilo 1.900 ok\nAlpha 1.500 ok\nZulu 1.200 ok\n' > "${do_sf}.tools"
+  do_out="$(printf '{"session_id":"%s","cwd":""}' "$do_sid" \
+    | bash "$SCRIPTS/session-end.sh")"
+  do_screen_order="$(printf '%s' "$do_out" | jq -r '.systemMessage' \
+    | grep -oE '[A-Za-z]+ [0-9.]+s \([0-9]+ calls?\)' \
+    | awk '{print $1}' | paste -sd, -)"
+  do_digest_order="$(cut -f8 "$CLAUDE_TIMESTAMP_HISTORY" \
+    | tr ',' '\n' | cut -d: -f1 | paste -sd, -)"
+  is "digest: ordering matches the on-screen summary for the same log" \
+     "Kilo,Alpha,Zulu" "$do_screen_order"
+  is "digest: and the history row orders the same way" \
+     "Kilo,Alpha,Zulu" "$do_digest_order"
+else
+  skip "digest: ordering matches the on-screen summary for the same log" "jq not installed"
+  skip "digest: and the history row orders the same way" "jq not installed"
+fi
+
+if command -v jq >/dev/null 2>&1; then
+  # ct_tool_digest in lib/config.sh skips a line with no usable tool name or
+  # duration -- a blank line, or one torn off mid-write. The on-screen
+  # aggregation four lines above it in this same hook is a second, separate
+  # awk pass over the identical log, and never got that filter: a blank line
+  # or a torn final line ("Rea", with no duration and no outcome) became a
+  # zero-duration, one-call tool named after whatever fragment survived,
+  # shown on screen even though the history row for the same session never
+  # recorded it.
+  it_sid="torn-line-$$-$RANDOM"
+  fresh 'TOOL_TIMING=on'
+  it_sf="$(ct_state_file "$it_sid")"
+  printf '%s' "$(( $(date +%s) - 100 ))" > "${it_sf}.start"
+  printf '1'  > "${it_sf}.turns"
+  printf '40' > "${it_sf}.wait"
+  printf '0'  > "${it_sf}.idle"
+  printf 'Bash 3.000 ok\nRead 1.000 ok\n\nRea' > "${it_sf}.tools"
+  it_out="$(printf '{"session_id":"%s","cwd":""}' "$it_sid" \
+    | bash "$SCRIPTS/session-end.sh")"
+  it_screen_tools="$(printf '%s' "$it_out" | jq -r '.systemMessage' \
+    | grep -oE '[A-Za-z]* [0-9.]+s \([0-9]+ calls?\)' \
+    | awk '{print $1}' | sort -u | paste -sd, -)"
+  it_history_tools="$(cut -f8 "$CLAUDE_TIMESTAMP_HISTORY" \
+    | tr ',' '\n' | cut -d: -f1 | sort -u | paste -sd, -)"
+  is "columns: a torn log line names the same tools on screen as in the history" \
+     "$it_screen_tools" "$it_history_tools"
+  refutes "columns: neither readout turns the torn fragment into a tool" \
+          grep -qx "Rea" <<< "$(tr ',' '\n' <<< "$it_screen_tools")"
+else
+  skip "columns: a torn log line names the same tools on screen as in the history" \
+       "jq not installed"
+  skip "columns: neither readout turns the torn fragment into a tool" \
+       "jq not installed"
+fi
+
+if command -v jq >/dev/null 2>&1; then
+  # End to end: drive the real writer, post-tool-use.sh, instead of
+  # fabricating its output. This is the case that would have caught the
+  # space-vs-tab mismatch on its own, and is meant to keep catching it if the
+  # writer's format ever changes again.
+  fresh 'TOOL_TIMING=on'
+  ct_stage_flag "digest-e2e" "timing-on" "1"
+  printf '{"session_id":"digest-e2e","tool_use_id":"d1","tool_name":"Bash","duration_ms":12500}' \
+    | bash "$SCRIPTS/post-tool-use.sh"
+  printf '{"session_id":"digest-e2e","tool_use_id":"d2","tool_name":"Bash","duration_ms":7500}' \
+    | bash "$SCRIPTS/post-tool-use.sh"
+  printf '{"session_id":"digest-e2e","tool_use_id":"d3","tool_name":"Read","duration_ms":250}' \
+    | bash "$SCRIPTS/post-tool-use.sh"
+  is "digest: reads the log post-tool-use.sh actually writes" \
+     "Bash:20:2,Read:0:1" "$(ct_tool_digest "$(ct_tool_log digest-e2e)")"
+else
+  skip "digest: reads the log post-tool-use.sh actually writes" "jq not installed"
+fi
+
+echo "history columns at session end"
+
+# Plants one finished turn's counters by hand, then drives the real
+# session-end.sh over stdin so the history row this feeds comes from the
+# actual writer rather than from a fabricated one. $1 is one or more config
+# lines to write first (embed a literal newline to set more than one); $2 is
+# the cwd session-end.sh receives, which is what PROJECTS=on records from.
+#
+# Deliberately does not create the turn's own base state file, only its
+# .start, .turns, .wait, .idle and .tools siblings -- so there is no open
+# turn for session-end.sh's own ct_turn_close to close: ct_close_turn returns
+# at once when that base file is absent, and the counters planted here are
+# what session-end.sh reads regardless.
+hc_run() {
+  local sid="hc-$$-$RANDOM"
+  printf '%s\n' "$1" > "$CLAUDE_TIMESTAMP_CONFIG"
+  : > "$CLAUDE_TIMESTAMP_HISTORY"
+  local sf; sf="$(ct_state_file "$sid")"
+  printf '%s' "$(( $(date +%s) - 100 ))" > "${sf}.start"
+  printf '1'   > "${sf}.turns"
+  printf '40'  > "${sf}.wait"
+  printf '0'   > "${sf}.idle"
+  printf 'Bash 12.500 ok\nRead 0.250 ok\n' > "${sf}.tools"
+  printf '{"session_id":"%s","cwd":"%s"}' "$sid" "$2" \
+    | bash "$SCRIPTS/session-end.sh" >/dev/null 2>&1
+}
+
+hc_repo="$WORK/hc-repo"
+mkdir -p "$hc_repo/.git"
+
+hc_run "PROJECTS=off"$'\n'"TOOL_TIMING=off" "$hc_repo"
+is "columns: both off writes six fields" \
+   "6" "$(awk -F'\t' 'NR==1{print NF}' "$CLAUDE_TIMESTAMP_HISTORY")"
+
+hc_run "PROJECTS=on"$'\n'"TOOL_TIMING=off" "$hc_repo"
+is "columns: PROJECTS on writes the project" \
+   "hc-repo" "$(cut -f7 "$CLAUDE_TIMESTAMP_HISTORY")"
+
+hc_run "PROJECTS=off"$'\n'"TOOL_TIMING=on" "$hc_repo"
+is "columns: TOOL_TIMING on writes the digest" \
+   "Bash:12:1,Read:0:1" "$(cut -f8 "$CLAUDE_TIMESTAMP_HISTORY")"
+is "columns: with no project recorded beside it" \
+   "-" "$(cut -f7 "$CLAUDE_TIMESTAMP_HISTORY")"
+
+# The regression at state.sh:402, in the one place it can come back.
+hc_run "SUMMARY=off"$'\n'"TOOL_TIMING=on"$'\n'"PROJECTS=on" "$hc_repo"
+is "columns: SUMMARY=off still records the row" \
+   "1" "$(wc -l < "$CLAUDE_TIMESTAMP_HISTORY" | tr -d ' ')"
+is "columns: and still records the tool digest" \
+   "Bash:12:1,Read:0:1" "$(cut -f8 "$CLAUDE_TIMESTAMP_HISTORY")"
+
+hc_run "PROJECTS=on"$'\n'"TOOL_TIMING=on"$'\n'"HISTORY=off" "$hc_repo"
+is "columns: HISTORY=off records nothing at all" \
+   "0" "$(wc -c < "$CLAUDE_TIMESTAMP_HISTORY" | tr -d ' ')"
+
+# A tool log with enough distinct tools makes `ct_tool_digest`'s internal
+# `sort -rn | head -8` close its pipe on `sort` before `sort` is done writing,
+# which sends `sort` SIGPIPE. Under session-end.sh's errexit/pipefail, a
+# nonzero exit from that pipeline used to abort the hook right there --
+# before ct_history_append and before ct_clear_state ran -- losing the
+# session's record and stranding its state files. 2000 distinct tools is
+# enough to reproduce it.
+big_sid="hc-big-$$-$RANDOM"
+printf '%s\n' "TOOL_TIMING=on" > "$CLAUDE_TIMESTAMP_CONFIG"
+: > "$CLAUDE_TIMESTAMP_HISTORY"
+big_sf="$(ct_state_file "$big_sid")"
+printf '%s' "$(( $(date +%s) - 100 ))" > "${big_sf}.start"
+printf '1'  > "${big_sf}.turns"
+printf '40' > "${big_sf}.wait"
+printf '0'  > "${big_sf}.idle"
+awk 'BEGIN { for (i = 0; i < 2000; i++) printf "Tool%04d 0.001 ok\n", i }' > "${big_sf}.tools"
+printf '{"session_id":"%s","cwd":"%s"}' "$big_sid" "$hc_repo" \
+  | bash "$SCRIPTS/session-end.sh" >/dev/null 2>&1
+big_status=$?
+is "large log: session-end still exits 0" "0" "$big_status"
+is "large log: the history row is still written" \
+   "1" "$(wc -l < "$CLAUDE_TIMESTAMP_HISTORY" | tr -d ' ')"
+if [ -e "$big_sf" ] || [ -e "${big_sf}.tools" ] || [ -e "${big_sf}.start" ]; then
+  fail "large log: session state is still cleared" "no state files left" "state files remain"
+else
+  pass "large log: session state is still cleared"
+fi
+
+rm -rf "$hc_repo"
 
 echo
 echo "----"

@@ -75,13 +75,28 @@ fi
 # worst-first, because the question this answers is "what made this session
 # slow", not "how long did any single call take".
 if [ "$CT_SUMMARY" = "on" ] && [ "$CT_TOOL_TIMING" = "on" ] && [ -s "$log" ]; then
-  tools="$(awk '{ sum[$1] += $2; n[$1]++ }
+  # `|| true`: on a log with many distinct tools, `head -3` can close the pipe
+  # before `sort` is done writing, which sends `sort` SIGPIPE even though
+  # every line `head` needed was already delivered. Under this script's own
+  # errexit/pipefail (see the top of the file), that nonzero exit would abort
+  # the hook right here -- before ct_history_append and before ct_clear_state
+  # -- for the same reason ct_tool_digest in lib/config.sh needs it. This is
+  # the more common way to hit it, since SUMMARY and TOOL_TIMING both on is
+  # the ordinary way to have TOOL_TIMING on at all.
+  tools="$(awk '
+                # Byte-identical to the filter ct_tool_digest applies in
+                # lib/config.sh, so a blank line or a line torn off mid-write
+                # cannot become a tool on screen that the history then does
+                # not carry: the two aggregations read the same log and must
+                # agree on what counts as a usable line.
+                $1 == "" || $2 !~ /^[0-9]+(\.[0-9]+)?$/ { next }
+                { sum[$1] += $2; n[$1]++ }
                 END { for (t in sum) printf "%.3f\t%s\t%d\n", sum[t], t, n[t] }' "$log" \
            | sort -rn | head -3 \
            | awk -F'\t' '{
                calls = ($3 == 1) ? "1 call" : $3 " calls"
                printf "%s%s %.1fs (%s)", (NR > 1 ? ", " : ""), $2, $1, calls
-             }')"
+             }')" || true
   if [ -n "$tools" ]; then
     [ -n "$summary" ] && summary="$summary"$'\n'
     summary="${summary}slowest tools: $tools"
@@ -101,7 +116,19 @@ fi
 # something to work from once the session is gone. Independent of SUMMARY:
 # they are separate settings and share only the counters underneath.
 if [ "$CT_HISTORY" = "on" ] && [ "$_CT_START" -gt 0 ] && [ "$_CT_TURNS" -gt 0 ]; then
-  ct_history_append "$total" "$_CT_TURNS" "$_CT_WAIT" "$_CT_IDLE" "$failed"
+  # Each column is gated on the setting that fills it and on nothing else.
+  #
+  # In particular the digest is gated on TOOL_TIMING alone, never on SUMMARY.
+  # The aggregation above shares this log and does test SUMMARY, because it
+  # feeds a line printed on screen. This one feeds the history, which is a
+  # separate setting: see state.sh:402 for what coupling the two cost the
+  # last time it happened.
+  hist_project=""
+  [ "$CT_PROJECTS" = "on" ] && hist_project="$(ct_project_name "$cwd")"
+  hist_tools=""
+  [ "$CT_TOOL_TIMING" = "on" ] && hist_tools="$(ct_tool_digest "$log")"
+  ct_history_append "$total" "$_CT_TURNS" "$_CT_WAIT" "$_CT_IDLE" "$failed" \
+    "$hist_project" "$hist_tools"
 fi
 
 ct_clear_state "$session_id"

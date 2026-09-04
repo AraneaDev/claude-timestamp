@@ -20,7 +20,25 @@ CT_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib"
 source "$CT_LIB/config.sh"
 source "$CT_LIB/state.sh"
 
-ZONEINFO="/usr/share/zoneinfo"
+# CLAUDE_TIMESTAMP_ZONEINFO exists so the test suite can point the wizard's
+# zone search at a synthetic tree large enough to reproduce a SIGPIPE that a
+# real machine's own zoneinfo may be too small to trigger; it is not a
+# user-facing setting.
+ZONEINFO="${CLAUDE_TIMESTAMP_ZONEINFO:-/usr/share/zoneinfo}"
+
+# Report filters for --stats, set by --since and --project in main()'s parser.
+# Empty means unfiltered. These configure a report rather than a persisted
+# setting, so they live here rather than in CT_FLAG_TABLE.
+#
+# CT_STATS_SINCE_DAYS holds the day count from a relative --since=Nd until
+# stats() can resolve it: the parser runs before ct_load_config, so CT_TZ is
+# still empty there, and resolving the cutoff that early would render it in
+# the machine's zone rather than the configured one. The absolute
+# --since=YYYY-MM-DD form needs no such deferral -- it is a literal, so it
+# goes straight into CT_STATS_SINCE.
+CT_STATS_SINCE=""
+CT_STATS_SINCE_DAYS=""
+CT_STATS_PROJECT=""
 
 usage() {
   cat <<'USAGE'
@@ -31,6 +49,11 @@ claude-timestamp setup
   setup.sh --show             Print the current configuration.
   setup.sh --doctor           Check that everything needed is present and working.
   setup.sh --stats            Summarise the sessions recorded so far.
+  setup.sh --stats --since=7d  Only sessions from the last seven days.
+  setup.sh --stats --since=2026-09-01
+                              Only sessions on or after that date.
+  setup.sh --stats --project=NAME
+                              Only sessions recorded against that project.
 
 Flags
   --tz=ZONE                   IANA timezone (Europe/Amsterdam), or "local".
@@ -58,6 +81,8 @@ Flags
   --subagents=on|off          Stamp subagent messages too.
   --history=on|off            Record each finished session for --stats.
   --history-limit=N           How many sessions to keep (default 200).
+  --projects=on|off           Record the project's directory name in each
+                              history row. Off by default. Never a path.
   --tool-timing=on|off        Record what each tool call cost and report the
                               slowest in the session summary. Off by default:
                               it is the only setting that costs anything per
@@ -124,6 +149,7 @@ subagents       SUBAGENTS       CT_SUBAGENTS        ct_is_onoff             -   
 tool-timing     TOOL_TIMING     CT_TOOL_TIMING      ct_is_onoff             -        ignore
 history         HISTORY         CT_HISTORY          ct_is_onoff             -        ignore
 history-limit   HISTORY_LIMIT   CT_HISTORY_LIMIT    ct_is_history_limit     -        ignore
+projects        PROJECTS        CT_PROJECTS         ct_is_onoff             -        ignore
 inject-context  INJECT_CONTEXT  CT_INJECT_CONTEXT   ct_is_bool              -        ignore
 "
 
@@ -245,6 +271,18 @@ preview() {
 stats() {
   ct_load_config
 
+  # The relative --since form is stored as a day count rather than resolved
+  # in the parser, because the parser runs before ct_load_config -- CT_TZ is
+  # still empty there, so a cutoff computed at parse time would be rendered
+  # in the machine's zone rather than the configured one. Resolved here,
+  # right after the config (and therefore CT_TZ) is loaded.
+  if [ -n "${CT_STATS_SINCE_DAYS:-}" ]; then
+    CT_STATS_SINCE="$(ct_date_days_ago "$CT_STATS_SINCE_DAYS")" || {
+      echo "This system's date cannot compute a cutoff. Use --since=YYYY-MM-DD." >&2
+      return 2
+    }
+  fi
+
   local file
   file="$(ct_history_path)"
   if [ ! -r "$file" ] || [ ! -s "$file" ]; then
@@ -260,11 +298,54 @@ stats() {
 
   local n total turns waited idle failed maxd maxwhen maxturns first last bad
   read -r n total turns waited idle failed maxd maxwhen maxturns first last bad <<EOF
-$(awk -F'\t' '
-  # Six fields, or the row is not a session. A partial write or a hand edit
-  # used to shift every field after the damaged one, which printed a total
-  # that was wrong rather than a message saying the file was.
-  NF != 6 { bad++; next }
+$(CT_STATS_SINCE="${CT_STATS_SINCE:-}" CT_STATS_PROJECT="${CT_STATS_PROJECT:-}" awk -F'\t' '
+  # Read through ENVIRON rather than -v: POSIX -v assignment runs escape-
+  # sequence processing on its value, so a project named literally
+  # "back\tslash" arrived here as "back<TAB>slash" -- silently matching
+  # nothing, since the history stores the name unprocessed. ENVIRON performs
+  # no such processing, so the filter sees exactly what the flag was given.
+  # `since` is immune to this in practice, since it is validated down to
+  # digits or a YYYY-MM-DD shape before it ever reaches awk, but it is read
+  # the same way regardless, so the two cannot drift back apart later.
+  BEGIN { since = ENVIRON["CT_STATS_SINCE"]; want = ENVIRON["CT_STATS_PROJECT"] }
+  # Six to eight fields, the last two being optional columns a row carries
+  # only when the setting that fills them was on. Widening the count alone
+  # would weaken the check, so the timings are checked for being timings:
+  # a partially written line usually still lands on some field count, and
+  # only this catches that.
+  NF < 6 || NF > 8 { bad++; next }
+  # Bounded to 15 digits, not merely to digits. That still admits any real
+  # duration -- 15 nines is over 31 million years of seconds -- while
+  # keeping each individual value inside the exact-integer range of a
+  # double (2^53 is 16 digits), so awk cannot silently round it, and inside
+  # the 64-bit range of the shell downstream, where a longer run of digits
+  # overflowed and turned every arithmetic expression that touched it into
+  # a raw shell error. This bounds each value alone, not their sum: totals,
+  # waited, idle, turns and failed below are accumulated across every
+  # matching row, and a sum of many 15-digit values can still exceed the
+  # 64-bit range of the shell even though every value that fed it
+  # individually respected this bound. The END block below carries a
+  # second bound for that accumulated case -- and so do the by-project and
+  # slowest-tools passes further down, which accumulate the same kind of
+  # per-row values into secs[] and calls[] of their own and are exposed to
+  # exactly the same overflow.
+  $2 !~ /^[0-9]{1,15}$/ || $3 !~ /^[0-9]{1,15}$/ || $4 !~ /^[0-9]{1,15}$/ ||
+  $5 !~ /^[0-9]{1,15}$/ || $6 !~ /^[0-9]{1,15}$/ { bad++; next }
+  # Field 1 (the date) is otherwise never validated, and it is emitted
+  # through a bare %s into a space-separated line that a positional `read`
+  # downstream consumes -- so a field 1 containing a space reads as extra
+  # words, shifting every field after it left the same way an empty
+  # maxwhen/first/last already does above, right down to the raw shell
+  # error. Rejecting on whitespace specifically, not on a full ISO-8601
+  # shape: ct_history_append always writes this field with `ct_now iso`,
+  # so a stricter pattern would probably still be safe, but whitespace is
+  # what actually breaks the reader, and the narrower rule cannot reject a
+  # legitimate historical row written by an older or newer format.
+  $1 ~ /[[:space:]]/ { bad++; next }
+  # Filtered rows are skipped, not counted as unreadable: they were read
+  # fine, they simply fall outside what was asked for.
+  since != "" && $1 "" < since "" { next }
+  want  != "" && ((NF >= 7 && $7 != "" ? $7 : "-") "" != want "") { next }
   {
     n++; total += $2; turns += $3; waited += $4; idle += $5; failed += $6
     # Seeded on the first row rather than only when a row beats the running
@@ -292,19 +373,97 @@ $(awk -F'\t' '
     if (maxwhen == "") maxwhen = "-"
     if (first == "") first = "-"
     if (last == "") last = "-"
+    # The per-value bound above keeps any one duration inside the 64-bit
+    # range of the shell; it says nothing about their sum. Enough rows each
+    # individually at that bound overflow these accumulators once awk sums
+    # them as doubles -- past 2^53 the sum itself is no longer exact, and
+    # the rounded result handed to the shell can land outside its signed
+    # 64-bit range entirely, reproducing the same raw shell error
+    # ("integer expression expected") the per-value bound exists to
+    # prevent. Clamped here to a value comfortably under the shell limit of
+    # INT64_MAX (about 9.22e18), with headroom for "waiting" below, which
+    # multiplies its total by 100 before dividing: the cap on waited times
+    # 100 must itself still fit, so the cap is chosen an order of magnitude
+    # below the raw 64-bit ceiling rather than right up against it. Every
+    # real history is many orders of magnitude under this either way --
+    # 9e16 seconds is billions of years of sessions -- so the clamp is
+    # unreachable in practice; it exists so the shell downstream is
+    # mathematically guaranteed never to see an integer it cannot hold,
+    # rather than relying on that being true by coincidence of scale.
+    cap = 90000000000000000
+    if (total  > cap) total  = cap
+    if (waited > cap) waited = cap
+    if (idle   > cap) idle   = cap
+    if (turns  > cap) turns  = cap
+    if (failed > cap) failed = cap
     printf "%d %d %d %d %d %d %d %s %d %s %s %d\n",
       n, total, turns, waited, idle, failed, maxd, maxwhen, maxturns, first, last, bad + 0
   }' "$file")
 EOF
 
   if [ "$n" -eq 0 ]; then
+    if [ -n "${CT_STATS_PROJECT:-}${CT_STATS_SINCE:-}" ]; then
+      # The filter is named even though nothing matched. --since=7d resolves to
+      # a date the user never typed, and "nothing matched" without saying what
+      # was asked for leaves them unable to tell a wrong filter from an empty
+      # history.
+      printf 'No sessions match'
+      [ -n "${CT_STATS_PROJECT:-}" ] && printf ' in %s' "$CT_STATS_PROJECT"
+      [ -n "${CT_STATS_SINCE:-}" ] && printf ' since %s' "$CT_STATS_SINCE"
+      printf '.\n'
+      # bad is computed regardless of whether a filter is in play -- the NF
+      # and timing guard above runs over every row before since/want ever
+      # apply. The unfiltered branch below already reports it; a filtered
+      # miss must too, in the same wording, or a history with damaged rows
+      # reads as merely unmatched rather than as damaged.
+      [ "$bad" -gt 0 ] && echo "  $bad unreadable row(s) in $(ct_tilde "$file")."
+      local known
+      # The same row-validity guard the totals, by-project and slowest-tools
+      # passes above share -- NF in range, each timing field a bounded run of
+      # digits, no whitespace in the date -- so this hint can only ever name
+      # a project that those passes would themselves count. Without it, a
+      # damaged row's field 7 could be offered as a suggestion and then
+      # refused when the reader tried it, since --project filters against
+      # the very same guard.
+      #
+      # It also carries the same `since` clause as those three passes, for a
+      # different reason: this hint exists to point a reader at a project
+      # they can actually retry, and a suggestion --since already excludes is
+      # a dead end -- refused the moment it is tried, with no way to tell
+      # that from a plain typo. It deliberately does NOT carry `want`: a
+      # project filter with no matches is exactly why this hint runs, so
+      # filtering the hint on that same project would empty it out.
+      known="$(CT_STATS_SINCE="${CT_STATS_SINCE:-}" awk -F'\t' '
+        # Read through ENVIRON rather than -v; see the totals pass above for
+        # why -v is unsafe for a filter value.
+        BEGIN { since = ENVIRON["CT_STATS_SINCE"] }
+        NF < 6 || NF > 8 { next }
+        $2 !~ /^[0-9]{1,15}$/ || $3 !~ /^[0-9]{1,15}$/ || $4 !~ /^[0-9]{1,15}$/ ||
+        $5 !~ /^[0-9]{1,15}$/ || $6 !~ /^[0-9]{1,15}$/ { next }
+        $1 ~ /[[:space:]]/ { next }
+        since != "" && $1 "" < since "" { next }
+        NF >= 7 && $7 != "" && $7 != "-" { print $7 }
+      ' "$file" | sort -u | tr '\n' ' ')"
+      [ -n "$known" ] && echo "  projects recorded: $known"
+      return 0
+    fi
     echo "No readable sessions recorded."
     [ "$bad" -gt 0 ] && echo "  $bad unreadable row(s) in $(ct_tilde "$file")."
     return 0
   fi
 
-  printf 'claude-timestamp stats%*slast %s session' "$((28 - 21))" "" "$n"
+  # "last N sessions" is right for an unfiltered view and wrong for a filtered
+  # one: the rows are the ones that matched, not the most recent ones. The
+  # filter is spelled out so a narrowed total is never read as an all-time one.
+  printf 'claude-timestamp stats%*s' "$((28 - 21))" ""
+  if [ -n "${CT_STATS_SINCE:-}${CT_STATS_PROJECT:-}" ]; then
+    printf '%s session' "$n"
+  else
+    printf 'last %s session' "$n"
+  fi
   [ "$n" -eq 1 ] || printf 's'
+  [ -n "${CT_STATS_PROJECT:-}" ] && printf ' in %s' "$CT_STATS_PROJECT"
+  [ -n "${CT_STATS_SINCE:-}" ] && printf ' since %s' "$CT_STATS_SINCE"
   printf '\n\n'
 
   echo "  sessions        $n"
@@ -322,6 +481,171 @@ EOF
   echo
   echo "  longest         ${maxwhen%%T*}  $(ct_format_duration "$maxd") over $maxturns turns"
   echo "  recorded from   ${first%%T*} to ${last%%T*}"
+
+  # By project. Emitted only when at least one row named one, so an
+  # installation that never turned PROJECTS on sees the output it saw before
+  # the column existed.
+  local rows
+  rows="$(CT_STATS_SINCE="${CT_STATS_SINCE:-}" CT_STATS_PROJECT="${CT_STATS_PROJECT:-}" awk -F'\t' '
+    # Read through ENVIRON rather than -v; see the totals pass above for why
+    # -v is unsafe for a filter value.
+    BEGIN { since = ENVIRON["CT_STATS_SINCE"]; want = ENVIRON["CT_STATS_PROJECT"] }
+    # The same validity test the totals above use, not a looser one. A row
+    # rejected there and accepted here would put seconds into a per-project
+    # figure that the total it sits under does not count, so the breakdown
+    # would exceed the whole.
+    NF < 6 || NF > 8 { next }
+    # Same 15-digit bound as the totals pass, and for the same reason: a
+    # value long enough to overflow the 64-bit arithmetic of the shell
+    # downstream is damage, not a duration.
+    $2 !~ /^[0-9]{1,15}$/ || $3 !~ /^[0-9]{1,15}$/ || $4 !~ /^[0-9]{1,15}$/ ||
+    $5 !~ /^[0-9]{1,15}$/ || $6 !~ /^[0-9]{1,15}$/ { next }
+    # Same whitespace-in-the-date-field guard as the totals pass, for the
+    # same reason given there: a row rejected as damage by the totals must
+    # not still count here, or the breakdown would exceed the whole.
+    $1 ~ /[[:space:]]/ { next }
+    since != "" && $1 "" < since "" { next }
+    want  != "" && ((NF >= 7 && $7 != "" ? $7 : "-") "" != want "") { next }
+    {
+      # seen tracks whether any row named a real project, not merely whether
+      # field 7 is present: a history where PROJECTS was never turned on, or
+      # where TOOL_TIMING alone put a "-" placeholder in field 7 to hold its
+      # place, must show no block at all -- (unnamed) only belongs to a mixed
+      # history where at least one row names a project and another does not.
+      named = (NF >= 7 && $7 != "" && $7 != "-")
+      p = (NF >= 7 && $7 != "") ? $7 : "-"
+      if (named) seen = 1
+      secs[p] += $2; n[p]++
+    }
+    END {
+      if (!seen) exit 0
+      # Same accumulator-overflow bound as the totals pass above, applied per
+      # project rather than once globally: secs[p] is summed across every row
+      # naming project p, and enough rows at the per-value bound can carry
+      # that projects sum past the 64-bit range of the shell downstream even
+      # though no single value that fed it broke the per-value bound. Capped
+      # per project, not on a grand total across projects, since the failure
+      # this guards is a single accumulator overflowing on its own, not the
+      # sum of all of them.
+      cap = 90000000000000000
+      for (p in secs) {
+        if (secs[p] > cap) secs[p] = cap
+        printf "%018d\t%s\t%d\n", secs[p], p, n[p]
+      }
+    }' "$file" | sort -rn)"
+  if [ -n "$rows" ]; then
+    echo
+    echo "  by project"
+    local p_secs p_name p_n label
+    while IFS=$'\t' read -r p_secs p_name p_n; do
+      [ -n "$p_name" ] || continue
+      label="$p_name"
+      [ "$label" = "-" ] && label="(unnamed)"
+      printf '    %-20s %10s  %d session' "$label" \
+        "$(ct_format_duration "$((10#$p_secs))")" "$p_n"
+      [ "$p_n" -eq 1 ] || printf 's'
+      printf '\n'
+    done <<ROWS
+$rows
+ROWS
+  fi
+
+  # Slowest tools, summed across every recorded session. The per-session
+  # summary answers "what made this session slow"; this answers "what has been
+  # costing me", which is the question a hundred rows can answer and one
+  # cannot.
+  rows="$(CT_STATS_SINCE="${CT_STATS_SINCE:-}" CT_STATS_PROJECT="${CT_STATS_PROJECT:-}" awk -F'\t' '
+    # Read through ENVIRON rather than -v; see the totals pass above for why
+    # -v is unsafe for a filter value.
+    BEGIN { since = ENVIRON["CT_STATS_SINCE"]; want = ENVIRON["CT_STATS_PROJECT"] }
+    # The same shared validity guard as the other two passes, plus one more
+    # rule this pass alone needs: field 8 must actually be present, since a
+    # row can be valid by the shared guard and still carry no tool digest.
+    NF < 6 || NF > 8 { next }
+    # Same 15-digit bound as the totals pass, and for the same reason.
+    $2 !~ /^[0-9]{1,15}$/ || $3 !~ /^[0-9]{1,15}$/ || $4 !~ /^[0-9]{1,15}$/ ||
+    $5 !~ /^[0-9]{1,15}$/ || $6 !~ /^[0-9]{1,15}$/ { next }
+    # Same whitespace-in-the-date-field guard as the totals pass, for the
+    # same reason given there: a row rejected as damage by the totals must
+    # not still count here.
+    $1 ~ /[[:space:]]/ { next }
+    since != "" && $1 "" < since "" { next }
+    want  != "" && ((NF >= 7 && $7 != "" ? $7 : "-") "" != want "") { next }
+    NF < 8 || $8 == "" { next }
+    {
+      c = split($8, entries, ",")
+      for (i = 1; i <= c; i++) {
+        if (split(entries[i], part, ":") != 3) continue
+        # An empty name (a hand-edited ":0:1" entry) must not become a row.
+        # The read loop below splits on \037 (unit separator), not tab, and
+        # \037 is not one of the "IFS whitespace" characters, so `read`
+        # preserves an empty field there instead of collapsing it into a
+        # neighbour -- the collapse that would otherwise shift the call
+        # count into the name and leave the count empty, failing an integer
+        # test with a raw shell error. That means this skip is no longer
+        # the thing standing between an empty name and that collapse; \037
+        # already prevents it. This is defense in depth: it keeps an empty
+        # name out of the emitted rows at all, the same way ct_tool_digest
+        # in lib/config.sh already skips a malformed entry at the source.
+        if (part[1] == "") continue
+        # Same 15-digit bound as the timing fields of the row itself.
+        if (part[2] !~ /^[0-9]{1,15}$/ || part[3] !~ /^[0-9]{1,15}$/) continue
+        secs[part[1]] += part[2]; calls[part[1]] += part[3]
+      }
+    }
+    # \037 (unit separator) rather than a tab: the read loop below uses
+    # `read`, and tab is one of the "IFS whitespace" characters, which makes
+    # `read` collapse adjacent delimiters and trim leading/trailing ones
+    # regardless of what IFS is set to, so a field that really was empty
+    # would silently shift into its neighbour. \037 is not whitespace to
+    # `read`, so an empty field stays an empty field no matter what this
+    # awk emits -- the entries loop above already keeps that from
+    # happening, this just stops relying on it staying that way.
+    END {
+      # Same accumulator-overflow bound as the totals and by-project passes
+      # above, applied per tool: secs[t] and calls[t] are each summed across
+      # every occurrence of tool t, and enough occurrences at the per-value
+      # bound can carry either sum past the 64-bit range of the shell
+      # downstream even though no single value that fed it broke the
+      # per-value bound. calls[t] gets the same cap as secs[t] for the same
+      # reason, not because it feeds a multiplication like waited does above:
+      # it reaches a plain `[ -eq ]` test in the shell, and an accumulator
+      # that overflows there raises the identical raw "integer expression
+      # expected" error.
+      cap = 90000000000000000
+      for (t in secs) {
+        if (secs[t]  > cap) secs[t]  = cap
+        if (calls[t] > cap) calls[t] = cap
+        printf "%018d\037%s\037%d\n", secs[t], t, calls[t]
+      }
+    }
+    ' "$file" | sort -rn | head -10)" || true
+  # `|| true` above: on a history with many distinct tool names, `head -10`
+  # closes the pipe once it has its ten lines, and `sort` -- which may still
+  # have more to write -- gets SIGPIPE for it, even though every line `head`
+  # needed had already been delivered. That makes the pipeline's exit status
+  # nonzero for reasons that have nothing to do with the output being wrong.
+  # `--stats` runs under this script's own errexit/pipefail, so without
+  # `|| true`, a large enough history would abort the whole report right
+  # here -- truncating it silently, with no error, before the slowest-tools
+  # table the reader came for ever prints. The printed output is unaffected
+  # either way. Same defect, same fix, as ct_tool_digest in lib/config.sh and
+  # the on-screen aggregation in session-end.sh.
+  if [ -n "$rows" ]; then
+    echo
+    echo "  slowest tools"
+    local t_secs t_name t_calls
+    while IFS=$'\x1f' read -r t_secs t_name t_calls; do
+      [ -n "$t_name" ] || continue
+      printf '    %-20s %10s  (%d call' "$t_name" \
+        "$(ct_format_duration "$((10#$t_secs))")" "$t_calls"
+      [ "$t_calls" -eq 1 ] || printf 's'
+      printf ')\n'
+    done <<ROWS
+$rows
+ROWS
+  fi
+
   return 0
 }
 
@@ -592,9 +916,11 @@ SUBAGENTS=$CT_SUBAGENTS
 TOOL_TIMING=$CT_TOOL_TIMING
 
 # Record each finished session, and how many to keep. Timings only: no message
-# text, no tool arguments, no paths.
+# text, no tool arguments, no paths. PROJECTS additionally names the project
+# directory in each row -- never the path above it.
 HISTORY=$CT_HISTORY
 HISTORY_LIMIT=$CT_HISTORY_LIMIT
+PROJECTS=$CT_PROJECTS
 
 # Tell Claude the local time each prompt was sent.
 INJECT_CONTEXT=$CT_INJECT_CONTEXT
@@ -676,8 +1002,16 @@ write_project_config() {
         # pinned to the empty string (TZ=, or a colour set to inherit) extract
         # as "", so emptiness alone cannot tell "nothing to keep" from "keep an
         # empty pin"; presence can.
-        if printf '%s\n' "$existing" | grep -q "^${key}="; then
-          value="$(printf '%s\n' "$existing" | sed -n "s/^${key}=//p" | tail -1)"
+        # A here-string, not a pipe: `grep -q` exits as soon as it finds a
+        # match, and on a config bigger than the pipe buffer that closes the
+        # read end while printf is still writing, giving printf SIGPIPE.
+        # Under this script's own pipefail, that reports the PIPELINE as
+        # failed even though grep found exactly what it was looking for, so
+        # `if` took the "not present" branch and dropped a real key. A
+        # here-string feeds grep from a temp file bash itself writes, so the
+        # match result no longer depends on how much of it grep chose to read.
+        if grep -q "^${key}=" <<< "$existing"; then
+          value="$(sed -n "s/^${key}=//p" <<< "$existing" | tail -1)"
           carried=1
         else
           continue
@@ -753,6 +1087,17 @@ TABLE
   echo "Wrote $(ct_tilde "$file")"
 }
 
+# Prints the effective settings for whoever ran --show (or the /timestamps
+# slash command's "how it looks" path) to confirm what is actually configured,
+# without reading the config file -- or two, once a project layer is
+# involved -- by hand.
+#
+# tools/check-docs.sh's show-config-completeness gate asserts every
+# CT_FLAG_TABLE row's variable is referenced somewhere in this function's
+# body. It exists because PROJECTS once reached the flag table and
+# write_config's heredoc but never this function: the setting parsed, wrote,
+# and validated correctly, yet --show had no line for it, so nothing could
+# confirm from the command line that it had taken.
 show_config() {
   ct_load_config
   local file
@@ -780,6 +1125,7 @@ show_config() {
   echo "  Subagents       $CT_SUBAGENTS"
   echo "  Tool timing     $CT_TOOL_TIMING"
   echo "  History         $CT_HISTORY (keeping $CT_HISTORY_LIMIT)"
+  echo "  Projects        $CT_PROJECTS"
   echo "  Inject context  $CT_INJECT_CONTEXT"
   echo
   echo -n "  Preview         "; preview
@@ -857,6 +1203,14 @@ ask() {
   return 0
 }
 
+# A curated walkthrough, not a complete one. It asks about the settings that
+# change what a session actually shows -- ENABLED, TZ, the clock format,
+# ELAPSED and its threshold, IDLE_AFTER, SUMMARY, TOOL_TIMING, COLOR, the
+# marker template, HISTORY and PROJECTS -- plus the one model-facing setting,
+# INJECT_CONTEXT and its format. Finer controls such as the per-part colours,
+# SLOW_COLOR, DATE_ROLLOVER, SUBAGENTS and HISTORY_LIMIT are reachable only
+# through their own flags; a curated set of ready-made marker templates is
+# offered separately, through the /timestamps slash command's looks picker.
 wizard() {
   ct_load_config
 
@@ -894,8 +1248,22 @@ wizard() {
       local term
       ask "  Search for" "Europe"; term="$_CT_ANSWER"
       if [ -d "$ZONEINFO" ]; then
+        # `|| true` at the very end of this pipeline: a broad enough search
+        # term can match enough files that `head -25` closes the pipe once it
+        # has its 25 lines, and `sort` -- which may still have more to write
+        # -- gets SIGPIPE for it, even though every line `head` needed had
+        # already been delivered. That makes the pipeline's exit status
+        # nonzero for reasons that have nothing to do with the output being
+        # wrong. This script runs under its own errexit/pipefail (see the top
+        # of the file), so without `|| true`, a search that matched enough
+        # zones would abort the wizard right here, mid-question. A reviewer
+        # could not reproduce this on this machine's own zoneinfo size, but
+        # the hazard is structural rather than size-dependent. Same defect,
+        # same fix, as ct_tool_digest in lib/config.sh, the aggregation in
+        # session-end.sh, and the slowest-tools pass in stats() below.
         find "$ZONEINFO" -type f -path "*$term*" 2>/dev/null \
-          | sed "s|^$ZONEINFO/||" | grep -v '^posix/\|^right/\|\.' | sort | head -25
+          | sed "s|^$ZONEINFO/||" | grep -v '^posix/\|^right/\|\.' | sort | head -25 \
+          || true
       else
         echo "  No zoneinfo database on this machine; type the name directly."
       fi
@@ -950,11 +1318,37 @@ wizard() {
   done
   ask "Report session totals when the session ends? (on/off)" "$CT_SUMMARY"; answer="$_CT_ANSWER"
   case "$answer" in on|off) CT_SUMMARY="$answer" ;; esac
-  if [ "$CT_SUMMARY" = "on" ]; then
-    echo "  Tool timing names the slowest tools in that summary. It is the only"
-    echo "  setting that costs anything per tool call rather than per message."
-    ask "  Record what each tool call cost? (on/off)" "$CT_TOOL_TIMING"; answer="$_CT_ANSWER"
-    case "$answer" in on|off) CT_TOOL_TIMING="$answer" ;; esac
+  # Unconditional: tool timing used to only change what the summary above
+  # printed, which is why this was nested under it. It now also fills field 8
+  # of the session history and feeds the --stats slowest-tools table, neither
+  # of which depends on the summary being on, so nesting it here would cut
+  # someone who answered "off" above away from the whole tool-breakdown
+  # feature through the guided path.
+  echo "Tool timing names the slowest tools in that summary and in --stats,"
+  echo "and records what each tool call cost into the session history. It is"
+  echo "the only setting that costs anything per tool call rather than per"
+  echo "message."
+  ask "Record what each tool call cost? (on/off)" "$CT_TOOL_TIMING"; answer="$_CT_ANSWER"
+  case "$answer" in on|off) CT_TOOL_TIMING="$answer" ;; esac
+  echo
+
+  # The one part of the wizard that is not about what appears on screen. It
+  # defaults to on, so a user who never reads the README has a file
+  # accumulating in their home directory that nothing in the guided setup
+  # mentions. Saying where it goes matters more than the question itself.
+  echo "Finished sessions can be recorded, so the totals survive the session"
+  echo "and --stats can add them up. Timings only, in"
+  echo "  $(ct_tilde "$(ct_history_path)")"
+  ask "Record finished sessions? (on/off)" "$CT_HISTORY"; answer="$_CT_ANSWER"
+  case "$answer" in on|off) CT_HISTORY="$answer" ;; esac
+  # Nested, because PROJECTS only ever changes what a recorded row contains.
+  # Asked with HISTORY off, it would be a question whose answer does nothing.
+  if [ "$CT_HISTORY" = "on" ]; then
+    echo "  The record can name the project each session belonged to, which lets"
+    echo "  --stats break the totals down per project. The directory's name only,"
+    echo "  never the path above it."
+    ask "  Name the project in each record? (on/off)" "$CT_PROJECTS"; answer="$_CT_ANSWER"
+    case "$answer" in on|off) CT_PROJECTS="$answer" ;; esac
   fi
   echo
 
@@ -1062,9 +1456,19 @@ TABLE
   return 1
 }
 
+# Parses argv into one action -- show, doctor, stats, wizard, or a write --
+# then dispatches to exactly one of them.
+#
+# Configuration is not loaded yet while parsing runs, so nothing in the loop
+# below may depend on it; --config=* is the one exception, since it only
+# decides where a later ct_load_config will look. --since=Nd used to violate
+# this by resolving its relative cutoff immediately, against whatever CT_TZ
+# happened to be in scope at parse time rather than the one the config file
+# names; it now stores the raw day count and defers resolution to stats(),
+# which runs after configuration has loaded.
 main() {
   local interactive=1 action="write" project_scope=0
-  local arg flag value i
+  local arg flag value i days
   # Parallel arrays with a counter of their own. bash 3.2 is what macOS ships:
   # it has no associative arrays, and under `set -u` it treats an empty array
   # as unset, so neither ${#arr[@]} nor a bare "${arr[@]}" is safe to lean on
@@ -1073,6 +1477,12 @@ main() {
   # A key present in named_keys was named on this run, which is the whole of
   # what "named" used to need four separate *_named locals to express.
   local named_keys=() named_values=() named_count=0
+  # Set when a stats-only flag was named, so the write-vs-report conflict
+  # below can be detected without re-deriving it from `action` -- which
+  # --since=* and --project=* both also set unconditionally, and set the
+  # same way whether or not a setting flag came with them.
+  local saw_stats_bare=0 saw_since_flag=0 since_flag_value=""
+  local saw_project_filter=0
 
   while [ $# -gt 0 ]; do
     arg="$1"
@@ -1081,7 +1491,55 @@ main() {
       --project)   project_scope=1; interactive=0 ;;
       --show)      action="show";   interactive=0 ;;
       --doctor)    action="doctor"; interactive=0 ;;
-      --stats)     action="stats";  interactive=0 ;;
+      --stats)     action="stats";  interactive=0; saw_stats_bare=1 ;;
+      --since=*)
+        action="stats"; interactive=0
+        value="${arg#*=}"
+        saw_since_flag=1; since_flag_value="$value"
+        case "$value" in
+          *d)
+            # [0-9]*d as a glob is "one digit, then anything, then a literal
+            # d" -- the middle * matches any character, not just digits --
+            # so "7dd" and "7x1d" both matched it too. ${value%d} then
+            # stripped only the trailing d and handed ct_date_days_ago a
+            # string it could not parse, which failed there and blamed the
+            # platform ("This system's date cannot compute a cutoff")
+            # instead of naming the flag the way the *) branch below does.
+            # Validated here instead, against digits alone.
+            days="${value%d}"
+            case "$days" in
+              ''|*[!0-9]*)
+                echo "--since takes a number of days such as 7d, or a date such as 2026-09-01." >&2
+                exit 2 ;;
+            esac
+            # Bounded to 6 digits. The plugin has not existed for anywhere
+            # near the 2700-odd years that many days is, and it keeps
+            # `days * 86400` in ct_date_days_ago far inside the shell's
+            # 64-bit range, rather than accepted here and left to overflow,
+            # or worse silently wrap, deep inside that arithmetic.
+            if [ "${#days}" -gt 6 ]; then
+              echo "--since takes a number of days such as 7d, or a date such as 2026-09-01." >&2
+              exit 2
+            fi
+            # Stored, not resolved: CT_TZ is not loaded yet at parse time.
+            # stats() resolves this into CT_STATS_SINCE right after it calls
+            # ct_load_config.
+            CT_STATS_SINCE_DAYS="$days" ;;
+          [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9])
+            CT_STATS_SINCE="$value" ;;
+          *)
+            echo "--since takes a number of days such as 7d, or a date such as 2026-09-01." >&2
+            exit 2 ;;
+        esac ;;
+      --project=*)
+        action="stats"; interactive=0
+        saw_project_filter=1
+        value="${arg#*=}"
+        if [ -z "$value" ]; then
+          echo "--project takes a name to filter by, such as my-app; it cannot be empty." >&2
+          exit 2
+        fi
+        CT_STATS_PROJECT="$value" ;;
       -h|--help)   usage; exit 0 ;;
       --*=*)
         flag="${arg#--}"; flag="${flag%%=*}"
@@ -1130,6 +1588,49 @@ main() {
     esac
     shift
   done
+
+  # Three flags share a name and nothing else: bare --project selects
+  # project scope for a setting being WRITTEN; --project=NAME is a --stats
+  # filter; --projects=on|off is the setting that turns recording project
+  # names on or off. Left unchecked, --project=NAME combined with a setting
+  # to write silently picked the --stats action over the write, discarding
+  # the write with no error -- and no project is plausibly named "on" or
+  # "off", so that value is almost always a typo for --projects=.
+  if [ "$saw_project_filter" = "1" ]; then
+    case "$CT_STATS_PROJECT" in
+      on|off)
+        echo "--project=$CT_STATS_PROJECT looks like a typo for --projects=$CT_STATS_PROJECT." >&2
+        echo "--project=NAME filters --stats by name; --projects=on|off is the setting" >&2
+        echo "that turns recording project names on or off. No project is named '$CT_STATS_PROJECT'." >&2
+        exit 2
+        ;;
+    esac
+  fi
+
+  # --stats and --since=* have the same write-vs-report conflict as
+  # --project=NAME above: each sets action="stats" unconditionally, so a
+  # setting flag named on the same run used to be silently discarded rather
+  # than refused. Checked here, after the flags are all parsed, against
+  # anything that writes a setting -- a --key=value flag (named_count), or
+  # bare --project selecting write scope.
+  if [ "$project_scope" = "1" ] || [ "$named_count" -gt 0 ]; then
+    if [ "$saw_stats_bare" = "1" ]; then
+      echo "--stats reports on recorded sessions; it does not write a setting." >&2
+      echo "Drop --stats to write settings, or drop the setting flags to see the report." >&2
+      exit 2
+    fi
+    if [ "$saw_since_flag" = "1" ]; then
+      echo "--since=$since_flag_value filters --stats; it does not write a setting." >&2
+      echo "Drop --since to write settings, or drop the setting flags to see the report." >&2
+      exit 2
+    fi
+    if [ "$saw_project_filter" = "1" ]; then
+      echo "--project=$CT_STATS_PROJECT filters --stats; it does not write a setting." >&2
+      echo "Use bare --project to write a setting for the current project, or" >&2
+      echo "--projects=on|off to change whether project names are recorded." >&2
+      exit 2
+    fi
+  fi
 
   if [ "$action" = "show" ]; then show_config; exit 0; fi
   if [ "$action" = "doctor" ]; then doctor; exit $?; fi
