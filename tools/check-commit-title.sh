@@ -50,6 +50,22 @@ style
 chore"
 fi
 
+# Strip every \r from $types before it is ever compared. Two independent
+# things can put one there: jq writes stdout in text mode on Windows, so the
+# "\n" between each type it prints becomes "\r\n"; and the hardcoded list
+# above is a string literal in this file, so a checkout that ever picked up
+# CRLF line endings would carry the same \r on every line but the last (the
+# closing quote sits on "chore"'s own line, ahead of the line ending, so
+# that one entry alone comes through clean). Either source trails every
+# type but one with a \r, e.g. "feat\r" instead of "feat" below, so the
+# newline-wrapped comparison can never match them and only the one type
+# with no \r of its own -- the last line of whichever list was used --
+# passes. .gitattributes forces LF on this file so the second source
+# cannot happen from here on, but the jq source is a Windows runtime fact
+# this script cannot change, so the type list is still normalised at the
+# point it is read.
+types="${types//$'\r'/}"
+
 fail() {
   {
     echo "Not a Conventional Commits title: $title"
