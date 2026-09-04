@@ -6227,6 +6227,33 @@ asserts "commit title: a revert subject is accepted" "$CCT" \
 asserts "commit title: a release-please subject is accepted" "$CCT" \
   "chore(main): release 0.0.17 (#51)"
 
+# check-commit-title.sh tests type membership by wrapping the type list in
+# newlines and searching for the type wrapped in newlines. A \r on the end
+# of every entry but one -- exactly what a Windows checkout of this file's
+# own hardcoded fallback list produces, and what jq writing CRLF to stdout
+# on Windows produces from the release-please-config.json branch -- turns
+# "\nfeat\n" into a pattern that can never match "\nfeat\r\n", while the one
+# entry with no \r of its own still matches. This shim stands in for either
+# source without needing a Windows runner: a fake jq on PATH that answers
+# the exact query check-commit-title.sh runs with a CRLF-separated list, the
+# last entry bare, reproducing the failure this suite would otherwise only
+# ever see on the Windows job.
+cct_crlf_dir="$WORK/cct-crlf-jq"
+mkdir -p "$cct_crlf_dir"
+cat > "$cct_crlf_dir/jq" <<'FAKEJQ'
+#!/usr/bin/env bash
+printf 'feat\r\nfix\r\nperf\r\ndocs\r\ntest\r\nci\r\nrefactor\r\nstyle\r\nchore'
+FAKEJQ
+chmod +x "$cct_crlf_dir/jq"
+
+for cct_crlf_type in feat fix perf docs test ci refactor style chore; do
+  asserts "commit title: '$cct_crlf_type' accepted with a CRLF type list" \
+    env PATH="$cct_crlf_dir:$PATH" "$CCT" "$cct_crlf_type: does a thing"
+done
+refutes "commit title: an unknown type is still rejected with a CRLF type list" \
+  env PATH="$cct_crlf_dir:$PATH" "$CCT" "docz: unknown type"
+rm -rf "$cct_crlf_dir"
+
 # .githooks/commit-msg is a thin wrapper around the same script: given the
 # path git actually hands a hook, does it pass the first line through and
 # report the right verdict.

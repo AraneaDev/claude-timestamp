@@ -1,0 +1,16 @@
+# Every file here that runs as a shell script must always check out with LF
+# line endings. Git for Windows checks out text files as CRLF by default,
+# and a \r in a script is invisible in an editor but changes what the script
+# does: it turned a hardcoded string literal in tools/check-commit-title.sh
+# into a list where every entry but the last carried a trailing \r, so only
+# that last entry ever matched. Forcing LF here closes that one source of
+# the bug for good; it does not touch the other source, jq itself writing
+# CRLF to stdout on Windows, which is handled in the script instead.
+*.sh text eol=lf
+
+# The three git hooks under .githooks/ have no extension -- a hook's name is
+# fixed by git, not chosen -- so they need naming one by one rather than by
+# a pattern.
+.githooks/commit-msg text eol=lf
+.githooks/pre-commit text eol=lf
+.githooks/pre-push text eol=lf
