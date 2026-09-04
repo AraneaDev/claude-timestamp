@@ -8,15 +8,16 @@ The plugin itself needs only `bash` and `jq`. Working on it also wants
 ```bash
 git clone https://github.com/AraneaDev/claude-timestamp
 cd claude-timestamp
-cp .githooks/pre-commit .githooks/pre-push .git/hooks/
-chmod +x .git/hooks/pre-commit .git/hooks/pre-push
+cp .githooks/pre-commit .githooks/pre-push .githooks/commit-msg .git/hooks/
+chmod +x .git/hooks/pre-commit .git/hooks/pre-push .git/hooks/commit-msg
 ```
 
 The hooks are copied rather than reached through `core.hooksPath`, because a
 tracked hook only exists in the working tree while a branch containing it is
 checked out, so it would be missing on exactly the branches that predate it.
-`pre-commit` refuses commits made directly on `main` and `pre-push` refuses
-pushes to it. Both take `--no-verify` when you mean it.
+`pre-commit` refuses commits made directly on `main`, `pre-push` refuses
+pushes to it, and `commit-msg` checks the commit message against the
+convention below. All three take `--no-verify` when you mean it.
 
 ## Checks
 
@@ -76,6 +77,15 @@ release-please reads to work out the next version:
 - `chore:` tooling and housekeeping
 
 Example: `feat: mark gaps between messages`
+
+This is enforced, not just documented. Pull requests are merged by squash, so
+the **PR title** becomes the commit on `main`, and that title is what
+release-please actually reads; the `pr-title` job in CI checks it against the
+type list above (read from `release-please-config.json`, not retyped here)
+and fails the PR with a corrected example if it does not match. The
+`commit-msg` hook runs the same check locally, on the first line of every
+commit message, so a bad title is caught before it reaches a pull request at
+all.
 
 ## Releases
 
