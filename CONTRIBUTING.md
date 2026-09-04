@@ -71,6 +71,7 @@ release-please reads to work out the next version:
 - `fix:` a bug fix
 - `perf:` a performance change
 - `refactor:` restructuring with no change in behaviour
+- `style:` formatting only, no change in behaviour
 - `test:` tests only
 - `docs:` documentation only
 - `ci:` continuous integration
