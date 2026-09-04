@@ -87,6 +87,12 @@ and fails the PR with a corrected example if it does not match. The
 commit message, so a bad title is caught before it reaches a pull request at
 all.
 
+Squash stays the default, and the title check is what makes that safe: the
+one commit `main` gets always carries a title release-please can read. The
+exception is a pull request whose individual commits must each reach the
+changelog on their own, which is rebase-merged instead, so squashing does not
+collapse them into the PR's own title.
+
 ## Releases
 
 Automated by [release-please](https://github.com/googleapis/release-please) via
