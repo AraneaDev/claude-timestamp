@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.0.17](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.16...v0.0.17) (2026-09-04)
+
+
+### Features
+
+* record which project and which tools a session spent its time on ([4ca1172](https://github.com/AraneaDev/claude-timestamp/commit/4ca11727edcf4cc97399e1fd6fa9919d1038cea3))
+
+
+### Fixes
+
+* **ci:** stop a carriage return breaking the commit title check on Windows ([e50a6bb](https://github.com/AraneaDev/claude-timestamp/commit/e50a6bba0bda489458a4006b47a2f4d85dd7802c))
+
+
+### Documentation
+
+* add a conventional commits badge ([47a771d](https://github.com/AraneaDev/claude-timestamp/commit/47a771d56c4136d305f33d09e729a9df9952e045))
+* document the style type and gate the list against release-please ([a801cae](https://github.com/AraneaDev/claude-timestamp/commit/a801cae6319ed8a67ece77a67ef3e2b1612e3843))
+* say when a pull request is rebase-merged rather than squashed ([86a2470](https://github.com/AraneaDev/claude-timestamp/commit/86a2470d2c5e1456b1cd0bf6f5574c0d27db6306))
+
+
+### Continuous integration
+
+* enforce a conventional commit title on pull requests ([ad75c73](https://github.com/AraneaDev/claude-timestamp/commit/ad75c7395d0ba8e5eb7bb997ef73ec066fffb826))
+* restrict the pr-title job to a read-only token ([f373ffa](https://github.com/AraneaDev/claude-timestamp/commit/f373ffab46ab12ceb9eee96ba3fd21ba89fb36a6))
+
 ## [0.0.16](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.15...v0.0.16) (2026-09-03)
 
 
