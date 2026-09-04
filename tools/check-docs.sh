@@ -399,6 +399,22 @@ else
   note "every tracked shell script is linted"
 fi
 
+echo "commit title types agree with release-please"
+# tools/check-commit-title.sh reads its accepted types from
+# release-please-config.json via jq, except when jq is unavailable -- the
+# commit-msg hook's case, never CI's -- where it falls back to a hardcoded
+# copy of the same list. A copy is a second thing to keep in step, so assert
+# it still says what the config says.
+ct_config_types="$(jq -r '.packages["."]["changelog-sections"][].type' release-please-config.json | sort -u)"
+ct_fallback_types="$(sed -n '/types="feat$/,/chore"$/p' tools/check-commit-title.sh |
+  sed 's/^[[:space:]]*types="//;s/"$//' | sort -u)"
+if [ "$ct_config_types" = "$ct_fallback_types" ]; then
+  gate commit-title-types 1 "check-commit-title.sh's no-jq fallback matches release-please-config.json"
+else
+  gate commit-title-types 0 \
+    "check-commit-title.sh's no-jq fallback ($ct_fallback_types) disagrees with release-please-config.json ($ct_config_types)"
+fi
+
 echo "help text agrees with the schema"
 # setup.sh's usage() is the only description of a setting that check-docs did
 # not read, which is how --time-color came to say it colours %time when it

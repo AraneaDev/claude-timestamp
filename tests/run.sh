@@ -6201,6 +6201,43 @@ fi
 
 rm -rf "$hc_repo"
 
+echo "commit title validation"
+# tools/check-commit-title.sh is the one place the Conventional Commits rule
+# is written -- the pr-title CI job and .githooks/commit-msg both call it
+# rather than each carrying their own copy -- so it is tested directly here.
+CCT="$ROOT/tools/check-commit-title.sh"
+
+for cct_type in feat fix perf refactor test docs ci chore style; do
+  asserts "commit title: accepted type '$cct_type'" "$CCT" "$cct_type: does a thing"
+done
+
+asserts "commit title: a scope is accepted" "$CCT" "fix(setup): accept a bare --marker="
+asserts "commit title: a breaking-change ! is accepted" "$CCT" "feat!: change the default"
+asserts "commit title: a scope and ! together are accepted" "$CCT" "fix(api)!: drop the old field"
+
+refutes "commit title: an unknown type is rejected" "$CCT" "docz: unknown type"
+refutes "commit title: a missing colon is rejected" "$CCT" "add a feature with no colon"
+refutes "commit title: an empty subject is rejected" "$CCT" "fix: "
+refutes "commit title: a bare type with no colon is rejected" "$CCT" "feat"
+refutes "commit title: an empty scope is rejected" "$CCT" "fix(): empty scope"
+
+asserts "commit title: a merge commit subject is accepted" "$CCT" "Merge pull request #1 from x/y"
+asserts "commit title: a revert subject is accepted" "$CCT" \
+  'Revert "fix: something that needed undoing"'
+asserts "commit title: a release-please subject is accepted" "$CCT" \
+  "chore(main): release 0.0.17 (#51)"
+
+# .githooks/commit-msg is a thin wrapper around the same script: given the
+# path git actually hands a hook, does it pass the first line through and
+# report the right verdict.
+cmt_dir="$WORK/commit-msg-test"
+mkdir -p "$cmt_dir"
+printf 'feat: add a thing\n' > "$cmt_dir/good"
+printf 'not conventional at all\n' > "$cmt_dir/bad"
+asserts "commit-msg hook: an accepted title passes"  bash "$ROOT/.githooks/commit-msg" "$cmt_dir/good"
+refutes "commit-msg hook: a bad title is rejected"    bash "$ROOT/.githooks/commit-msg" "$cmt_dir/bad"
+rm -rf "$cmt_dir"
+
 echo
 echo "----"
 printf '%d passed, %d failed\n' "$PASS" "$FAIL"
