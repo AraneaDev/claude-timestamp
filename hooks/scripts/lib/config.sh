@@ -856,10 +856,11 @@ _ct_project_basename() {
 # that never reaches "/" -- a symlink loop, or simply a deep tree -- cannot
 # hang the hook this runs inside.
 #
-# No subprocess: parameter expansion only, cheap enough to run unconditionally
-# once per session rather than only when PROJECTS=on. Resolving symlinks the
-# way ct_find_project_config does would need one, so this deliberately does
-# not.
+# No subprocess: parameter expansion and directory tests only. Resolving
+# symlinks the way ct_find_project_config does would need one, so this
+# deliberately does not. Its only caller runs it once per session and only
+# when PROJECTS=on (session-end.sh), so the cost never falls on anyone who
+# has not asked for the column.
 #
 # ".git" is tested as both a directory and a file: a linked git worktree's
 # .git is a file, not a directory, and a checkout opened as a worktree would
