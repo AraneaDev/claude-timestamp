@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Enforce Conventional Commits on the commit message subject.
+#
+# The repository merges pull requests by squash, so a PR title outside the
+# convention is caught by the pr-title CI job before it ever reaches main.
+# This is the same check run locally, so a non-conventional message is caught
+# at the point it is written rather than five minutes later on a pull
+# request.
+#
+# Install by copying into .git/hooks/, the same way pre-commit and pre-push
+# are:
+#   cp .githooks/pre-commit .githooks/pre-push .githooks/commit-msg .git/hooks/
+#
+# Copied rather than reached through core.hooksPath for the reason
+# CONTRIBUTING.md gives: a tracked hook only exists in the working tree while
+# a branch containing it is checked out, so it would be missing on exactly the
+# branches that predate it.
+#
+# Deliberate exception (a release chore, an emergency fix):
+#     git commit --no-verify
+set -eu
+
+msg_file="$1"
+first_line="$(head -n1 "$msg_file")"
+root="$(git rev-parse --show-toplevel)"
+
+if ! "$root/tools/check-commit-title.sh" "$first_line"; then
+  echo >&2
+  echo "  Fix the first line, or commit with --no-verify if you meant it." >&2
+  echo >&2
+  exit 1
+fi
+
+exit 0

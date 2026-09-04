@@ -80,7 +80,8 @@ jobs:
       - name: Syntax check
         run: |
           for f in hooks/scripts/*.sh hooks/scripts/lib/*.sh tests/run.sh \
-                   tools/*.sh tools/screenshots/*.sh .githooks/pre-push .githooks/pre-commit; do
+                   tools/*.sh tools/screenshots/*.sh \
+                   .githooks/pre-push .githooks/pre-commit .githooks/commit-msg; do
             bash -n "$f"
           done
 
@@ -118,8 +119,33 @@ jobs:
             hooks/scripts/lib/*.sh \
             tests/run.sh \
             tools/check-docs.sh \
+            tools/check-commit-title.sh \
             tools/screenshots/make.sh \
-            .githooks/pre-push .githooks/pre-commit
+            .githooks/pre-push .githooks/pre-commit .githooks/commit-msg
+
+  pr-title:
+    # Pull requests are merged by squash, so the PR title becomes the commit
+    # subject on main, and that subject is what release-please reads to work
+    # out the next version. A title outside Conventional Commits produces a
+    # commit release-please silently ignores, and the release never happens.
+    # There is no title to check on a push or a manual run, only on a pull
+    # request, hence the guard below.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install jq
+        run: command -v jq >/dev/null || (sudo apt-get update && sudo apt-get install -y jq)
+
+      - name: Check the PR title follows Conventional Commits
+        # The title comes through an environment variable rather than being
+        # interpolated into the script directly: it is attacker-controlled on
+        # a fork PR, and a title carrying quotes or backticks must not be able
+        # to break out of the shell command that checks it.
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: bash tools/check-commit-title.sh "$PR_TITLE"
 
   docs:
     # The README goes stale silently: a setting gets added and never written
