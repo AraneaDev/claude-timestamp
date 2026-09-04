@@ -3799,6 +3799,64 @@ contains "sections: with the actual busiest tool named" "Tool0000" "$out"
 contains "sections: and its correct summed duration" "33m20s" "$out"
 contains "sections: and its correct call count" "(1 call)" "$out"
 
+echo "stats: name column width"
+
+# The by-project and slowest-tools tables used to pad every name to a
+# hardcoded 20 columns, so any name longer than that pushed its own duration
+# right without moving the OTHER rows' duration column to match -- the whole
+# table stopped lining up, not just the long row. The column now sizes to the
+# longest name in the table (floored at 20, so a short-name table is
+# unchanged; ceilinged at 40, so one pathological name cannot drag the column
+# past a normal terminal).
+
+# A short-name-only table must render byte-identical to the pre-fix layout --
+# this is what the floor exists to preserve, and what every existing fixture
+# (and the README's screenshots) depend on.
+{
+  printf '2026-09-01T10:00:00\t3600\t10\t600\t0\t0\talpha\tBash:150:8\n'
+  printf '2026-09-02T10:00:00\t1800\t5\t300\t0\t0\talpha\tBash:0:0\n'
+} > "$CLAUDE_TIMESTAMP_HISTORY"
+out="$(bash "$SCRIPTS/setup.sh" --stats 2>&1)"
+is "width: a short project name keeps the floor-20 layout" \
+   "    alpha                     1h30m  2 sessions" \
+   "$(grep '^    alpha' <<< "$out")"
+is "width: a short tool name keeps the floor-20 layout" \
+   "    Bash                      2m30s  (8 calls)" \
+   "$(grep '^    Bash' <<< "$out")"
+
+# A name longer than 20 but under the 40 ceiling widens the whole column, so
+# every row's duration -- including a short name sitting beside it -- moves
+# out to match rather than only the long row's own duration shifting.
+# mcp__git-server_git__git_status is 31 characters, an ordinary MCP tool
+# name shape, not a padded string built to hit a boundary.
+printf '2026-09-01T10:00:00\t55\t1\t10\t0\t0\talpha\tBash:5:2,mcp__git-server_git__git_status:50:1\n' \
+  > "$CLAUDE_TIMESTAMP_HISTORY"
+out="$(bash "$SCRIPTS/setup.sh" --stats 2>&1)"
+is "width: a name under the ceiling widens the column" \
+   "    mcp__git-server_git__git_status        50s  (1 call)" \
+   "$(grep '^    mcp__git-server_git__git_status' <<< "$out")"
+is "width: and the short name beside it moves out to match" \
+   "    Bash                                    5s  (2 calls)" \
+   "$(grep '^    Bash' <<< "$out")"
+
+# A name at or beyond the 40 ceiling still prints in full -- it is not
+# truncated, since two MCP tools from the same server can share a long
+# prefix and differ only at the end -- but the column itself stops growing
+# past the ceiling. That row's own duration runs wide of the rest of the
+# table; every other row still aligns to the capped width. This is the exact
+# 55-character name and layout reported from a real session.
+printf '2026-09-01T10:00:00\t55\t1\t10\t0\t0\talpha\tBash:5:2,mcp__plugin_context-mode_context-mode__ctx_execute_file:50:1\n' \
+  > "$CLAUDE_TIMESTAMP_HISTORY"
+out="$(bash "$SCRIPTS/setup.sh" --stats 2>&1)"
+contains "width: a name at the ceiling prints in full, not truncated" \
+   "mcp__plugin_context-mode_context-mode__ctx_execute_file" "$out"
+is "width: its own row runs wide rather than clipping the column" \
+   "    mcp__plugin_context-mode_context-mode__ctx_execute_file        50s  (1 call)" \
+   "$(grep '^    mcp__plugin_context-mode_context-mode__ctx_execute_file' <<< "$out")"
+is "width: every other row still aligns to the capped column" \
+   "    Bash                                             5s  (2 calls)" \
+   "$(grep '^    Bash' <<< "$out")"
+
 echo "stats filters"
 
 {

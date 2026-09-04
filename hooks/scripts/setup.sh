@@ -263,6 +263,41 @@ preview() {
   [ "$CT_ENABLED" = "on" ] || echo "(sample only -- ENABLED=$CT_ENABLED, so no hook actually draws this)"
 }
 
+# Width for a stats table's name column: the longest name about to be
+# printed in it, floored at 20 and ceilinged at 40.
+#
+# 20 is the width the by-project and slowest-tools tables have always used,
+# so a table of short names -- Bash, alpha, T1, what every existing fixture
+# and the README's screenshots show -- keeps exactly the layout it has
+# today. 40 exists because an MCP tool name has no length limit and this
+# script has seen one 55 characters long; left unbounded, a single such name
+# would drag the duration and call-count columns far enough right that a
+# normal terminal wraps the line and the alignment the column exists for is
+# lost for every row, not just the long one. At the indent these tables use
+# (4 columns) plus a duration field and a "(N calls)" suffix, 40 keeps a row
+# at the ceiling comfortably inside 80 columns while still being generous to
+# real tool names -- most MCP names, including the 55-character one above,
+# are longer than 20 but well under 40.
+#
+# A name past the ceiling is not truncated: two MCP tools from the same
+# server can share a long prefix and differ only at the end, and cutting
+# either one short would make them impossible to tell apart. It prints in
+# full instead, so that one row's duration runs wide of the rest of the
+# column rather than the name being shortened into ambiguity.
+#
+# LC_ALL=C makes awk's length() count bytes rather than characters, matching
+# printf's own %-*s below, which pads by bytes too (see _ct_display_width
+# above). Measuring in a different unit than printf pads in would misalign
+# the column on the same multi-byte input that mismatch describes.
+ct_stats_name_width() {
+  local rows="$1" delim="$2" field="$3" floor=20 ceiling=40 max
+  max="$(LC_ALL=C awk -F"$delim" -v f="$field" \
+    '{ if (length($f) > m) m = length($f) } END { print m + 0 }' <<<"$rows")"
+  [ "$max" -lt "$floor" ]   && max="$floor"
+  [ "$max" -gt "$ceiling" ] && max="$ceiling"
+  printf '%d' "$max"
+}
+
 # What the recorded sessions add up to.
 #
 # The history holds timings only, so everything here is arithmetic on six
@@ -536,12 +571,14 @@ EOF
   if [ -n "$rows" ]; then
     echo
     echo "  by project"
-    local p_secs p_name p_n label
+    local p_secs p_name p_n label name_w tab
+    tab="$(printf '\t')"
+    name_w="$(ct_stats_name_width "$rows" "$tab" 2)"
     while IFS=$'\t' read -r p_secs p_name p_n; do
       [ -n "$p_name" ] || continue
       label="$p_name"
       [ "$label" = "-" ] && label="(unnamed)"
-      printf '    %-20s %10s  %d session' "$label" \
+      printf '    %-*s %10s  %d session' "$name_w" "$label" \
         "$(ct_format_duration "$((10#$p_secs))")" "$p_n"
       [ "$p_n" -eq 1 ] || printf 's'
       printf '\n'
@@ -634,10 +671,12 @@ ROWS
   if [ -n "$rows" ]; then
     echo
     echo "  slowest tools"
-    local t_secs t_name t_calls
+    local t_secs t_name t_calls name_w unit_sep
+    unit_sep="$(printf '\037')"
+    name_w="$(ct_stats_name_width "$rows" "$unit_sep" 2)"
     while IFS=$'\x1f' read -r t_secs t_name t_calls; do
       [ -n "$t_name" ] || continue
-      printf '    %-20s %10s  (%d call' "$t_name" \
+      printf '    %-*s %10s  (%d call' "$name_w" "$t_name" \
         "$(ct_format_duration "$((10#$t_secs))")" "$t_calls"
       [ "$t_calls" -eq 1 ] || printf 's'
       printf ')\n'
