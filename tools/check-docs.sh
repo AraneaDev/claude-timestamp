@@ -415,6 +415,23 @@ else
     "check-commit-title.sh's no-jq fallback ($ct_fallback_types) disagrees with release-please-config.json ($ct_config_types)"
 fi
 
+echo "CONTRIBUTING's commit type list agrees with release-please"
+# The "Commit messages" section says the accepted types come from
+# release-please-config.json, then retypes them by hand for the reader --
+# which is how that list went stale enough to omit style entirely. Modelled
+# on the commit-title-types gate above: extract the section's own bullet
+# list and assert it names exactly the types changelog-sections does.
+cm_config_types="$(jq -r '.packages["."]["changelog-sections"][].type' release-please-config.json | sort -u)"
+# shellcheck disable=SC2016  # the backticks are markdown, not a subshell
+cm_doc_types="$(sed -n '/^## Commit messages$/,/^## Releases$/p' CONTRIBUTING.md |
+  grep -oE '^- `[a-z]+:`' | sed 's/^- `//;s/:`$//' | sort -u)"
+if [ "$cm_config_types" = "$cm_doc_types" ]; then
+  gate contributing-commit-types 1 "CONTRIBUTING.md's commit type list matches release-please-config.json"
+else
+  gate contributing-commit-types 0 \
+    "CONTRIBUTING.md's commit type list ($cm_doc_types) disagrees with release-please-config.json ($cm_config_types)"
+fi
+
 echo "help text agrees with the schema"
 # setup.sh's usage() is the only description of a setting that check-docs did
 # not read, which is how --time-color came to say it colours %time when it
