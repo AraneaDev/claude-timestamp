@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.19](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.18...v0.0.19) (2026-09-04)
+
+
+### Documentation
+
+* show the project and tool columns in the stats screenshot ([#55](https://github.com/AraneaDev/claude-timestamp/issues/55)) ([cf583e8](https://github.com/AraneaDev/claude-timestamp/commit/cf583e82be9f1bbec11054e6683d8689c66bc538))
+
 ## [0.0.18](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.17...v0.0.18) (2026-09-04)
 
 
