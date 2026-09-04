@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.18](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.17...v0.0.18) (2026-09-04)
+
+
+### Fixes
+
+* **stats:** size the name column to the names it prints ([#53](https://github.com/AraneaDev/claude-timestamp/issues/53)) ([d8a9d61](https://github.com/AraneaDev/claude-timestamp/commit/d8a9d61530b0c62b9dafacf856d9b8557b6b67db))
+
 ## [0.0.17](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.16...v0.0.17) (2026-09-04)
 
 
