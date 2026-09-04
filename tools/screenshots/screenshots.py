@@ -197,7 +197,7 @@ def capture_pty(argv, keys, cols, rows, settle=12, total=150, env=None, record=F
     return bytes(raw)
 
 
-def capture_pty_until(argv, until, answer, cols, rows, tick=0.35, settle=3, total=40, env=None):
+def capture_pty_until(argv, until, answer, cols, rows, tick=0.35, settle=3, total=40, env=None, cwd=None):
     """Run argv in a pty, pressing Enter on a timer until the transcript so
     far contains `until`, then send `answer` once and let the process finish.
 
@@ -208,12 +208,33 @@ def capture_pty_until(argv, until, answer, cols, rows, tick=0.35, settle=3, tota
     for the wizard before it gained a Marker question, that once made this
     shot capture the wizard rejecting `answer` at the wrong prompt instead of
     reaching the one it was meant for.
+
+    cwd matters as much as env here, for a reason specific to this plugin: its
+    project-config search walks upward from the working directory, directory
+    by directory, comparing each one to $HOME and stopping the instant they
+    match -- see ct_find_project_config in lib/config.sh. A caller that
+    overrides HOME to a scratch directory but leaves cwd wherever the Python
+    process happens to be sitting breaks that stop condition, because cwd's
+    real ancestors no longer include the fake HOME at all. The walk then
+    keeps climbing past every directory this repository sits under until it
+    reaches one that does have a .claude/claude-timestamp.conf -- the
+    generating machine's own account config -- and reads it as a *project*
+    layer on top of whatever DOCTOR_CONFIG staged. That is exactly how a
+    wizard shot once rendered PROJECTS as [on] although DOCTOR_CONFIG never
+    sets it: the repository root is a subdirectory of the real $HOME, so the
+    walk from there reached it and picked up whatever the real account has
+    turned on that day. Passing a cwd inside the fake HOME (the caller below
+    passes the fake HOME itself) makes the very first comparison in that walk
+    match, so it stops before looking at any real file. Do not drop this
+    parameter as unused-looking plumbing -- the shot is wrong without it.
     """
     pid, fd = pty.fork()
     if pid == 0:
         os.environ.update(env or {})
         os.environ["TERM"] = "xterm-256color"
         os.environ["COLUMNS"], os.environ["LINES"] = str(cols), str(rows)
+        if cwd is not None:
+            os.chdir(cwd)
         os.execvp(argv[0], argv)
 
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
@@ -662,12 +683,22 @@ def shot_wizard():
     home.mkdir(parents=True, exist_ok=True)
     (home / "claude-timestamp.conf").write_text(DOCTOR_CONFIG)
 
-    cols, rows = 84, 58
+    # rows raised from 58: the flow is now two questions longer (HISTORY, with
+    # PROJECTS nested under it) and the full accept-every-default transcript
+    # runs 66 rows tall at 84 columns. 58 scrolled the top of it away before
+    # the write-confirmation prompt appeared; 72 leaves headroom above that.
+    cols, rows = 84, 72
+    # cwd pinned to the same directory as the fake HOME above -- see
+    # capture_pty_until's docstring for why leaving cwd wherever this process
+    # happens to be sitting makes the wizard's project-config walk climb past
+    # this repository and read the generating machine's own account config
+    # as a project layer.
     raw = capture_pty_until(
         ["bash", str(SCRIPTS / "setup.sh")],
         until="Write this configuration?", answer="y\r",
         cols=cols, rows=rows, settle=3, total=40,
         env={"HOME": str(work / "home"), "CLAUDE_TIMESTAMP_CONFIG": ""},
+        cwd=str(work / "home"),
     )
     (work / "wizard.raw").write_bytes(raw)
     render(raw, ASSETS / "wizard.webp", cols, rows)
@@ -703,6 +734,20 @@ def shot_stats():
     The rows are made up, because a believable screenshot needs more sessions
     than this repository has accumulated. Everything else, the arithmetic and
     the formatting, is the real command.
+
+    Fields 7 (project) and 8 (tool digest) are made up the same way the six
+    timing fields always have been, in the same format ct_history_append and
+    ct_tool_digest actually write: field 7 a bare project name or "-", field 8
+    "Name:seconds:calls" entries, comma separated, worst first, at most 8. Two
+    rows keep the "-" sentinel, so the by-project table's (unnamed) row -- what
+    anyone with history from before PROJECTS existed will actually see -- is
+    part of the picture rather than a hypothetical. Three named projects give
+    the by-project table something to rank instead of one lone row. Every
+    row's digest seconds sum to less than that row's own waited time (field
+    4): the digest is tool execution time, a subset of the turn's total wait,
+    and a digest that outran the wait would be visibly impossible to a reader
+    who adds the row up. Bash dominates every row, because that is what real
+    sessions look like.
     """
     work = WORK / "stats"
     (work / "home" / ".claude").mkdir(parents=True, exist_ok=True)
@@ -710,16 +755,26 @@ def shot_stats():
 
     history = work / "home" / ".claude" / "claude-timestamp-history.tsv"
     rows = [
-        ("2026-08-04T09:12:00", 4820, 41, 1180, 900, 0),
-        ("2026-08-05T10:41:00", 2260, 19, 540, 0, 1),
-        ("2026-08-06T08:55:00", 7415, 63, 2210, 3600, 2),
-        ("2026-08-07T14:02:00", 1180, 9, 260, 0, 0),
-        ("2026-08-10T09:30:00", 5360, 44, 1490, 1800, 0),
-        ("2026-08-11T11:15:00", 3090, 27, 700, 0, 3),
-        ("2026-08-12T09:05:00", 6240, 52, 1810, 2400, 1),
-        ("2026-08-13T16:20:00", 900, 6, 190, 0, 0),
-        ("2026-08-17T10:00:00", 4100, 33, 1020, 1200, 0),
-        ("2026-08-19T09:45:00", 2980, 24, 660, 0, 1),
+        ("2026-08-04T09:12:00", 4820, 41, 1180, 900, 0, "claude-timestamp",
+         "Bash:640:28,Read:210:54,Edit:95:22,Grep:40:18,WebFetch:35:3,Glob:12:9,Write:8:4,Task:5:1"),
+        ("2026-08-05T10:41:00", 2260, 19, 540, 0, 1, "api-gateway",
+         "Bash:310:14,Read:85:20,Edit:40:9,Grep:15:6,Write:10:3"),
+        ("2026-08-06T08:55:00", 7415, 63, 2210, 3600, 2, "claude-timestamp",
+         "Bash:1120:52,Read:340:70,Edit:180:40,Grep:95:25,WebFetch:60:5,Task:45:2,Glob:20:11,Write:15:6"),
+        ("2026-08-07T14:02:00", 1180, 9, 260, 0, 0, "-",
+         "Bash:140:8,Read:55:12,Edit:20:5,Grep:10:4"),
+        ("2026-08-10T09:30:00", 5360, 44, 1490, 1800, 0, "claude-timestamp",
+         "Bash:780:35,Read:260:58,Edit:130:28,Grep:70:20,WebFetch:45:4,Write:20:8,Glob:15:10"),
+        ("2026-08-11T11:15:00", 3090, 27, 700, 0, 3, "api-gateway",
+         "Bash:410:18,Read:110:24,Edit:55:12,WebFetch:35:3,Grep:20:9"),
+        ("2026-08-12T09:05:00", 6240, 52, 1810, 2400, 1, "dashboard",
+         "Bash:960:44,Read:300:62,Edit:160:33,Grep:85:22,Task:60:3,WebFetch:40:4,Glob:18:12,Write:12:5"),
+        ("2026-08-13T16:20:00", 900, 6, 190, 0, 0, "-",
+         "Bash:95:5,Read:40:9,Edit:15:4"),
+        ("2026-08-17T10:00:00", 4100, 33, 1020, 1200, 0, "claude-timestamp",
+         "Bash:540:24,Read:180:40,Edit:90:19,Grep:50:14,Write:25:9,Glob:10:7"),
+        ("2026-08-19T09:45:00", 2980, 24, 660, 0, 1, "dashboard",
+         "Bash:350:16,Read:120:26,Edit:60:13,WebFetch:30:2,Grep:18:8"),
     ]
     history.write_text("".join("\t".join(str(f) for f in r) + "\n" for r in rows))
 
@@ -733,7 +788,11 @@ def shot_stats():
     )
     raw = proc.stdout + proc.stderr
     (work / "stats.raw").write_bytes(raw)
-    render(raw, ASSETS / "stats.webp", cols=64, rows=22, crlf=True)
+    # rows raised from 22: the by-project and slowest-tools tables this
+    # fixture now exercises add roughly a dozen lines to the report, and
+    # render() crops to whatever the screen actually holds -- a screen too
+    # short loses the top of the report rather than shrinking to fit.
+    render(raw, ASSETS / "stats.webp", cols=64, rows=34, crlf=True)
 
 
 # A bash snippet, not a hand-written table: it sources the library the plugin
