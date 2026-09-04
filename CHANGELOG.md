@@ -3,6 +3,11 @@
 ## [0.0.17](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.16...v0.0.17) (2026-09-04)
 
 
+### Features
+
+* record which project and which tools a session spent its time on ([4ca1172](https://github.com/AraneaDev/claude-timestamp/commit/4ca11727edcf4cc97399e1fd6fa9919d1038cea3))
+
+
 ### Fixes
 
 * **ci:** stop a carriage return breaking the commit title check on Windows ([e50a6bb](https://github.com/AraneaDev/claude-timestamp/commit/e50a6bba0bda489458a4006b47a2f4d85dd7802c))
