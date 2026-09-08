@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.21](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.20...v0.0.21) (2026-09-08)
+
+
+### Continuous integration
+
+* scope the concurrency group to the pull request, not the base branch ([#59](https://github.com/AraneaDev/claude-timestamp/issues/59)) ([a5394fa](https://github.com/AraneaDev/claude-timestamp/commit/a5394fa42664af3de78893fd86c889a9535ff294))
+
 ## [0.0.20](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.19...v0.0.20) (2026-09-08)
 
 
