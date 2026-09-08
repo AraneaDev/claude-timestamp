@@ -43,7 +43,17 @@ jobs:
         with:
           persist-credentials: false
 
+      # A release-please PR's diff is version files, the manifest, and a
+      # CHANGELOG entry, all cut from a main that just passed this suite on
+      # identical code. Re-running the steps below against it re-verifies
+      # nothing; it only pays the jq install and the three-OS test matrix
+      # again for no new answer. The job itself still runs, checkout
+      # included, because branch protection names "test (ubuntu-latest)",
+      # "test (macos-latest)" and "test (windows-latest)" as required checks,
+      # and a required check that never reports leaves the PR permanently
+      # blocked. The guard is keyed on the branch release-please owns.
       - name: Install jq
+        if: github.head_ref != 'release-please--branches--main'
         run: |
           if command -v jq >/dev/null 2>&1; then
             echo "jq $(jq --version) already present"
@@ -57,7 +67,9 @@ jobs:
 
       - name: Report the platform's date and timezone support
         # Recorded on every run because these two facts drive most of what can
-        # differ between platforms here.
+        # differ between platforms here. Skipped on a release PR along with
+        # the rest of this job's steps; see the note above Install jq.
+        if: github.head_ref != 'release-please--branches--main'
         run: |
           echo "uname:      $(uname -s)"
           echo "date:       $(date --version 2>/dev/null | head -1 || echo 'BSD/other date')"
@@ -66,13 +78,15 @@ jobs:
           echo "TZ=UTC        -> $(TZ=UTC date '+%H:%M %Z')"
 
       - name: Run tests
+        if: github.head_ref != 'release-please--branches--main'
         run: bash tests/run.sh
 
       - name: Run tests under bash 3.2
         # macOS still ships bash 3.2 as /bin/bash. The plugin claims to work
         # there, and this is the only runner that can actually check it, so the
-        # claim gets tested rather than asserted.
-        if: runner.os == 'macOS'
+        # claim gets tested rather than asserted. Still skipped on a release
+        # PR, same as the rest of this job's steps.
+        if: runner.os == 'macOS' && github.head_ref != 'release-please--branches--main'
         run: |
           echo "/bin/bash is $(/bin/bash --version | head -1)"
           /bin/bash tests/run.sh
