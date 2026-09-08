@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.23](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.22...v0.0.23) (2026-09-08)
+
+
+### Continuous integration
+
+* match the release branch by prefix, not by exact name ([#63](https://github.com/AraneaDev/claude-timestamp/issues/63)) ([aedaa65](https://github.com/AraneaDev/claude-timestamp/commit/aedaa65c1b07c71796d32e786cd5c9fdb3dad686))
+
 ## [0.0.22](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.21...v0.0.22) (2026-09-08)
 
 
