@@ -53,7 +53,7 @@ jobs:
       # and a required check that never reports leaves the PR permanently
       # blocked. The guard is keyed on the branch release-please owns.
       - name: Install jq
-        if: github.head_ref != 'release-please--branches--main'
+        if: ${{ !startsWith(github.head_ref, 'release-please--branches--') }}
         run: |
           if command -v jq >/dev/null 2>&1; then
             echo "jq $(jq --version) already present"
@@ -69,7 +69,7 @@ jobs:
         # Recorded on every run because these two facts drive most of what can
         # differ between platforms here. Skipped on a release PR along with
         # the rest of this job's steps; see the note above Install jq.
-        if: github.head_ref != 'release-please--branches--main'
+        if: ${{ !startsWith(github.head_ref, 'release-please--branches--') }}
         run: |
           echo "uname:      $(uname -s)"
           echo "date:       $(date --version 2>/dev/null | head -1 || echo 'BSD/other date')"
@@ -78,7 +78,7 @@ jobs:
           echo "TZ=UTC        -> $(TZ=UTC date '+%H:%M %Z')"
 
       - name: Run tests
-        if: github.head_ref != 'release-please--branches--main'
+        if: ${{ !startsWith(github.head_ref, 'release-please--branches--') }}
         run: bash tests/run.sh
 
       - name: Run tests under bash 3.2
@@ -86,7 +86,7 @@ jobs:
         # there, and this is the only runner that can actually check it, so the
         # claim gets tested rather than asserted. Still skipped on a release
         # PR, same as the rest of this job's steps.
-        if: runner.os == 'macOS' && github.head_ref != 'release-please--branches--main'
+        if: ${{ runner.os == 'macOS' && !startsWith(github.head_ref, 'release-please--branches--') }}
         run: |
           echo "/bin/bash is $(/bin/bash --version | head -1)"
           /bin/bash tests/run.sh
