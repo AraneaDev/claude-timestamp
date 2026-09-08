@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.22](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.21...v0.0.22) (2026-09-08)
+
+
+### Continuous integration
+
+* skip heavy CI steps on release-please PRs ([#61](https://github.com/AraneaDev/claude-timestamp/issues/61)) ([a5d596c](https://github.com/AraneaDev/claude-timestamp/commit/a5d596cd86b9d4208315e6bdc936c534a420f58b))
+
 ## [0.0.21](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.20...v0.0.21) (2026-09-08)
 
 
