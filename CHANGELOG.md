@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.20](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.19...v0.0.20) (2026-09-08)
+
+
+### Continuous integration
+
+* cancel superseded runs and give every job a timeout ([#57](https://github.com/AraneaDev/claude-timestamp/issues/57)) ([aa75dea](https://github.com/AraneaDev/claude-timestamp/commit/aa75dea0c9410ba5a099b47bc6763e8275b4a38c))
+
 ## [0.0.19](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.18...v0.0.19) (2026-09-04)
 
 
