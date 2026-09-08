@@ -14,6 +14,14 @@ on:
 permissions:
   contents: read
 
+# One run per branch. A second push cancels the first, because whoever pushed
+# again has already answered the question the running job was asked. The runs
+# long enough to be overtaken are the expensive ones, so this is worth more
+# than the share of runs it cancels suggests.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
     # Every supported platform runs the suite, because the differences are real:
@@ -24,6 +32,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     defaults:
       run:
         # Windows runners default to PowerShell; the plugin is bash throughout,
@@ -70,6 +79,7 @@ jobs:
 
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
         with:
@@ -144,6 +154,7 @@ jobs:
     # request, hence the guard below.
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
         with:
@@ -165,6 +176,7 @@ jobs:
     # The README goes stale silently: a setting gets added and never written
     # down, a count stops matching, an image gets renamed. All cheap to check.
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
         with:
@@ -178,6 +190,7 @@ jobs:
 
   manifests:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
         with:
