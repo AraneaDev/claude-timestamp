@@ -164,6 +164,8 @@ _ct_read_config_file() {
       HISTORY_LIMIT)  CT_HISTORY_LIMIT="$value" ;;
       PROJECTS)       CT_PROJECTS="$value" ;;
       INJECT_CONTEXT) CT_INJECT_CONTEXT="$value" ;;
+      HEARTBEAT_AFTER) CT_HEARTBEAT_AFTER="$value" ;;
+      SLOW_TOOL_AFTER) CT_SLOW_TOOL_AFTER="$value" ;;
     esac
   done < "$file"
 }
@@ -193,6 +195,8 @@ ct_load_config() {
   CT_HISTORY_LIMIT="200"      # sessions kept; older ones are dropped
   CT_PROJECTS="off"           # record the project name in the history row
   CT_INJECT_CONTEXT="true"
+  CT_HEARTBEAT_AFTER="900"    # seconds; 0 disables. Tells the model, so INJECT_CONTEXT gates it too
+  CT_SLOW_TOOL_AFTER="60"     # seconds; 0 disables. Tells the model, so INJECT_CONTEXT gates it too
 
   CT_CONFIG_PROBLEMS=""
   CT_PROJECT_CONFIG=""
@@ -316,6 +320,8 @@ ct_validate_config() {
   _ct_require HISTORY_LIMIT  ct_is_history_limit 200
   _ct_require PROJECTS       ct_is_onoff        off
   _ct_require INJECT_CONTEXT ct_is_bool         true
+  _ct_require HEARTBEAT_AFTER ct_is_seconds     900
+  _ct_require SLOW_TOOL_AFTER ct_is_seconds     60
 }
 
 # Preset name -> strftime string. Anything containing a % is already a strftime

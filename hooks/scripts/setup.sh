@@ -88,6 +88,10 @@ Flags
                               it is the only setting that costs anything per
                               tool call rather than per message.
   --inject-context=true|false Tell Claude the time each prompt was sent.
+  --heartbeat-after=SECONDS   Tell Claude how long a turn has run, every this
+                              many seconds (0 disables).
+  --slow-tool-after=SECONDS   Tell Claude when one tool call took this long
+                              (0 disables).
   --enabled=on|off            Master switch. off silences every hook without
                               uninstalling the plugin.
   --project                   Write to this project instead of your account,
@@ -151,6 +155,8 @@ history         HISTORY         CT_HISTORY          ct_is_onoff             -   
 history-limit   HISTORY_LIMIT   CT_HISTORY_LIMIT    ct_is_history_limit     -        ignore
 projects        PROJECTS        CT_PROJECTS         ct_is_onoff             -        ignore
 inject-context  INJECT_CONTEXT  CT_INJECT_CONTEXT   ct_is_bool              -        ignore
+heartbeat-after HEARTBEAT_AFTER CT_HEARTBEAT_AFTER  ct_is_seconds           -        ignore
+slow-tool-after SLOW_TOOL_AFTER CT_SLOW_TOOL_AFTER  ct_is_seconds           -        ignore
 "
 
 # --- validation -------------------------------------------------------------
@@ -809,6 +815,8 @@ doctor() {
   echo "  subagents       $CT_SUBAGENTS"
   echo "  history         $CT_HISTORY, keeping $CT_HISTORY_LIMIT"
   echo "  tool timing     $CT_TOOL_TIMING"
+  echo "  heartbeat       $([ "$CT_HEARTBEAT_AFTER" -gt 0 ] 2>/dev/null && echo "every ${CT_HEARTBEAT_AFTER}s" || echo "off")"
+  echo "  slow tool note  $([ "$CT_SLOW_TOOL_AFTER" -gt 0 ] 2>/dev/null && echo "after ${CT_SLOW_TOOL_AFTER}s" || echo "off")"
   echo
 
   echo "State"
@@ -963,6 +971,12 @@ PROJECTS=$CT_PROJECTS
 
 # Tell Claude the local time each prompt was sent.
 INJECT_CONTEXT=$CT_INJECT_CONTEXT
+
+# Tell Claude how long the open turn has run, every this many seconds. 0 disables.
+HEARTBEAT_AFTER=$CT_HEARTBEAT_AFTER
+
+# Tell Claude when one tool call took at least this many seconds. 0 disables.
+SLOW_TOOL_AFTER=$CT_SLOW_TOOL_AFTER
 CONF
   echo "Wrote $(ct_tilde "$file")"
 }
@@ -1166,6 +1180,8 @@ show_config() {
   echo "  History         $CT_HISTORY (keeping $CT_HISTORY_LIMIT)"
   echo "  Projects        $CT_PROJECTS"
   echo "  Inject context  $CT_INJECT_CONTEXT"
+  echo "  Heartbeat       $CT_HEARTBEAT_AFTER s"
+  echo "  Slow tool note  $CT_SLOW_TOOL_AFTER s"
   echo
   echo -n "  Preview         "; preview
 }
@@ -1247,9 +1263,10 @@ ask() {
 # ELAPSED and its threshold, IDLE_AFTER, SUMMARY, TOOL_TIMING, COLOR, the
 # marker template, HISTORY and PROJECTS -- plus the one model-facing setting,
 # INJECT_CONTEXT and its format. Finer controls such as the per-part colours,
-# SLOW_COLOR, DATE_ROLLOVER, SUBAGENTS and HISTORY_LIMIT are reachable only
-# through their own flags; a curated set of ready-made marker templates is
-# offered separately, through the /timestamps slash command's looks picker.
+# SLOW_COLOR, DATE_ROLLOVER, SUBAGENTS, HISTORY_LIMIT, HEARTBEAT_AFTER and
+# SLOW_TOOL_AFTER are reachable only through their own flags; a curated set of
+# ready-made marker templates is offered separately, through the /timestamps
+# slash command's looks picker.
 wizard() {
   ct_load_config
 

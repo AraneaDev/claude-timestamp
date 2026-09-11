@@ -1652,7 +1652,7 @@ is "a rejected format cannot smuggle a second setting into the file" "on" "$CT_E
 # to be wrong, so flag twenty-one is covered the day it is added.
 fresh 'ENABLED=on'
 flag_table="$(sed -n '/^CT_FLAG_TABLE="$/,/^"$/p' "$SCRIPTS/setup.sh" | sed '1d;$d')"
-is "every setting has a flag in the table" "21" \
+is "every setting has a flag in the table" "23" \
   "$(printf '%s\n' "$flag_table" | grep -c '^[a-z]')"
 # shellcheck disable=SC2034  # t_rest is read to consume the rest of the row
 while read -r t_flag t_rest; do
@@ -6322,6 +6322,30 @@ printf 'not conventional at all\n' > "$cmt_dir/bad"
 asserts "commit-msg hook: an accepted title passes"  bash "$ROOT/.githooks/commit-msg" "$cmt_dir/good"
 refutes "commit-msg hook: a bad title is rejected"    bash "$ROOT/.githooks/commit-msg" "$cmt_dir/bad"
 rm -rf "$cmt_dir"
+
+echo
+echo "agent notes: settings"
+
+fresh
+is "notes: heartbeat defaults to 900" "900" "$CT_HEARTBEAT_AFTER"
+is "notes: slow tool note defaults to 60" "60" "$CT_SLOW_TOOL_AFTER"
+
+fresh 'HEARTBEAT_AFTER=0' 'SLOW_TOOL_AFTER=120'
+is "notes: heartbeat reads 0" "0" "$CT_HEARTBEAT_AFTER"
+is "notes: slow tool reads a value" "120" "$CT_SLOW_TOOL_AFTER"
+
+fresh 'HEARTBEAT_AFTER=often' 'SLOW_TOOL_AFTER=-5'
+is "notes: an invalid heartbeat falls back" "900" "$CT_HEARTBEAT_AFTER"
+is "notes: an invalid slow tool falls back" "60" "$CT_SLOW_TOOL_AFTER"
+contains "notes: the invalid heartbeat is reported" "HEARTBEAT_AFTER=often is not valid, using 900" "$CT_CONFIG_PROBLEMS"
+
+fresh
+bash "$SCRIPTS/setup.sh" --heartbeat-after=600 --slow-tool-after=30 >/dev/null 2>&1
+ct_load_config
+is "notes: --heartbeat-after is written" "600" "$CT_HEARTBEAT_AFTER"
+is "notes: --slow-tool-after is written" "30" "$CT_SLOW_TOOL_AFTER"
+refutes "notes: --heartbeat-after refuses a word" bash "$SCRIPTS/setup.sh" --heartbeat-after=soon
+contains "notes: --show lists the heartbeat" "Heartbeat" "$(bash "$SCRIPTS/setup.sh" --show 2>&1)"
 
 echo
 echo "----"

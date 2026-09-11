@@ -137,6 +137,8 @@ Some phrasings and what they mean:
 | "12 hour" | `DISPLAY_FORMAT=12h` |
 | "off", "stop timestamps" | `ENABLED=off` |
 | "don't tell Claude the time" | `INJECT_CONTEXT=false` |
+| "stop telling Claude how long it has been working" | `HEARTBEAT_AFTER=0` |
+| "don't tell Claude about slow commands" | `SLOW_TOOL_AFTER=0` |
 | "highlight slow turns after 30s" | `SLOW_AFTER=30` |
 | "time my tools" | `TOOL_TIMING=on` |
 | "why was that slow" | `TOOL_TIMING=on`, and explain it names the worst tool in the marker from now on |
