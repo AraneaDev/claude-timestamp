@@ -6348,6 +6348,16 @@ refutes "notes: --heartbeat-after refuses a word" bash "$SCRIPTS/setup.sh" --hea
 contains "notes: --show lists the heartbeat" "Heartbeat" "$(bash "$SCRIPTS/setup.sh" --show 2>&1)"
 
 echo
+echo "agent notes: epoch formatting"
+
+fresh 'TZ=UTC'
+is "format_epoch: 24h in the pinned zone" "00:01:40" "$(ct_format_epoch 100 24h)"
+is "format_epoch: short" "00:01" "$(ct_format_epoch 100 short)"
+is "format_epoch: a raw strftime string" "1970-01-01 Thu" "$(ct_format_epoch 100 '%Y-%m-%d %a')"
+refutes "format_epoch: refuses a word" ct_format_epoch soon 24h
+refutes "format_epoch: refuses empty" ct_format_epoch "" 24h
+
+echo
 echo "----"
 printf '%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

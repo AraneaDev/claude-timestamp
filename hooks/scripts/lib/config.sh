@@ -416,6 +416,27 @@ ct_zone() {
   if ct_tz_honoured; then TZ="$CT_TZ" date '+%Z'; else date '+%Z'; fi
 }
 
+# Render a moment other than now, the way ct_now renders now. GNU date takes
+# -d @EPOCH and BSD date takes -r EPOCH; ct_date_days_ago tries them in the
+# same order. The 12h preset drops its leading zero here as ct_now does, so a
+# time reads the same whichever function produced it.
+ct_format_epoch() {
+  local epoch="${1:-}" fmt out
+  case "$epoch" in ''|*[!0-9]*) return 1 ;; esac
+  fmt="$(ct_expand_format "${2:-24h}")"
+  if ct_tz_honoured; then
+    out="$(TZ="$CT_TZ" date -d "@$epoch" "+$fmt" 2>/dev/null)" \
+      || out="$(TZ="$CT_TZ" date -r "$epoch" "+$fmt" 2>/dev/null)" \
+      || return 1
+  else
+    out="$(date -d "@$epoch" "+$fmt" 2>/dev/null)" \
+      || out="$(date -r "$epoch" "+$fmt" 2>/dev/null)" \
+      || return 1
+  fi
+  [ "${2:-}" = "12h" ] && out="${out#0}"
+  printf '%s' "$out"
+}
+
 # The escape sequence for a colour, assigned rather than printed so a caller on
 # the hot path pays no subshell. Sets _CT_SEQ, which is empty when the colour is
 # off, unknown, or disabled by NO_COLOR.
