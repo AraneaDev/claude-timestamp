@@ -6471,10 +6471,35 @@ if command -v jq >/dev/null 2>&1; then
   printf '{"session_id":"tn"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
   contains "tool hook: SUBAGENTS=on lets a subagent hear about its slow call" "took 2m14s" \
     "$(tn_ctx "$(tn_call 134000 PostToolUse ',"agent_id":"sub1"')")"
+
+  # A subagent shares the session's single heartbeat record with the main
+  # conversation rather than keeping one of its own, so a subagent call that
+  # crosses an interval must not claim it -- otherwise the main conversation's
+  # next call would find that interval already told.
+  fresh
+  printf '{"session_id":"tn"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  printf '%s' "$(( $(date +%s) - 1000 ))" > "$(ct_state_file tn)"
+  is "tool hook: a subagent's call earns no heartbeat" "" \
+    "$(tn_ctx "$(tn_call 1000 PostToolUse ',"agent_id":"sub1"')")"
+  contains "tool hook: the main conversation still hears it right after" "Turn running 16m" \
+    "$(tn_ctx "$(tn_call 1000)")"
+
+  # An older harness that sends no duration_ms field at all still owes the
+  # main conversation its heartbeat: the heartbeat does not depend on there
+  # being a usable duration, only on the interval and the caller being the
+  # main conversation.
+  fresh
+  printf '{"session_id":"tn"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  printf '%s' "$(( $(date +%s) - 1000 ))" > "$(ct_state_file tn)"
+  out="$(printf '{"session_id":"tn","tool_name":"Bash","hook_event_name":"PostToolUse"}' \
+    | bash "$SCRIPTS/post-tool-use.sh")"
+  contains "tool hook: a heartbeat still arrives with no duration_ms field" "Turn running 16m" \
+    "$(tn_ctx "$out")"
 else
   for tn_label in "fast call silent" "slow call told" "event name" "slow failure" "failure event" \
                   "no timings" "heartbeat" "not twice" "merged" "inject off" "timing records" \
-                  "note still sent" "subagents off" "main still told" "subagent branch"; do
+                  "note still sent" "subagents off" "main still told" "subagent branch" \
+                  "subagent no heartbeat" "main heartbeat after subagent" "no duration heartbeat"; do
     skip "tool hook: $tn_label" "jq is not installed"
   done
 fi

@@ -21,8 +21,8 @@
 # It also tells the model two things, as additionalContext: that the call just
 # finished was slow (SLOW_TOOL_AFTER), and how long the open turn has run
 # (HEARTBEAT_AFTER). Both are staged by the prompt hook already resolved
-# against INJECT_CONTEXT and ENABLED, so this hook reads a number per note and
-# loads no configuration.
+# against INJECT_CONTEXT and ENABLED, so this hook reads a number per note
+# rather than loading configuration for them.
 #
 # Never alters tool output: it writes its own state, may add context, and exits 0.
 #
@@ -101,11 +101,20 @@ if [ "$ct_timing" = "on" ] && [ -n "$ms" ] && ct_state_ready \
 fi
 
 # What the model is told. Both notes are facts only; the time-awareness skill
-# is where the advice about them lives. A subagent's calls follow SUBAGENTS,
-# the same switch that decides whether its messages are stamped.
+# is where the advice about them lives. The slow-tool note follows SUBAGENTS,
+# the same switch that decides whether a subagent's messages are stamped --
+# but the heartbeat is main-conversation only, whatever SUBAGENTS says.
+# Subagents share the session's heartbeat record (<state>.hb) with the main
+# conversation rather than keeping one of their own, so letting a subagent's
+# call claim an interval would leave the main conversation's next call
+# finding it already told; the elapsed time it reports is the turn's, which
+# belongs to the main conversation regardless of which call happens to
+# observe it.
 note=""
 if [ -z "$agent_id" ] || [ "$(ct_read_flag "$session_id" "subagents")" = "on" ]; then
   note="$(ct_slow_tool_note "$tool_name" "$ms" "$outcome" "$(ct_read_flag "$session_id" "slowtool")")"
+fi
+if [ -z "$agent_id" ]; then
   hb_every="$(ct_read_flag "$session_id" "heartbeat")"
   case "$hb_every" in
     ''|0|*[!0-9]*) ;;
