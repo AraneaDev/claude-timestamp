@@ -6405,8 +6405,10 @@ ct_turn_open hb 1000
 ct_stage_flag hb tz UTC
 ct_stage_flag hb ctxfmt short
 is "heartbeat: silent before the first interval" "" "$(ct_heartbeat_note hb 1899 900)"
+# The zone is asked of the platform, as zone_utc explains in the "zone"
+# section: Git Bash on Windows calls TZ=UTC "GMT".
 is "heartbeat: fires at the first interval" \
-  "Turn running 15m00s (prompt sent 00:16); now 00:31 UTC." "$(ct_heartbeat_note hb 1900 900)"
+  "Turn running 15m00s (prompt sent 00:16); now 00:31 $zone_utc." "$(ct_heartbeat_note hb 1900 900)"
 is "heartbeat: silent again within that interval" "" "$(ct_heartbeat_note hb 2500 900)"
 contains "heartbeat: fires at the second interval" "Turn running 30m00s" "$(ct_heartbeat_note hb 2800 900)"
 is "heartbeat: an interval is told once" "" "$(ct_heartbeat_note hb 2801 900)"
