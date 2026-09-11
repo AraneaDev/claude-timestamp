@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.0.24](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.23...v0.0.24) (2026-09-11)
+
+
+### Features
+
+* add a time-awareness skill for the notes Claude receives ([#67](https://github.com/AraneaDev/claude-timestamp/issues/67)) ([9411cbe](https://github.com/AraneaDev/claude-timestamp/commit/9411cbe0349a86eca8362cbeb48722f84bdfa167))
+* tell Claude how long ago a project or conversation was last active ([#66](https://github.com/AraneaDev/claude-timestamp/issues/66)) ([5d18fde](https://github.com/AraneaDev/claude-timestamp/commit/5d18fdea80dcb80bc80e7d88bdb50ca288581c55))
+* tell Claude when a turn runs long or a tool call is slow ([#65](https://github.com/AraneaDev/claude-timestamp/issues/65)) ([f383e8d](https://github.com/AraneaDev/claude-timestamp/commit/f383e8d04057b8670f5b42b8ba7f6413c4fa40de))
+
 ## [0.0.23](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.22...v0.0.23) (2026-09-08)
 
 
