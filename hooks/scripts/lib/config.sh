@@ -443,6 +443,73 @@ ct_format_epoch() {
   printf '%s' "$out"
 }
 
+# A file's modification time as an epoch, or failure. GNU stat spells it
+# -c %Y and BSD stat -f %m; on GNU, -f means something else entirely, which is
+# why -c is tried first and anything that is not a plain number is refused.
+ct_mtime() {
+  local f="${1:-}" out=""
+  [ -e "$f" ] || return 1
+  out="$(stat -c %Y "$f" 2>/dev/null)" || out=""
+  case "$out" in ''|*[!0-9]*) out="$(stat -f %m "$f" 2>/dev/null)" || out="" ;; esac
+  case "$out" in ''|*[!0-9]*) return 1 ;; esac
+  printf '%s' "$out"
+}
+
+# The sentence telling the model how long ago this conversation, or this
+# project, was last active, or nothing.
+#   $1 SessionStart source   $2 the payload's transcript_path   $3 now (epoch)
+#
+# Nothing new is recorded for this: Claude Code already keeps one transcript
+# per session, in one directory per project, and the payload names this
+# session's. Anything unexpected about that layout means no sentence, never a
+# wrong one.
+#
+#   resume   the newest entry at least two minutes old in this transcript. A
+#            resume may write to the file before this hook runs, and anything
+#            that recent is under the hour threshold anyway.
+#   startup  the newest other transcript beside this one, by mtime. A session
+#            still running in another terminal is minutes old, so it stays
+#            under the threshold rather than being reported as ended.
+#   other    clear, compact and fork continue work that is already in view.
+ct_resume_note() {
+  local source="${1:-}" transcript="${2:-}" now="${3:-}" last="" label newest="" f gap
+  case "$now" in ''|*[!0-9]*) return 0 ;; esac
+  [ -n "$transcript" ] || return 0
+  case "$source" in
+    resume)
+      [ -r "$transcript" ] || return 0
+      # Timestamps look like 2026-09-04T11:33:47.059Z. The fraction is cut
+      # with a slice rather than sub(), which needs a jq built with regex
+      # support.
+      last="$(tail -n 200 "$transcript" 2>/dev/null \
+        | jq -nR --argjson cutoff "$((now - 120))" '
+            [inputs | fromjson? | (.timestamp? // empty) | strings
+             | (.[0:19] + "Z") | (fromdateiso8601? // empty)
+             | select(. <= $cutoff)] | max // empty' 2>/dev/null)" || last=""
+      label="Resuming this conversation; last activity"
+      ;;
+    startup)
+      [ -d "${transcript%/*}" ] || return 0
+      # ls -t is the portable newest-first; the names are session ids.
+      # shellcheck disable=SC2012
+      while IFS= read -r f; do
+        [ "$f" = "$transcript" ] && continue
+        newest="$f"
+        break
+      done < <(ls -t "${transcript%/*}"/*.jsonl 2>/dev/null)
+      [ -n "$newest" ] || return 0
+      last="$(ct_mtime "$newest")" || return 0
+      label="Previous session in this project ended"
+      ;;
+    *) return 0 ;;
+  esac
+  case "$last" in ''|*[!0-9]*) return 0 ;; esac
+  gap=$((now - last))
+  [ "$gap" -ge 3600 ] || return 0
+  printf '%s %s ago (%s).' "$label" "$(ct_humanize_gap "$gap")" \
+    "$(ct_format_epoch "$last" "%a $(ct_expand_format "${CT_CONTEXT_FORMAT:-24h}")")"
+}
+
 # The escape sequence for a colour, assigned rather than printed so a caller on
 # the hot path pays no subshell. Sets _CT_SEQ, which is empty when the colour is
 # off, unknown, or disabled by NO_COLOR.
