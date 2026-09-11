@@ -233,6 +233,12 @@
       "type": "seconds",
       "zero": "disables",
       "describes": "tell Claude when one tool call took at least this many seconds; INJECT_CONTEXT=false silences it"
+    },
+    "RESUME_NOTE": {
+      "default": "on",
+      "validator": "ct_is_onoff",
+      "values": ["on", "off"],
+      "describes": "tell Claude at session start how long ago this conversation or project was last active; INJECT_CONTEXT=false silences it"
     }
   },
   "preview_context": {

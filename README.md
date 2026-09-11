@@ -8,7 +8,7 @@
 [![Release](https://img.shields.io/github/v/release/AraneaDev/claude-timestamp)](https://github.com/AraneaDev/claude-timestamp/releases)
 [![Tool page](https://img.shields.io/badge/tool%20page-aranea--development.nl-0b7285)](https://aranea-development.nl/en/tools/claude-timestamp)
 [![CI](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml/badge.svg)](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-1231%20passing-2b8a3e)](tests/run.sh)
+[![Tests](https://img.shields.io/badge/tests-1259%20passing-2b8a3e)](tests/run.sh)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-364fc7)](#platform-notes)
 [![Conventional Commits](https://img.shields.io/badge/commits-conventional-fe5196?logo=conventionalcommits&logoColor=white)](https://www.conventionalcommits.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
@@ -79,6 +79,7 @@ has a setting of its own.
 | Every prompt | `Message sent at local time 10:37:21 CEST, after a 3h break` | `INJECT_CONTEXT`, `CONTEXT_FORMAT` |
 | The first tool result after a turn passes 15 minutes, and every 15 after | `Turn running 15m02s (prompt sent 10:37:21); now 10:52:23 CEST.` | `HEARTBEAT_AFTER` |
 | One tool call takes a minute or more | `That Bash call took 2m14s.` | `SLOW_TOOL_AFTER` |
+| A session starts an hour or more after the last one in this project, or a conversation is resumed an hour or more after its last activity | `Previous session in this project ended 14h ago (Thu 20:12:05).` | `RESUME_NOTE` |
 
 The notes state facts and give no instructions. A turn that has run for half
 an hour is a reason to check the work still matches the request, and a
@@ -90,6 +91,11 @@ for the next tool result. A single 31-minute command produces one note when
 it finishes, not one at 15 minutes and another at 30.
 
 Subagents hear about their own slow calls unless `SUBAGENTS` is `off`. The turn-length note goes to the main conversation only, since the turn is yours and theirs is a part of it.
+
+The resumption note records nothing of its own. Claude Code already keeps a
+transcript per session in a folder per project, and the note reads the time
+from those. If that layout ever changes, the note goes quiet rather than
+guessing.
 
 ## Requirements
 
@@ -382,6 +388,7 @@ cannot run anything.
 | `INJECT_CONTEXT` | `true` | Tell Claude the local time each prompt was sent |
 | `HEARTBEAT_AFTER` | `900` | Tell Claude how long the open turn has run, every this many seconds. `0` disables, and `INJECT_CONTEXT=false` silences it too |
 | `SLOW_TOOL_AFTER` | `60` | Tell Claude when one tool call took at least this many seconds. `0` disables, and `INJECT_CONTEXT=false` silences it too |
+| `RESUME_NOTE` | `on` | Tell Claude, when a session starts, how long ago this conversation or project was last active. `INJECT_CONTEXT=false` silences it too |
 | `SLOW_AFTER` | `60` | Colour the duration past this many seconds, `0` disables |
 | `SLOW_COLOR` | `yellow` | Colour used for a slow turn |
 | `IDLE_AFTER` | `3600` | Mark a gap this long between messages, `0` disables |
@@ -535,7 +542,7 @@ no database.
 ## Development
 
 ```bash
-bash tests/run.sh                                    # 1231 assertions, no framework
+bash tests/run.sh                                    # 1259 assertions, no framework
 shellcheck -S style -e SC1091 hooks/scripts/**/*.sh  # clean
 bash tools/check-docs.sh                             # README against the code
 ```

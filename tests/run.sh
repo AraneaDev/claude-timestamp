@@ -1652,7 +1652,7 @@ is "a rejected format cannot smuggle a second setting into the file" "on" "$CT_E
 # to be wrong, so flag twenty-one is covered the day it is added.
 fresh 'ENABLED=on'
 flag_table="$(sed -n '/^CT_FLAG_TABLE="$/,/^"$/p' "$SCRIPTS/setup.sh" | sed '1d;$d')"
-is "every setting has a flag in the table" "23" \
+is "every setting has a flag in the table" "24" \
   "$(printf '%s\n' "$flag_table" | grep -c '^[a-z]')"
 # shellcheck disable=SC2034  # t_rest is read to consume the rest of the row
 while read -r t_flag t_rest; do
@@ -6524,6 +6524,119 @@ else
                   "subagent no heartbeat" "main heartbeat after subagent" "no duration heartbeat" \
                   "oversized duration silent" "oversized duration unrecorded"; do
     skip "tool hook: $tn_label" "jq is not installed"
+  done
+fi
+
+echo
+echo "agent notes: resume setting"
+
+fresh
+is "resume setting: on by default" "on" "$CT_RESUME_NOTE"
+fresh 'RESUME_NOTE=off'
+is "resume setting: reads off" "off" "$CT_RESUME_NOTE"
+fresh 'RESUME_NOTE=maybe'
+is "resume setting: an invalid value falls back" "on" "$CT_RESUME_NOTE"
+contains "resume setting: and is reported" "RESUME_NOTE=maybe is not valid, using on" "$CT_CONFIG_PROBLEMS"
+fresh
+bash "$SCRIPTS/setup.sh" --resume-note=off >/dev/null 2>&1
+ct_load_config
+is "resume setting: --resume-note is written" "off" "$CT_RESUME_NOTE"
+contains "resume setting: --show lists it" "Resume note" "$(bash "$SCRIPTS/setup.sh" --show 2>&1)"
+
+echo
+echo "agent notes: resumption"
+
+rs_dir="$WORK/transcripts"
+rs_ago() {  # minutes ago -> touch -t stamp, GNU then BSD
+  date -d "$1 minutes ago" +%Y%m%d%H%M 2>/dev/null || date -v-"$1"M +%Y%m%d%H%M
+}
+rs_iso() {  # epoch -> the transcript's timestamp shape
+  date -u -d "@$1" +%Y-%m-%dT%H:%M:%S.000Z 2>/dev/null || date -u -r "$1" +%Y-%m-%dT%H:%M:%S.000Z
+}
+
+fresh 'TZ=UTC'
+rm -rf "$rs_dir"; mkdir -p "$rs_dir"
+rs_now="$(date +%s)"
+
+printf '{}\n' > "$rs_dir/self.jsonl"
+is_near "mtime: reads a file's modification time" "$rs_now" "$(ct_mtime "$rs_dir/self.jsonl")" 5
+refutes "mtime: a missing file fails" ct_mtime "$rs_dir/absent.jsonl"
+
+printf '{}\n' > "$rs_dir/older.jsonl"; touch -t "$(rs_ago 4320)" "$rs_dir/older.jsonl"
+printf '{}\n' > "$rs_dir/newer.jsonl"; touch -t "$(rs_ago 870)"  "$rs_dir/newer.jsonl"
+contains "resume: startup names the newest other session" \
+  "Previous session in this project ended 14h ago (" "$(ct_resume_note startup "$rs_dir/self.jsonl" "$rs_now")"
+touch "$rs_dir/self.jsonl"
+touch -t "$(rs_ago 30)" "$rs_dir/newer.jsonl"
+is "resume: startup under an hour says nothing" "" "$(ct_resume_note startup "$rs_dir/self.jsonl" "$rs_now")"
+rm -f "$rs_dir/newer.jsonl" "$rs_dir/older.jsonl"
+is "resume: no other session says nothing" "" "$(ct_resume_note startup "$rs_dir/self.jsonl" "$rs_now")"
+is "resume: a missing directory says nothing" "" "$(ct_resume_note startup "$WORK/nowhere/x.jsonl" "$rs_now")"
+
+if command -v jq >/dev/null 2>&1; then
+  {
+    printf '{"type":"user","timestamp":"%s"}\n' "$(rs_iso $((rs_now - 90000)))"
+    printf '{"type":"assistant","timestamp":"%s"}\n' "$(rs_iso $((rs_now - 50400)))"
+    printf '{"type":"mode","timestamp":null}\n'
+    printf 'not json at all\n'
+    printf '{"type":"user","timestamp":"%s"}\n' "$(rs_iso $((rs_now - 10)))"
+  } > "$rs_dir/conv.jsonl"
+  rs_ctx="$(ct_resume_note resume "$rs_dir/conv.jsonl" "$rs_now")"
+  contains "resume: reports the last activity before the resume" "Resuming this conversation; last activity 14h ago (" "$rs_ctx"
+  contains "resume: with the weekday and time it happened" \
+    "($(TZ=UTC date -d "@$((rs_now - 50400))" '+%a %H:%M:%S' 2>/dev/null || TZ=UTC date -r "$((rs_now - 50400))" '+%a %H:%M:%S'))." "$rs_ctx"
+
+  printf '{"type":"user","timestamp":"%s"}\n' "$(rs_iso $((rs_now - 1800)))" > "$rs_dir/recent.jsonl"
+  is "resume: under an hour says nothing" "" "$(ct_resume_note resume "$rs_dir/recent.jsonl" "$rs_now")"
+else
+  skip "resume: reports the last activity before the resume" "jq is not installed"
+  skip "resume: with the weekday and time it happened" "jq is not installed"
+  skip "resume: under an hour says nothing" "jq is not installed"
+fi
+
+is "resume: clear says nothing" "" "$(ct_resume_note clear "$rs_dir/conv.jsonl" "$rs_now")"
+is "resume: compact says nothing" "" "$(ct_resume_note compact "$rs_dir/conv.jsonl" "$rs_now")"
+is "resume: fork says nothing" "" "$(ct_resume_note fork "$rs_dir/conv.jsonl" "$rs_now")"
+is "resume: no transcript path says nothing" "" "$(ct_resume_note resume "" "$rs_now")"
+
+echo
+echo "agent notes: session start"
+
+if command -v jq >/dev/null 2>&1; then
+  ss_dir="$WORK/ss-transcripts"
+  # shellcheck disable=SC2119,SC2120  # the default source is "startup"; no case here needs another
+  ss_run() {
+    printf '{"session_id":"ss","source":"%s","transcript_path":"%s/self.jsonl"}' "${1:-startup}" "$ss_dir" \
+      | bash "$SCRIPTS/session-start.sh"
+  }
+  ss_ctx() { printf '%s' "$1" | jq -r '.hookSpecificOutput.additionalContext // ""'; }
+  rm -rf "$ss_dir"; mkdir -p "$ss_dir"
+  printf '{}\n' > "$ss_dir/self.jsonl"
+  printf '{}\n' > "$ss_dir/before.jsonl"; touch -t "$(rs_ago 870)" "$ss_dir/before.jsonl"
+
+  fresh
+  out="$(ss_run)"
+  contains "session start: tells Claude when the project was last active" \
+    "Previous session in this project ended 14h ago" "$(ss_ctx "$out")"
+  is "session start: under SessionStart" "SessionStart" "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.hookEventName')"
+
+  fresh 'RESUME_NOTE=off'
+  lacks "session start: RESUME_NOTE=off says nothing about it" "Previous session" "$(ss_ctx "$(ss_run)")"
+  fresh 'INJECT_CONTEXT=false'
+  lacks "session start: INJECT_CONTEXT=false says nothing about it" "Previous session" "$(ss_ctx "$(ss_run)")"
+  fresh 'ENABLED=off'
+  is "session start: ENABLED=off says nothing at all" "" "$(ss_run)"
+
+  fresh
+  rm -f "$CLAUDE_TIMESTAMP_CONFIG"
+  out="$(ss_run)"
+  is "session start: one object carries both audiences" "1" "$(printf '%s' "$out" | jq -s 'length')"
+  contains "session start: the user still gets the first-run note" "/timestamps" "$(printf '%s' "$out" | jq -r '.systemMessage // ""')"
+  contains "session start: and Claude gets the resumption note" "Previous session" "$(ss_ctx "$out")"
+else
+  for ss_label in "last active" "event name" "resume off" "inject off" "enabled off" \
+                  "one object" "user note" "claude note"; do
+    skip "session start: $ss_label" "jq is not installed"
   done
 fi
 
