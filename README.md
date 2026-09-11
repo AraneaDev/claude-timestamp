@@ -8,7 +8,7 @@
 [![Release](https://img.shields.io/github/v/release/AraneaDev/claude-timestamp)](https://github.com/AraneaDev/claude-timestamp/releases)
 [![Tool page](https://img.shields.io/badge/tool%20page-aranea--development.nl-0b7285)](https://aranea-development.nl/en/tools/claude-timestamp)
 [![CI](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml/badge.svg)](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-1160%20passing-2b8a3e)](tests/run.sh)
+[![Tests](https://img.shields.io/badge/tests-1225%20passing-2b8a3e)](tests/run.sh)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-364fc7)](#platform-notes)
 [![Conventional Commits](https://img.shields.io/badge/commits-conventional-fe5196?logo=conventionalcommits&logoColor=white)](https://www.conventionalcommits.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
@@ -41,8 +41,9 @@ There is nothing to set up. The defaults work as soon as it is installed, and
 - **Marks where you stepped away.** A gap between messages is labelled, so a
   session you returned to the next morning still reads in order.
 - **Tells Claude the time.** The model receives the local time each prompt was
-  sent, which lets it reason about when things happened. You can switch this
-  off and keep the display-only marker.
+  sent, and a short note when a turn runs long or a tool call is slow. See
+  [What Claude is told](#what-claude-is-told). You can switch this off and
+  keep the display-only marker.
 - **Summarises the session.** On exit: how long it ran, how many turns, how
   much of that you spent waiting, and how much you were away. Waiting and away
   never cover the same seconds, so the two add up to no more than the session
@@ -65,6 +66,26 @@ this example is drawn from:
 
 Display is display only. The marker is drawn as messages render, so it never
 enters the transcript and never reaches the model.
+
+## What Claude is told
+
+The marker is drawn on your screen and never reaches the model. A few short
+notes do reach it, each as a system reminder, and each only when there is
+something to say. `INJECT_CONTEXT=false` switches all of them off, and each
+has a setting of its own.
+
+| When | What Claude reads | Setting |
+| --- | --- | --- |
+| Every prompt | `Message sent at local time 10:37:21 CEST, after a 3h break` | `INJECT_CONTEXT`, `CONTEXT_FORMAT` |
+| A turn passes 15 minutes, and every 15 after | `Turn running 15m02s (prompt sent 10:37:21); now 10:52:23 CEST.` | `HEARTBEAT_AFTER` |
+| One tool call takes a minute or more | `That Bash call took 2m14s.` | `SLOW_TOOL_AFTER` |
+
+The notes state facts and give no instructions. A turn that has run for half
+an hour is a reason to check the work still matches the request, and a
+four-minute test run is a reason to run it in the background next time, but
+that is Claude's call to make.
+
+Subagents hear about their own slow calls unless `SUBAGENTS` is `off`. The turn-length note goes to the main conversation only, since the turn is yours and theirs is a part of it.
 
 ## Requirements
 
@@ -510,7 +531,7 @@ no database.
 ## Development
 
 ```bash
-bash tests/run.sh                                    # 1160 assertions, no framework
+bash tests/run.sh                                    # 1225 assertions, no framework
 shellcheck -S style -e SC1091 hooks/scripts/**/*.sh  # clean
 bash tools/check-docs.sh                             # README against the code
 ```
