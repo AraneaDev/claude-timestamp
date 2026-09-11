@@ -481,6 +481,13 @@ ct_resume_note() {
       # Timestamps look like 2026-09-04T11:33:47.059Z. The fraction is cut
       # with a slice rather than sub(), which needs a jq built with regex
       # support.
+      #
+      # The last 200 lines are enough. The cutoff is two minutes before NOW,
+      # not before the last entry, so every line the earlier session wrote is
+      # eligible however busy its final minutes were; only lines the resume
+      # itself wrote are excluded, and it writes a handful, not 200. Reading
+      # the whole file instead would cost real time at session start, since
+      # transcripts run to tens of megabytes.
       last="$(tail -n 200 "$transcript" 2>/dev/null \
         | jq -nR --argjson cutoff "$((now - 120))" '
             [inputs | fromjson? | (.timestamp? // empty) | strings

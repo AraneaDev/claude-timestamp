@@ -79,7 +79,7 @@ has a setting of its own.
 | Every prompt | `Message sent at local time 10:37:21 CEST, after a 3h break` | `INJECT_CONTEXT`, `CONTEXT_FORMAT` |
 | The first tool result after a turn passes 15 minutes, and every 15 after | `Turn running 15m02s (prompt sent 10:37:21); now 10:52:23 CEST.` | `HEARTBEAT_AFTER` |
 | One tool call takes a minute or more | `That Bash call took 2m14s.` | `SLOW_TOOL_AFTER` |
-| A session starts an hour or more after the last one in this project, or a conversation is resumed | `Previous session in this project ended 14h ago (Thu 20:12:05).` | `RESUME_NOTE` |
+| A session starts an hour or more after the last one in this project, or a conversation is resumed an hour or more after its last activity | `Previous session in this project ended 14h ago (Thu 20:12:05).` | `RESUME_NOTE` |
 
 The notes state facts and give no instructions. A turn that has run for half
 an hour is a reason to check the work still matches the request, and a
