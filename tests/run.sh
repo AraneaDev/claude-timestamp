@@ -6698,9 +6698,22 @@ if command -v jq >/dev/null 2>&1; then
   printf 'TOOL_TIMING=on\n' > "$CLAUDE_TIMESTAMP_CONFIG"
   contains "session: the session's staged settings win over the config" "tool timing     off" \
     "$(CLAUDE_CODE_SESSION_ID=live bash "$SCRIPTS/setup.sh" --session 2>&1)"
+
+  # A turn file read while ct_turn_open is still writing it can be empty, which
+  # reads as 0. That is not a turn running since 1970.
+  : > "$(ct_state_file live)"
+  contains "session: an unreadable turn start is reported as unknown" "current turn    unknown" \
+    "$(CLAUDE_CODE_SESSION_ID=live bash "$SCRIPTS/setup.sh" --session 2>&1)"
+
+  # --session only reports, so a setting named on the same run must be refused
+  # rather than parsed and then silently dropped, the way --stats refuses one.
+  out="$(CLAUDE_CODE_SESSION_ID=live bash "$SCRIPTS/setup.sh" --session --tool-timing=on 2>&1)"; rc=$?
+  is "session: refuses a setting flag on the same run" "2" "$rc"
+  contains "session: and says why" "does not write a setting" "$out"
 else
   for sr_label in "slowest summed" "slowest empty" "no id exit" "no id why" "unknown" \
-                  "turns" "open turn" "timing off" "closed turn" "slowest listed" "staged wins"; do
+                  "turns" "open turn" "timing off" "closed turn" "slowest listed" "staged wins" \
+                  "turn start unknown" "refuses settings" "refusal says why"; do
     skip "session report: $sr_label" "jq is not installed"
   done
 fi

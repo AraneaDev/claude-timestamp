@@ -42,7 +42,7 @@ handles extremely well and a lossy setting would only blur; save_image and
 save_animation are the two functions every shot's output passes through, so a
 future shot cannot quietly stay PNG.
 """
-import fcntl, json, os, pty, select, struct, stat, subprocess, sys, termios, time
+import fcntl, json, os, pty, select, shutil, struct, stat, subprocess, sys, tempfile, termios, time
 from pathlib import Path
 
 import pyte
@@ -1051,29 +1051,30 @@ def shot_skill():
 
     # The Bash call in the shot prints the plugin's path in full, so the plugin
     # is loaded through a short symlink rather than wherever this checkout
-    # lives -- the same reason the doctor shot uses /tmp/ct-demo-project.
-    plugin = Path("/tmp/claude-timestamp")
-    if plugin.is_symlink() or not plugin.exists():
-        if plugin.is_symlink():
-            plugin.unlink()
-        plugin.symlink_to(ROOT)
-    else:
-        raise SystemExit(f"{plugin} exists and is not a symlink; refusing to replace it.")
+    # lives. The symlink sits in a fresh owner-private directory from mkdtemp,
+    # not at a fixed name in /tmp, which any local user could create first to
+    # block the capture; the directory is removed again however the run ends.
+    link_dir = Path(tempfile.mkdtemp(prefix="ct-", dir="/tmp"))
+    plugin = link_dir / "claude-timestamp"
+    plugin.symlink_to(ROOT)
 
     cols, rows = 96, 60
     os.chdir(work)
-    raw = capture_pty(
-        ["claude", "--plugin-dir", str(plugin), "--model", "haiku",
-         "--settings", json.dumps({"enabledPlugins": {"claude-timestamp@aranea": False}}),
-         "--allowedTools", "Bash", "Skill"],
-        keys=[
-            (6.0, "What is the capital of Portugal? One word, no punctuation."), (7.5, "\r"),
-            (16.0, "How long has this session been running, and how much of that "
-                   "did I spend waiting for your replies?"), (17.5, "\r"),
-        ],
-        cols=cols, rows=rows, settle=12, total=110,
-        env={"CLAUDE_TIMESTAMP_CONFIG": str(conf)},
-    )
+    try:
+        raw = capture_pty(
+            ["claude", "--plugin-dir", str(plugin), "--model", "haiku",
+             "--settings", json.dumps({"enabledPlugins": {"claude-timestamp@aranea": False}}),
+             "--allowedTools", "Bash", "Skill"],
+            keys=[
+                (6.0, "What is the capital of Portugal? One word, no punctuation."), (7.5, "\r"),
+                (16.0, "How long has this session been running, and how much of that "
+                       "did I spend waiting for your replies?"), (17.5, "\r"),
+            ],
+            cols=cols, rows=rows, settle=12, total=110,
+            env={"CLAUDE_TIMESTAMP_CONFIG": str(conf)},
+        )
+    finally:
+        shutil.rmtree(link_dir, ignore_errors=True)
     (work / "skill.raw").write_bytes(raw)
 
     # Crop past the welcome banner, which carries the account's name, email

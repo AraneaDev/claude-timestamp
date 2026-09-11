@@ -752,7 +752,14 @@ session_report() {
     echo "  current turn    none open"
   else
     turn_start="$(ct_read_counter "$base")"
-    echo "  current turn    running $(ct_format_duration $(( now - turn_start ))), since $(ct_format_epoch "$turn_start" "$ctxfmt")"
+    # An empty or half-written turn file reads as 0, which would be a turn
+    # "running" since 1970. ct_turn_open writes it without a lock, so a report
+    # can land mid-write; say so instead of inventing a duration.
+    if [ "$turn_start" -gt 0 ]; then
+      echo "  current turn    running $(ct_format_duration $(( now - turn_start ))), since $(ct_format_epoch "$turn_start" "$ctxfmt")"
+    else
+      echo "  current turn    unknown"
+    fi
   fi
   if [ "$tooltiming" = "on" ]; then
     tools="$(ct_slowest_tools "${base}.tools" 5)"
@@ -1616,7 +1623,7 @@ main() {
   # below can be detected without re-deriving it from `action` -- which
   # --since=* and --project=* both also set unconditionally, and set the
   # same way whether or not a setting flag came with them.
-  local saw_stats_bare=0 saw_since_flag=0 since_flag_value=""
+  local saw_stats_bare=0 saw_since_flag=0 since_flag_value="" saw_session=0
   local saw_project_filter=0
 
   while [ $# -gt 0 ]; do
@@ -1627,7 +1634,7 @@ main() {
       --show)      action="show";   interactive=0 ;;
       --doctor)    action="doctor"; interactive=0 ;;
       --stats)     action="stats";  interactive=0; saw_stats_bare=1 ;;
-      --session)   action="session"; interactive=0 ;;
+      --session)   action="session"; interactive=0; saw_session=1 ;;
       --since=*)
         action="stats"; interactive=0
         value="${arg#*=}"
@@ -1750,6 +1757,11 @@ main() {
   # anything that writes a setting -- a --key=value flag (named_count), or
   # bare --project selecting write scope.
   if [ "$project_scope" = "1" ] || [ "$named_count" -gt 0 ]; then
+    if [ "$saw_session" = "1" ]; then
+      echo "--session reports on the running session; it does not write a setting." >&2
+      echo "Drop --session to write settings, or drop the setting flags to see the report." >&2
+      exit 2
+    fi
     if [ "$saw_stats_bare" = "1" ]; then
       echo "--stats reports on recorded sessions; it does not write a setting." >&2
       echo "Drop --stats to write settings, or drop the setting flags to see the report." >&2
