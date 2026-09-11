@@ -175,7 +175,9 @@ _ct_say_invalid() {
     ct_is_bool)
       echo "$label must be 'true' or 'false', got '$value'." >&2 ;;
     ct_is_seconds)
-      echo "$label must be a whole number of seconds, got '$value'." >&2 ;;
+      echo "$label must be a whole number of seconds, got '$value'." >&2
+      # A number that fails is one that is too large, so say which rule it broke.
+      case "$value" in ''|*[!0-9]*) ;; *) echo "The largest accepted value is 999999999." >&2 ;; esac ;;
     ct_is_history_limit)
       echo "$label must be a whole number of 1 or more, got '$value'." >&2
       echo "To keep no history at all, use --history=off." >&2 ;;

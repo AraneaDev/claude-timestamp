@@ -1807,6 +1807,11 @@ is "invalid: ct_is_seconds is labelled by the flag as typed" \
    "--slow-after must be a whole number of seconds, got 'soon'." \
    "$(invalid --slow-after=soon)"
 
+# A number that is merely too large gets the rule it broke, not only the one
+# it already satisfies.
+contains "invalid: an oversized number of seconds names the limit" \
+   "999999999" "$(invalid --slow-after=9999999999)"
+
 # HISTORY_LIMIT has no "0 disables" reading, so its message carries a second
 # line pointing at the switch that does turn history off. Both lines matter:
 # without the first the refusal has no rule in it, without the second the user
@@ -2509,6 +2514,10 @@ is "a strftime format is accepted"  "0" "$(ct_is_valid_format '%H:%M' && echo 0 
 is "a nonsense format is rejected"  "1" "$(ct_is_valid_format wat     && echo 0 || echo 1)"
 is "a number is seconds"            "0" "$(ct_is_seconds 30           && echo 0 || echo 1)"
 is "a word is not seconds"          "1" "$(ct_is_seconds soon         && echo 0 || echo 1)"
+# Bounded, because every seconds setting ends up in shell arithmetic, which
+# wraps a large enough number silently instead of failing.
+is "nine digits are seconds"        "0" "$(ct_is_seconds 999999999    && echo 0 || echo 1)"
+is "ten digits are not"             "1" "$(ct_is_seconds 9999999999   && echo 0 || echo 1)"
 is "an empty timezone is fine"      "0" "$(ct_is_valid_tz ''          && echo 0 || echo 1)"
 is "an absolute timezone path is not" "1" "$(ct_is_valid_tz /etc/passwd && echo 0 || echo 1)"
 is "a traversing timezone is not"   "1" "$(ct_is_valid_tz a/../b      && echo 0 || echo 1)"
@@ -6400,6 +6409,10 @@ is "slow note: leading zeros are decimal" "That Bash call took 1m20s." "$(ct_slo
 is "slow note: 0 disables it" "" "$(ct_slow_tool_note Bash 999999 ok 0)"
 is "slow note: no duration says nothing" "" "$(ct_slow_tool_note Bash '' ok 60)"
 is "slow note: an unstaged threshold says nothing" "" "$(ct_slow_tool_note Bash 999999 ok '')"
+# A threshold this large overflowed when it was multiplied into milliseconds,
+# turning negative and making every call slow.
+is "slow note: a huge threshold cannot overflow into every call" "" \
+  "$(ct_slow_tool_note Bash 1000 ok 9223372036854777)"
 
 ct_turn_open hb 1000
 ct_stage_flag hb tz UTC
@@ -6497,11 +6510,19 @@ if command -v jq >/dev/null 2>&1; then
     | bash "$SCRIPTS/post-tool-use.sh")"
   contains "tool hook: a heartbeat still arrives with no duration_ms field" "Turn running 16m" \
     "$(tn_ctx "$out")"
+
+  # A duration too long to be real would wrap in shell arithmetic, so it is
+  # treated like one that is missing: no log line and no note built on it.
+  fresh 'TOOL_TIMING=on'
+  printf '{"session_id":"tn"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  is "tool hook: an oversized duration_ms tells the model nothing" "" "$(tn_call 99999999999999999999)"
+  refutes "tool hook: and records nothing" test -s "$(ct_tool_log tn)"
 else
   for tn_label in "fast call silent" "slow call told" "event name" "slow failure" "failure event" \
                   "no timings" "heartbeat" "not twice" "merged" "inject off" "timing records" \
                   "note still sent" "subagents off" "main still told" "subagent branch" \
-                  "subagent no heartbeat" "main heartbeat after subagent" "no duration heartbeat"; do
+                  "subagent no heartbeat" "main heartbeat after subagent" "no duration heartbeat" \
+                  "oversized duration silent" "oversized duration unrecorded"; do
     skip "tool hook: $tn_label" "jq is not installed"
   done
 fi

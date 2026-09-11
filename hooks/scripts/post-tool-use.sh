@@ -83,7 +83,14 @@ outcome=ok
 # it as octal, where 8 is not a valid digit, aborting the hook; "10#" pins the
 # base so the digits are read as the decimal the sender meant. Do not remove
 # this as noise.
-case "$ms" in ''|*[!0-9]*) ms="" ;; *) ms=$((10#$ms)) ;; esac
+#
+# More than 15 digits -- over 30,000 years of milliseconds -- is not a real
+# duration, and bash arithmetic would wrap it silently into a wrong or
+# negative one. It is treated the same as a missing value.
+case "$ms" in
+  ''|*[!0-9]*) ms="" ;;
+  *) if [ "${#ms}" -gt 15 ]; then ms=""; else ms=$((10#$ms)); fi ;;
+esac
 
 if [ "$ct_timing" = "on" ] && [ -n "$ms" ] && ct_state_ready \
    && log="$(ct_tool_log "$session_id")"; then

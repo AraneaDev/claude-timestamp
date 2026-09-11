@@ -461,7 +461,10 @@ ct_slow_tool_note() {
   ms=$((10#$ms))
   after=$((10#$after))
   [ "$after" -gt 0 ] || return 0
-  [ "$ms" -ge $((after * 1000)) ] || return 0
+  # Compared in whole seconds rather than by scaling the threshold up to
+  # milliseconds: the same test for non-negative numbers, and one that cannot
+  # overflow however large the threshold is.
+  [ $((ms / 1000)) -ge "$after" ] || return 0
   took="$(ct_format_duration $((ms / 1000)))"
   [ -n "$tool" ] || tool="tool"
   if [ "$outcome" = "fail" ]; then

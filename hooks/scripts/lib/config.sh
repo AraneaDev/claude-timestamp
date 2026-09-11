@@ -242,7 +242,10 @@ ct_is_valid_color()  { case "${1:-}" in none|off|dim|gray|grey|red|green|yellow|
 # the check in the single place the loader and setup.sh already share.
 ct_has_control()     { case "${1:-}" in *[[:cntrl:]]*) return 0 ;; *) return 1 ;; esac; }
 ct_is_valid_format() { ct_has_control "${1:-}" && return 1; case "${1:-}" in *%*|24h|short|12h|iso) return 0 ;; *) return 1 ;; esac; }
-ct_is_seconds()      { case "${1:-}" in ''|*[!0-9]*) return 1 ;; *) return 0 ;; esac; }
+# At most nine digits, about 31 years. Every seconds setting ends up in shell
+# arithmetic, and bash wraps a number past 64 bits silently rather than
+# failing, so an unbounded value would come back as a different one.
+ct_is_seconds()      { case "${1:-}" in ''|*[!0-9]*) return 1 ;; *) [ "${#1}" -le 9 ] ;; esac; }
 
 # A retention count, which unlike SLOW_AFTER and IDLE_AFTER has no "0 disables"
 # reading: keeping zero sessions is what HISTORY=off means, and 0 here used to
