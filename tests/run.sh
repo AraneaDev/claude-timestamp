@@ -6641,6 +6641,46 @@ else
 fi
 
 echo
+echo "session report"
+
+if command -v jq >/dev/null 2>&1; then
+  printf 'Bash 40.000 ok\nRead 0.400 ok\nBash 1.200 fail\n\ngarbage line\n' > "$WORK/slowest.log"
+  is "slowest tools: summed per tool, worst first" "Bash 41.2s (2 calls), Read 0.4s (1 call)" \
+    "$(ct_slowest_tools "$WORK/slowest.log" 3)"
+  is "slowest tools: an empty log says nothing" "" "$(ct_slowest_tools "$WORK/absent.log" 3)"
+
+  fresh
+  out="$(CLAUDE_CODE_SESSION_ID='' bash "$SCRIPTS/setup.sh" --session 2>&1)"; rc=$?
+  is "session: without a session id it exits 2" "2" "$rc"
+  contains "session: and says why" "CLAUDE_CODE_SESSION_ID" "$out"
+
+  out="$(CLAUDE_CODE_SESSION_ID=never-seen bash "$SCRIPTS/setup.sh" --session 2>&1)"
+  contains "session: an unknown session says there is no record" "no record of this session" "$out"
+
+  fresh 'TZ=UTC'
+  printf '{"session_id":"live"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  out="$(CLAUDE_CODE_SESSION_ID=live bash "$SCRIPTS/setup.sh" --session 2>&1)"
+  contains "session: counts the turns" "turns           1" "$out"
+  contains "session: names the open turn" "current turn    running" "$out"
+  contains "session: says tool timing is off" "tool timing     off" "$out"
+  printf '{"session_id":"live"}' | bash "$SCRIPTS/stop.sh" >/dev/null
+  contains "session: a finished turn is not open" "current turn    none open" \
+    "$(CLAUDE_CODE_SESSION_ID=live bash "$SCRIPTS/setup.sh" --session 2>&1)"
+
+  fresh 'TOOL_TIMING=on'
+  printf '{"session_id":"live"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  printf '{"session_id":"live","tool_name":"Bash","hook_event_name":"PostToolUse","duration_ms":2000}' \
+    | bash "$SCRIPTS/post-tool-use.sh" >/dev/null
+  contains "session: lists the slowest tools when timing is on" "slowest tools   Bash 2.0s (1 call)" \
+    "$(CLAUDE_CODE_SESSION_ID=live bash "$SCRIPTS/setup.sh" --session 2>&1)"
+else
+  for sr_label in "slowest summed" "slowest empty" "no id exit" "no id why" "unknown" \
+                  "turns" "open turn" "timing off" "closed turn" "slowest listed"; do
+    skip "session report: $sr_label" "jq is not installed"
+  done
+fi
+
+echo
 echo "----"
 printf '%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

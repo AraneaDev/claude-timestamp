@@ -468,6 +468,14 @@ bash "$CLAUDE_PLUGIN_ROOT/hooks/scripts/setup.sh" --stats --since=7d
 bash "$CLAUDE_PLUGIN_ROOT/hooks/scripts/setup.sh" --stats --project=claude-timestamp
 ```
 
+`--stats` only sees sessions that have already ended. For the one still
+running, `--session` reports how long this session has run, from inside
+Claude Code:
+
+```bash
+bash "$CLAUDE_PLUGIN_ROOT/hooks/scripts/setup.sh" --session
+```
+
 ## When something is wrong
 
 Ask Claude why you're not seeing timestamps and it reads the facts file and

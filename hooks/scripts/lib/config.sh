@@ -1035,6 +1035,35 @@ ct_project_name() {
   esac
 }
 
+# The worst tools in a tool log, summed per tool, as one line:
+#   Bash 41.2s (18 calls), WebFetch 8.1s (1 call)
+# Shared by the end-of-session summary and setup.sh --session, so the two can
+# never describe the same log differently.
+#
+# `|| true`: on a log with many distinct tools, `head` can close the pipe
+# before `sort` is done writing, which sends `sort` SIGPIPE even though every
+# line `head` needed was already delivered. Under a caller's errexit/pipefail
+# that nonzero exit would abort it, for the same reason ct_tool_digest needs
+# the same guard.
+ct_slowest_tools() {
+  local log="${1:-}" n="${2:-3}"
+  [ -s "$log" ] || return 0
+  case "$n" in ''|*[!0-9]*) n=3 ;; esac
+  # Byte-identical to the filter ct_tool_digest applies, so a blank line or a
+  # line torn off mid-write cannot become a tool on screen that the history
+  # then does not carry: the two aggregations read the same log and must
+  # agree on what counts as a usable line.
+  awk '
+    $1 == "" || $2 !~ /^[0-9]+(\.[0-9]+)?$/ { next }
+    { sum[$1] += $2; n[$1]++ }
+    END { for (t in sum) printf "%.3f\t%s\t%d\n", sum[t], t, n[t] }' "$log" \
+    | sort -rn | head -n "$n" \
+    | awk -F'\t' '{
+        calls = ($3 == 1) ? "1 call" : $3 " calls"
+        printf "%s%s %.1fs (%s)", (NR > 1 ? ", " : ""), $2, $1, calls
+      }' || true
+}
+
 # One session's tool log reduced to the history row's tool column:
 # Name:seconds:calls, comma separated, worst first.
 #

@@ -54,6 +54,8 @@ claude-timestamp setup
                               Only sessions on or after that date.
   setup.sh --stats --project=NAME
                               Only sessions recorded against that project.
+  setup.sh --session          How long this session has run, from inside
+                              Claude Code.
 
 Flags
   --tz=ZONE                   IANA timezone (Europe/Amsterdam), or "local".
@@ -696,6 +698,48 @@ $rows
 ROWS
   fi
 
+  return 0
+}
+
+# The live figures for the session this is run from. Claude Code puts the
+# session id in the environment of every command its Bash tool runs, which is
+# how the time-awareness skill answers "how long have we been at this" from
+# measurement instead of from an impression of the conversation.
+session_report() {
+  local sid="${CLAUDE_CODE_SESSION_ID:-}" base now turn_start tools
+  ct_load_config
+  if [ -z "$sid" ] || ! base="$(ct_state_file "$sid")"; then
+    echo "No current session id. Run this from inside Claude Code, which sets CLAUDE_CODE_SESSION_ID." >&2
+    return 2
+  fi
+  if [ ! -r "$base" ]; then
+    echo "claude-timestamp has no record of this session yet. It starts counting at the first prompt, and records nothing while ENABLED=off."
+    return 0
+  fi
+
+  ct_session_totals "$sid"
+  now="$(date +%s)"
+  echo "claude-timestamp session"
+  echo
+  if [ "$_CT_START" -gt 0 ]; then
+    echo "  started         $(ct_format_epoch "$_CT_START" "$CT_CONTEXT_FORMAT") $(ct_zone)"
+    echo "  elapsed         $(ct_format_duration $(( now - _CT_START )))"
+  fi
+  echo "  turns           $_CT_TURNS"
+  echo "  waiting         $(ct_format_duration "$_CT_WAIT")"
+  echo "  away            $(ct_format_duration "$_CT_IDLE")"
+  if [ -e "${base}.closed" ]; then
+    echo "  current turn    none open"
+  else
+    turn_start="$(ct_read_counter "$base")"
+    echo "  current turn    running $(ct_format_duration $(( now - turn_start ))), since $(ct_format_epoch "$turn_start" "$CT_CONTEXT_FORMAT")"
+  fi
+  if [ "$CT_TOOL_TIMING" = "on" ]; then
+    tools="$(ct_slowest_tools "${base}.tools" 5)"
+    echo "  slowest tools   ${tools:-none timed yet}"
+  else
+    echo "  tool timing     off; turn it on with /timestamps to see which tools took longest"
+  fi
   return 0
 }
 
@@ -1559,6 +1603,7 @@ main() {
       --show)      action="show";   interactive=0 ;;
       --doctor)    action="doctor"; interactive=0 ;;
       --stats)     action="stats";  interactive=0; saw_stats_bare=1 ;;
+      --session)   action="session"; interactive=0 ;;
       --since=*)
         action="stats"; interactive=0
         value="${arg#*=}"
@@ -1702,6 +1747,7 @@ main() {
   if [ "$action" = "show" ]; then show_config; exit 0; fi
   if [ "$action" = "doctor" ]; then doctor; exit $?; fi
   if [ "$action" = "stats" ]; then stats; exit $?; fi
+  if [ "$action" = "session" ]; then session_report; exit $?; fi
   if [ "$interactive" = "1" ]; then wizard; exit 0; fi
 
   # Non-interactive: start from what is already configured so each flag is a
