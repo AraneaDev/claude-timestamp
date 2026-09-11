@@ -6390,6 +6390,36 @@ ct_turn_open stage-e 2000
 refutes "stage: a new turn forgets the last heartbeat" test -e "$(ct_state_file stage-e).hb"
 
 echo
+echo "agent notes: note builders"
+
+fresh
+is "slow note: 1 ms under the threshold says nothing" "" "$(ct_slow_tool_note Bash 59999 ok 60)"
+is "slow note: at the threshold" "That Bash call took 1m00s." "$(ct_slow_tool_note Bash 60000 ok 60)"
+is "slow note: a failed call says so" "That Bash call failed after 2m14s." "$(ct_slow_tool_note Bash 134000 fail 60)"
+is "slow note: leading zeros are decimal" "That Bash call took 1m20s." "$(ct_slow_tool_note Bash 080000 ok 60)"
+is "slow note: 0 disables it" "" "$(ct_slow_tool_note Bash 999999 ok 0)"
+is "slow note: no duration says nothing" "" "$(ct_slow_tool_note Bash '' ok 60)"
+is "slow note: an unstaged threshold says nothing" "" "$(ct_slow_tool_note Bash 999999 ok '')"
+
+ct_turn_open hb 1000
+ct_stage_flag hb tz UTC
+ct_stage_flag hb ctxfmt short
+is "heartbeat: silent before the first interval" "" "$(ct_heartbeat_note hb 1899 900)"
+is "heartbeat: fires at the first interval" \
+  "Turn running 15m00s (prompt sent 00:16); now 00:31 UTC." "$(ct_heartbeat_note hb 1900 900)"
+is "heartbeat: silent again within that interval" "" "$(ct_heartbeat_note hb 2500 900)"
+contains "heartbeat: fires at the second interval" "Turn running 30m00s" "$(ct_heartbeat_note hb 2800 900)"
+is "heartbeat: an interval is told once" "" "$(ct_heartbeat_note hb 2801 900)"
+ct_turn_open hb 5000
+contains "heartbeat: a new turn counts from its own start" "Turn running 15m00s" "$(ct_heartbeat_note hb 5900 900)"
+ct_close_turn "$(ct_state_file hb)" 6000
+is "heartbeat: a closed turn says nothing" "" "$(ct_heartbeat_note hb 9000 900)"
+ct_turn_open hb 10000
+is "heartbeat: 0 disables it" "" "$(ct_heartbeat_note hb 99999 0)"
+is "heartbeat: an unstaged interval says nothing" "" "$(ct_heartbeat_note hb 99999 '')"
+is "heartbeat: no state says nothing" "" "$(ct_heartbeat_note nobody 99999 900)"
+
+echo
 echo "----"
 printf '%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

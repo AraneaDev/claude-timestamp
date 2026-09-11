@@ -449,6 +449,71 @@ ct_turn_close() {
   return 0
 }
 
+# The sentence the tool hook adds when one call was slow, or nothing.
+#   $1 tool name   $2 duration in ms   $3 ok|fail   $4 threshold in seconds
+# A fact and nothing else: what to do about a slow call is the skill's
+# business, not this string's.
+ct_slow_tool_note() {
+  local tool="${1:-}" ms="${2:-}" outcome="${3:-ok}" after="${4:-}" took
+  case "$ms"    in ''|*[!0-9]*) return 0 ;; esac
+  case "$after" in ''|*[!0-9]*) return 0 ;; esac
+  # "10#": a leading zero would otherwise read as octal. See post-tool-use.sh.
+  ms=$((10#$ms))
+  after=$((10#$after))
+  [ "$after" -gt 0 ] || return 0
+  [ "$ms" -ge $((after * 1000)) ] || return 0
+  took="$(ct_format_duration $((ms / 1000)))"
+  [ -n "$tool" ] || tool="tool"
+  if [ "$outcome" = "fail" ]; then
+    printf 'That %s call failed after %s.' "$tool" "$took"
+  else
+    printf 'That %s call took %s.' "$tool" "$took"
+  fi
+}
+
+# The sentence telling the model how long the open turn has run, when a new
+# interval has been crossed since the last one it was told about, or nothing.
+#   $1 session id   $2 now (epoch)   $3 interval in seconds
+#
+# The interval told is recorded in <state>.hb, which ct_turn_open clears, so
+# each turn starts from none told. Two tool calls finishing together can both
+# see the old value and both report it: a duplicate sentence, never a missing
+# one, and cheaper than a lock on a path this hot.
+#
+# Clock times are rendered with the zone and format the prompt hook staged, so
+# this never loads configuration. CT_TZ is declared local so that staging it
+# here cannot leak into the caller.
+ct_heartbeat_note() {
+  local sid="${1:-}" now="${2:-}" every="${3:-}" base start elapsed n last fmt CT_TZ
+  case "$now"   in ''|*[!0-9]*) return 0 ;; esac
+  case "$every" in ''|*[!0-9]*) return 0 ;; esac
+  every=$((10#$every))
+  [ "$every" -gt 0 ] || return 0
+  ct_state_file_var "$sid" || return 0
+  base="$_CT_STATE_FILE"
+  [ -r "$base" ] || return 0
+  [ -e "${base}.closed" ] && return 0
+  start="$(ct_read_counter "$base")"
+  [ "$start" -gt 0 ] || return 0
+  elapsed=$((now - start))
+  n=$((elapsed / every))
+  [ "$n" -ge 1 ] || return 0
+  last="$(ct_read_counter "${base}.hb")"
+  [ "$n" -gt "$last" ] || return 0
+  ct_state_ready || return 0
+  printf '%s' "$n" > "${base}.hb"
+
+  # shellcheck disable=SC2034  # read by ct_format_epoch/ct_zone below, not here
+  CT_TZ="$(ct_read_flag "$sid" tz)"
+  fmt="$(ct_read_flag "$sid" ctxfmt)"
+  [ -n "$fmt" ] || fmt="24h"
+  printf 'Turn running %s (prompt sent %s); now %s %s.' \
+    "$(ct_format_duration "$elapsed")" \
+    "$(ct_format_epoch "$start" "$fmt")" \
+    "$(ct_format_epoch "$now" "$fmt")" \
+    "$(ct_zone)"
+}
+
 # Record how long the user was away, and stage it for the divider.
 #
 # The gap runs from the previous turn's close to this prompt. Measuring from
