@@ -55,6 +55,11 @@ This session so far:
 bash "${CLAUDE_SKILL_DIR}/../../hooks/scripts/setup.sh" --session
 ```
 
+In both reports, **waiting** is the time the user spent waiting for your
+replies, from each prompt to its answer. **Away** is the breaks between one
+of your replies and the user's next prompt. Neither is time you spent
+waiting for the user.
+
 Recorded sessions, all of them, the last week, or one project:
 
 ```bash
