@@ -1522,7 +1522,7 @@ if command -v jq >/dev/null 2>&1; then
   fi
 
   out="$(printf '{"session_id":"s"}' | bash "$SCRIPTS/session-start.sh")"
-  is "session-start is quiet once configured" "" "$out"
+  is "session-start shows the user nothing once configured" "" "$(printf '%s' "$out" | jq -r '.systemMessage // ""')"
 
   CLAUDE_TIMESTAMP_CONFIG="$WORK/does-not-exist.conf" out="$(printf '{"session_id":"s"}' | bash "$SCRIPTS/session-start.sh")"
   contains "session-start points a new user at /timestamps" "/timestamps" "$out"
@@ -6692,6 +6692,22 @@ for ta_quote in "Turn running" "That Bash call took" "Previous session in this p
   contains "skill: explains '$ta_quote'" "$ta_quote" "$(cat "$ta_skill" 2>/dev/null)"
 done
 lacks "skill: no em dashes" "—" "$(cat "$ta_skill" 2>/dev/null)"
+
+if command -v jq >/dev/null 2>&1; then
+  fresh
+  ptr_ctx="$(printf '{"session_id":"ptr"}' | bash "$SCRIPTS/session-start.sh" | jq -r '.hookSpecificOutput.additionalContext // ""')"
+  contains "pointer: names the shipped skill" "claude-timestamp:$(sed -n 's/^name: //p' "$ta_skill")" "$ptr_ctx"
+  fresh 'INJECT_CONTEXT=false'
+  is "pointer: INJECT_CONTEXT=false leaves it out" "" \
+    "$(printf '{"session_id":"ptr"}' | bash "$SCRIPTS/session-start.sh" | jq -r '.hookSpecificOutput.additionalContext // ""')"
+  fresh
+  contains "pointer: follows the resumption note" "ago (" "$(ss_ctx "$(ss_run)")"
+  contains "pointer: in that order" ". claude-timestamp reports" "$(ss_ctx "$(ss_run)")"
+else
+  for ptr_label in "names skill" "inject off" "after resume" "order"; do
+    skip "pointer: $ptr_label" "jq is not installed"
+  done
+fi
 
 echo
 echo "----"

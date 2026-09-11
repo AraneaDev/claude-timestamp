@@ -8,7 +8,7 @@
 [![Release](https://img.shields.io/github/v/release/AraneaDev/claude-timestamp)](https://github.com/AraneaDev/claude-timestamp/releases)
 [![Tool page](https://img.shields.io/badge/tool%20page-aranea--development.nl-0b7285)](https://aranea-development.nl/en/tools/claude-timestamp)
 [![CI](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml/badge.svg)](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-1259%20passing-2b8a3e)](tests/run.sh)
+[![Tests](https://img.shields.io/badge/tests-1276%20passing-2b8a3e)](tests/run.sh)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-364fc7)](#platform-notes)
 [![Conventional Commits](https://img.shields.io/badge/commits-conventional-fe5196?logo=conventionalcommits&logoColor=white)](https://www.conventionalcommits.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
@@ -76,15 +76,20 @@ has a setting of its own.
 
 | When | What Claude reads | Setting |
 | --- | --- | --- |
+| A session starts | `claude-timestamp reports turn length, slow tool calls and resumed sessions in system reminders; the claude-timestamp:time-awareness skill explains them and can query session history.` | `INJECT_CONTEXT` |
 | Every prompt | `Message sent at local time 10:37:21 CEST, after a 3h break` | `INJECT_CONTEXT`, `CONTEXT_FORMAT` |
 | The first tool result after a turn passes 15 minutes, and every 15 after | `Turn running 15m02s (prompt sent 10:37:21); now 10:52:23 CEST.` | `HEARTBEAT_AFTER` |
 | One tool call takes a minute or more | `That Bash call took 2m14s.` | `SLOW_TOOL_AFTER` |
 | A session starts an hour or more after the last one in this project, or a conversation is resumed an hour or more after its last activity | `Previous session in this project ended 14h ago (Thu 20:12:05).` | `RESUME_NOTE` |
 
-The notes state facts and give no instructions. A turn that has run for half
-an hour is a reason to check the work still matches the request, and a
-four-minute test run is a reason to run it in the background next time, but
-that is Claude's call to make.
+The notes state facts and give no instructions. The advice lives in one place,
+a skill the plugin ships, `time-awareness`, which Claude loads when a note
+arrives or when you ask something like "how long has this session been running?". It
+says what each note is a reason to do: check the work against the request
+after a long stretch, run a slow command in the background next time, re-check
+the branch and CI after a gap. It can also run `setup.sh --session` and
+`--stats` to answer from measurement. It does not appear in your `/` menu;
+`/timestamps` is still where you change settings.
 
 A note can only reach Claude when a hook runs, so the turn-length note waits
 for the next tool result. A single 31-minute command produces one note when
@@ -550,7 +555,7 @@ no database.
 ## Development
 
 ```bash
-bash tests/run.sh                                    # 1259 assertions, no framework
+bash tests/run.sh                                    # 1276 assertions, no framework
 shellcheck -S style -e SC1091 hooks/scripts/**/*.sh  # clean
 bash tools/check-docs.sh                             # README against the code
 ```
