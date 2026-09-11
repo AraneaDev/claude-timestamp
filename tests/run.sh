@@ -6358,6 +6358,38 @@ refutes "format_epoch: refuses a word" ct_format_epoch soon 24h
 refutes "format_epoch: refuses empty" ct_format_epoch "" 24h
 
 echo
+echo "agent notes: staging"
+
+fresh
+printf '{"session_id":"stage-a"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+is "stage: heartbeat default is staged" "900" "$(ct_read_flag stage-a heartbeat)"
+is "stage: slow tool default is staged" "60" "$(ct_read_flag stage-a slowtool)"
+is "stage: the context format is staged" "24h" "$(ct_read_flag stage-a ctxfmt)"
+is "stage: the subagents setting is staged" "on" "$(ct_read_flag stage-a subagents)"
+asserts "stage: notes alone open the tool gate" test -e "$(ct_state_file stage-a).timing-on"
+
+fresh 'INJECT_CONTEXT=false'
+printf '{"session_id":"stage-b"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+is "stage: INJECT_CONTEXT=false stages no heartbeat" "0" "$(ct_read_flag stage-b heartbeat)"
+is "stage: INJECT_CONTEXT=false stages no slow tool note" "0" "$(ct_read_flag stage-b slowtool)"
+refutes "stage: no timing and no notes keeps the gate shut" test -e "$(ct_state_file stage-b).timing-on"
+
+fresh 'HEARTBEAT_AFTER=0' 'SLOW_TOOL_AFTER=0'
+printf '{"session_id":"stage-c"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+refutes "stage: both notes at 0 keep the gate shut" test -e "$(ct_state_file stage-c).timing-on"
+
+fresh 'ENABLED=off'
+printf '{"session_id":"stage-d"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+is "stage: ENABLED=off stages no heartbeat" "0" "$(ct_read_flag stage-d heartbeat)"
+refutes "stage: ENABLED=off keeps the gate shut" test -e "$(ct_state_file stage-d).timing-on"
+
+fresh
+ct_turn_open stage-e 1000
+printf '3' > "$(ct_state_file stage-e).hb"
+ct_turn_open stage-e 2000
+refutes "stage: a new turn forgets the last heartbeat" test -e "$(ct_state_file stage-e).hb"
+
+echo
 echo "----"
 printf '%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

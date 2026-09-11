@@ -55,12 +55,32 @@ if state_file="$(ct_state_file "$session_id")"; then
   ct_stage_flag "$session_id" "enabled"    "$CT_ENABLED"
   ct_stage_flag "$session_id" "tooltiming" "$CT_TOOL_TIMING"
 
+  # The notes the tool hook may send the model, resolved here against every
+  # switch that can silence them, so that hook reads one number per note and
+  # never loads configuration. 0 means "never", whatever the reason.
+  notes_hb=0
+  notes_st=0
+  if [ "$CT_ENABLED" = "on" ] && [ "$CT_INJECT_CONTEXT" != "false" ]; then
+    notes_hb="$CT_HEARTBEAT_AFTER"
+    notes_st="$CT_SLOW_TOOL_AFTER"
+  fi
+  ct_stage_flag "$session_id" "heartbeat" "$notes_hb"
+  ct_stage_flag "$session_id" "slowtool"  "$notes_st"
+  # What the heartbeat renders its clock times with, and whether a subagent's
+  # tool calls may carry a note.
+  ct_stage_flag "$session_id" "ctxfmt"    "$CT_CONTEXT_FORMAT"
+  ct_stage_flag "$session_id" "tz"        "$CT_TZ"
+  ct_stage_flag "$session_id" "subagents" "$CT_SUBAGENTS"
+
   # A sentinel whose mere existence answers "does any session on this machine
-  # want tool timing", so the tool hook can decide it has nothing to do with a
-  # glob rather than a jq fork. Cleared when the answer is no -- a project that
-  # once pinned it on would otherwise keep every later session paying for it,
-  # and so would a session that has since been switched off.
-  if [ "$CT_TOOL_TIMING" = "on" ] && [ "$CT_ENABLED" = "on" ]; then
+  # need the tool hook", so that hook can decide it has nothing to do with a
+  # glob rather than a jq fork. It is named for what it first meant, tool
+  # timing; it now also stands for either note. Cleared when the answer is no
+  # -- a project that once pinned it on would otherwise keep every later
+  # session paying for it, and so would a session that has since been
+  # switched off.
+  if [ "$CT_ENABLED" = "on" ] \
+     && { [ "$CT_TOOL_TIMING" = "on" ] || [ "$notes_hb" -gt 0 ] || [ "$notes_st" -gt 0 ]; }; then
     ct_stage_flag "$session_id" "timing-on" "1"
   else
     ct_clear_flag "$session_id" "timing-on"

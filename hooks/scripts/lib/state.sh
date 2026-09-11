@@ -215,7 +215,9 @@ ct_dominant_tool() {
 # they have switched off. A sentinel is staged per session while tool timing is
 # on, so no match here means no session wants timing and the hook is finished.
 # A match means SOME session does; which one still needs the payload, and that
-# is where the fork earns its place.
+# is where the fork earns its place. The sentinel also stands for the
+# model-facing tool notes (see user-prompt-submit.sh), so "timing" here means
+# "the tool hook has work".
 #
 # Conservative on purpose: one session with timing on makes every concurrent
 # session pay the parse. Over-recording is recoverable, a missed measurement is
@@ -410,6 +412,10 @@ ct_turn_open() {
 
   printf '%s' "$now" > "$base"
   rm -f "${base}.closed" 2>/dev/null || true
+
+  # The heartbeat counts intervals within one turn, so a new turn starts from
+  # none told.
+  rm -f "${base}.hb" 2>/dev/null || true
 
   # Rewritten on every prompt rather than only when absent, so its modification
   # time tracks the session. ct_prune_state deletes by mtime, and this was the
