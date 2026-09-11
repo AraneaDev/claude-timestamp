@@ -232,7 +232,15 @@ if [ "$CT_INJECT_CONTEXT" != "false" ]; then
   if [ "$CT_RESUME_NOTE" = "on" ]; then
     context="$(ct_resume_note "$origin" "$transcript" "$(date +%s)")"
   fi
-  context="${context:+$context }claude-timestamp reports turn length, slow tool calls and resumed sessions in system reminders; the claude-timestamp:time-awareness skill explains them and can query session history."
+  # With every note switched off there is nothing for the skill to explain,
+  # so the pointer says only what is still true. The values were validated as
+  # whole numbers on load, and `-eq` reads them as decimal, so "00" is 0 too.
+  if [ "$CT_HEARTBEAT_AFTER" -eq 0 ] && [ "$CT_SLOW_TOOL_AFTER" -eq 0 ] \
+     && [ "$CT_RESUME_NOTE" != "on" ]; then
+    context="The claude-timestamp:time-awareness skill can query session history."
+  else
+    context="${context:+$context }claude-timestamp reports turn length, slow tool calls and resumed sessions in system reminders; the claude-timestamp:time-awareness skill explains them and can query session history."
+  fi
 fi
 
 # An `if` rather than `[ ... ] && jq ...`: under set -e an AND-list whose test

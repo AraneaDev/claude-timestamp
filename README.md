@@ -8,7 +8,7 @@
 [![Release](https://img.shields.io/github/v/release/AraneaDev/claude-timestamp)](https://github.com/AraneaDev/claude-timestamp/releases)
 [![Tool page](https://img.shields.io/badge/tool%20page-aranea--development.nl-0b7285)](https://aranea-development.nl/en/tools/claude-timestamp)
 [![CI](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml/badge.svg)](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-1276%20passing-2b8a3e)](tests/run.sh)
+[![Tests](https://img.shields.io/badge/tests-1286%20passing-2b8a3e)](tests/run.sh)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-364fc7)](#platform-notes)
 [![Conventional Commits](https://img.shields.io/badge/commits-conventional-fe5196?logo=conventionalcommits&logoColor=white)](https://www.conventionalcommits.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
@@ -80,22 +80,24 @@ has a setting of its own.
 | Every prompt | `Message sent at local time 10:37:21 CEST, after a 3h break` | `INJECT_CONTEXT`, `CONTEXT_FORMAT` |
 | The first tool result after a turn passes 15 minutes, and every 15 after | `Turn running 15m02s (prompt sent 10:37:21); now 10:52:23 CEST.` | `HEARTBEAT_AFTER` |
 | One tool call takes a minute or more | `That Bash call took 2m14s.` | `SLOW_TOOL_AFTER` |
-| A session starts an hour or more after the last one in this project, or a conversation is resumed an hour or more after its last activity | `Previous session in this project ended 14h ago (Thu 20:12:05).` | `RESUME_NOTE` |
+| A session starts an hour or more after the last one in this project, or a conversation is resumed an hour or more after its last activity | `Previous session in this project ended 14h ago (Thu 20:12:05).` or `Resuming this conversation; last activity 14h ago (Thu 20:12:05).` | `RESUME_NOTE` |
 
 The notes state facts and give no instructions. The advice lives in one place,
 a skill the plugin ships, `time-awareness`, which Claude loads when a note
-arrives or when you ask something like "how long has this session been running?". It
-says what each note is a reason to do: check the work against the request
-after a long stretch, run a slow command in the background next time, re-check
-the branch and CI after a gap. It can also run `setup.sh --session` and
-`--stats` to answer from measurement. It does not appear in your `/` menu;
-`/timestamps` is still where you change settings.
+arrives or when you ask something like "how long has this session been
+running?". It says what each note is a reason to do: check the work against
+the request after a long stretch, run a slow command in the background next
+time, re-check the branch and CI after a gap. It can also run
+`setup.sh --session` and `--stats` to answer from measurement. It does not
+appear in your `/` menu; `/timestamps` is still where you change settings.
 
 A note can only reach Claude when a hook runs, so the turn-length note waits
 for the next tool result. A single 31-minute command produces one note when
 it finishes, not one at 15 minutes and another at 30.
 
-Subagents hear about their own slow calls unless `SUBAGENTS` is `off`. The turn-length note goes to the main conversation only, since the turn is yours and theirs is a part of it.
+Subagents hear about their own slow calls unless `SUBAGENTS` is `off`. The
+turn-length note goes to the main conversation only, since the turn is yours
+and theirs is a part of it.
 
 The resumption note records nothing of its own. Claude Code already keeps a
 transcript per session in a folder per project, and the note reads the time
@@ -390,7 +392,7 @@ cannot run anything.
 | `ELAPSED_COLOR` | inherit | Colour of `%elapsed`; `SLOW_COLOR` still wins on a slow turn |
 | `TOOL_COLOR` | inherit | Colour of `%tool`; empty follows `COLOR` |
 | `ELAPSED` | `on` | Show how long the turn took |
-| `INJECT_CONTEXT` | `true` | Tell Claude the local time each prompt was sent |
+| `INJECT_CONTEXT` | `true` | Tell Claude the local time each prompt was sent. `false` also silences the heartbeat, slow tool, resumption and time-awareness pointer notes |
 | `HEARTBEAT_AFTER` | `900` | Tell Claude how long the open turn has run, every this many seconds. `0` disables, and `INJECT_CONTEXT=false` silences it too |
 | `SLOW_TOOL_AFTER` | `60` | Tell Claude when one tool call took at least this many seconds. `0` disables, and `INJECT_CONTEXT=false` silences it too |
 | `RESUME_NOTE` | `on` | Tell Claude, when a session starts, how long ago this conversation or project was last active. `INJECT_CONTEXT=false` silences it too |
@@ -399,7 +401,7 @@ cannot run anything.
 | `IDLE_AFTER` | `3600` | Mark a gap this long between messages, `0` disables |
 | `DATE_ROLLOVER` | `on` | Show the date on the first message after midnight |
 | `SUMMARY` | `on` | Report session totals on exit. Independent of `HISTORY`: both read the same counters, which are kept either way |
-| `SUBAGENTS` | `on` | Stamp subagent messages as well |
+| `SUBAGENTS` | `on` | Stamp subagent messages as well. Also decides whether a subagent is told about its own slow tool calls |
 | `TOOL_TIMING` | `off` | Record what each tool call cost and name the slowest |
 | `HISTORY` | `on` | Record each finished session, for `/timestamps` and `--stats`. Independent of `SUMMARY` |
 | `HISTORY_LIMIT` | `200` | How many recorded sessions to keep, 1 or more; `HISTORY=off` keeps none |
@@ -424,10 +426,16 @@ Clock formats render as `14:03:22` for `24h`, `14:03` for `short`, `2:03 PM`
 for `12h`, and `2026-08-19T14:03:22` for `iso`. Any value containing a `%` is
 treated as a strftime string, so the escape hatch needs no separate setting.
 
-`TOOL_TIMING` is off by default because it is the only setting that costs
-anything per tool call. Everything else costs once per message. Claude Code
-reports how long each call took, so the plugin no longer times them itself,
-but the hook that records the number still runs on every call.
+Three settings cost something per tool call rather than once per message:
+`TOOL_TIMING`, `HEARTBEAT_AFTER` and `SLOW_TOOL_AFTER`. While any of them is
+on, a hook reads every tool call's payload to decide whether to record it or
+tell Claude something. On the machine this was measured on, that came to a few
+milliseconds per tool call (roughly 3 to 5 ms above the idle path). The two
+notes are on by default and `TOOL_TIMING` is off. Setting `HEARTBEAT_AFTER=0`,
+`SLOW_TOOL_AFTER=0` and `TOOL_TIMING=off` together brings back the free path,
+where the hook exits before it reads the payload. Claude Code reports how long
+each call took, so the plugin no longer times them itself, but the hook that
+records the number still runs on every call.
 
 Those timings cover the call alone. Time a permission prompt spent waiting for
 you is not counted against the tool, so a slow turn you spent deciding through
@@ -555,7 +563,7 @@ no database.
 ## Development
 
 ```bash
-bash tests/run.sh                                    # 1276 assertions, no framework
+bash tests/run.sh                                    # 1286 assertions, no framework
 shellcheck -S style -e SC1091 hooks/scripts/**/*.sh  # clean
 bash tools/check-docs.sh                             # README against the code
 ```

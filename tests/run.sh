@@ -2639,8 +2639,8 @@ is "validate: a bad IDLE_AFTER falls back"     "3600"   "$CT_IDLE_AFTER"
 is "validate: a bad DATE_ROLLOVER falls back"  "on"     "$CT_DATE_ROLLOVER"
 is "validate: a bad SUMMARY falls back"        "on"     "$CT_SUMMARY"
 is "validate: a bad SUBAGENTS falls back"      "on"     "$CT_SUBAGENTS"
-# The one toggle whose default is off, because it costs two forks per tool
-# call. An arm that copied a neighbour's default would switch it on for
+# The one toggle whose default is off, because it costs a few milliseconds per
+# tool call. An arm that copied a neighbour's default would switch it on for
 # everyone who typoed the value.
 is "validate: a bad TOOL_TIMING falls back to off, not on" "off" "$CT_TOOL_TIMING"
 is "validate: a bad HISTORY falls back"        "on"     "$CT_HISTORY"
@@ -6450,6 +6450,8 @@ if command -v jq >/dev/null 2>&1; then
   out="$(tn_call 134000)"
   is "tool hook: a slow call is told to the model" "That Bash call took 2m14s." "$(tn_ctx "$out")"
   is "tool hook: under the event that fired" "PostToolUse" "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.hookEventName')"
+  tn_call 134000 >/dev/null; tn_rc=$?
+  is "tool hook: exits 0 when it sends a note" "0" "$tn_rc"
   out="$(tn_call 70000 PostToolUseFailure)"
   is "tool hook: a slow failure says so" "That Bash call failed after 1m10s." "$(tn_ctx "$out")"
   is "tool hook: a failure answers as PostToolUseFailure" "PostToolUseFailure" "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.hookEventName')"
@@ -6518,7 +6520,7 @@ if command -v jq >/dev/null 2>&1; then
   is "tool hook: an oversized duration_ms tells the model nothing" "" "$(tn_call 99999999999999999999)"
   refutes "tool hook: and records nothing" test -s "$(ct_tool_log tn)"
 else
-  for tn_label in "fast call silent" "slow call told" "event name" "slow failure" "failure event" \
+  for tn_label in "fast call silent" "slow call told" "event name" "note exit status" "slow failure" "failure event" \
                   "no timings" "heartbeat" "not twice" "merged" "inject off" "timing records" \
                   "note still sent" "subagents off" "main still told" "subagent branch" \
                   "subagent no heartbeat" "main heartbeat after subagent" "no duration heartbeat" \
@@ -6572,6 +6574,21 @@ is "resume: startup under an hour says nothing" "" "$(ct_resume_note startup "$r
 rm -f "$rs_dir/newer.jsonl" "$rs_dir/older.jsonl"
 is "resume: no other session says nothing" "" "$(ct_resume_note startup "$rs_dir/self.jsonl" "$rs_now")"
 is "resume: a missing directory says nothing" "" "$(ct_resume_note startup "$WORK/nowhere/x.jsonl" "$rs_now")"
+
+# 12h renders the weekday and the clock separately, so the clock keeps the
+# preset's trimmed hour: "Fri 1:33 PM", never "Fri 01:33 PM". 13:33 UTC a week
+# ago, on the same weekday as today, so the hour is one digit in 12h and the
+# gap is well past the threshold. LC_ALL=C pins the weekday and AM/PM names.
+fresh 'TZ=UTC' 'CONTEXT_FORMAT=12h'
+rs_12h=$(( rs_now - rs_now % 86400 - 7 * 86400 + 13 * 3600 + 33 * 60 ))
+printf '{}\n' > "$rs_dir/twelve.jsonl"
+TZ=UTC touch -t "$(TZ=UTC date -d "@$rs_12h" +%Y%m%d%H%M.%S 2>/dev/null || TZ=UTC date -r "$rs_12h" +%Y%m%d%H%M.%S)" \
+  "$rs_dir/twelve.jsonl"
+contains "resume: 12h gives the weekday and an unpadded hour" \
+  "($(LC_ALL=C TZ=UTC date -d "@$rs_12h" +%a 2>/dev/null || LC_ALL=C TZ=UTC date -r "$rs_12h" +%a) 1:33 PM)." \
+  "$(export LC_ALL=C; ct_resume_note startup "$rs_dir/self.jsonl" "$rs_now")"
+rm -f "$rs_dir/twelve.jsonl"
+fresh 'TZ=UTC'
 
 if command -v jq >/dev/null 2>&1; then
   {
@@ -6673,9 +6690,17 @@ if command -v jq >/dev/null 2>&1; then
     | bash "$SCRIPTS/post-tool-use.sh" >/dev/null
   contains "session: lists the slowest tools when timing is on" "slowest tools   Bash 2.0s (1 call)" \
     "$(CLAUDE_CODE_SESSION_ID=live bash "$SCRIPTS/setup.sh" --session 2>&1)"
+
+  # The report runs from wherever Claude's Bash tool happens to be, so what the
+  # session staged at its last prompt wins over the config found from here.
+  fresh 'TZ=UTC'
+  printf '{"session_id":"live"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  printf 'TOOL_TIMING=on\n' > "$CLAUDE_TIMESTAMP_CONFIG"
+  contains "session: the session's staged settings win over the config" "tool timing     off" \
+    "$(CLAUDE_CODE_SESSION_ID=live bash "$SCRIPTS/setup.sh" --session 2>&1)"
 else
   for sr_label in "slowest summed" "slowest empty" "no id exit" "no id why" "unknown" \
-                  "turns" "open turn" "timing off" "closed turn" "slowest listed"; do
+                  "turns" "open turn" "timing off" "closed turn" "slowest listed" "staged wins"; do
     skip "session report: $sr_label" "jq is not installed"
   done
 fi
@@ -6703,8 +6728,13 @@ if command -v jq >/dev/null 2>&1; then
   fresh
   contains "pointer: follows the resumption note" "ago (" "$(ss_ctx "$(ss_run)")"
   contains "pointer: in that order" ". claude-timestamp reports" "$(ss_ctx "$(ss_run)")"
+  # With every note off there is nothing to report, so the pointer keeps only
+  # the part that is still true.
+  fresh 'HEARTBEAT_AFTER=0' 'SLOW_TOOL_AFTER=0' 'RESUME_NOTE=off'
+  is "pointer: with every note off it only offers session history" \
+    "The claude-timestamp:time-awareness skill can query session history." "$(ss_ctx "$(ss_run)")"
 else
-  for ptr_label in "names skill" "inject off" "after resume" "order"; do
+  for ptr_label in "names skill" "inject off" "after resume" "order" "all notes off"; do
     skip "pointer: $ptr_label" "jq is not installed"
   done
 fi

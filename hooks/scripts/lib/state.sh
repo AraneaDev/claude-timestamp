@@ -140,11 +140,11 @@ ct_state_ready() {
 # directory itself or its parent.
 #
 # The reduction is a bash pattern substitution rather than `printf | tr`, which
-# cost a subshell and an external binary at every call. Six functions in this
-# file resolve a path this way, and post-tool-use.sh reaches them four times
-# per timed tool call -- through ct_read_flag twice, ct_tool_log and
-# ct_turn_tool_log -- on the one hook the README singles out as the only
-# per-call cost. Same assign-don't-print shape as ct_state_dir_var and
+# cost a subshell and an external binary at every call. Most functions in this
+# file resolve a path this way, and post-tool-use.sh reaches it several times
+# per tool call -- once per staged flag it reads, and again for the logs -- on
+# the hook that runs at tool-call rate whenever TOOL_TIMING, HEARTBEAT_AFTER or
+# SLOW_TOOL_AFTER is on. Same assign-don't-print shape as ct_state_dir_var and
 # ct_color_seq, for the same reason.
 ct_state_file_var() {
   local sid="${1:-}"
@@ -209,15 +209,16 @@ ct_dominant_tool() {
 # whole point of the gate.
 #
 # Answered with a glob before anything forks. This runs on every tool call, and
-# the README promises TOOL_TIMING is the only setting that costs anything at
-# that rate. Learning the session id needs jq, and forking jq to discover there
-# was nothing to do would make every user running the default pay for a feature
-# they have switched off. A sentinel is staged per session while tool timing is
-# on, so no match here means no session wants timing and the hook is finished.
-# A match means SOME session does; which one still needs the payload, and that
-# is where the fork earns its place. The sentinel also stands for the
-# model-facing tool notes (see user-prompt-submit.sh), so "timing" here means
-# "the tool hook has work".
+# the README promises that with TOOL_TIMING=off, HEARTBEAT_AFTER=0 and
+# SLOW_TOOL_AFTER=0 nothing is paid at that rate. Learning the session id needs
+# jq, and forking jq to discover there was nothing to do would make a user who
+# switched all three off pay for features they do not use. A sentinel is
+# staged per session while tool timing or either model-facing tool note is on
+# (see user-prompt-submit.sh), so "timing" here means "the tool hook has work".
+# No match means no session has any and the hook is finished. A match means
+# SOME session does; which one still needs the payload, and that is where the
+# fork earns its place. With the notes on by default, a default install takes
+# that path on every call: a few milliseconds, which the README states.
 #
 # Conservative on purpose: one session with timing on makes every concurrent
 # session pay the parse. Over-recording is recoverable, a missed measurement is
@@ -296,18 +297,29 @@ ct_stage_flag() {
   return 0
 }
 
-ct_read_flag() {
-  local sid="${1:-}" name="${2:-}" base value=""
+# Assign a staged flag into _CT_FLAG, empty when it was never staged.
+#
+# The assign-don't-print form, for the same reason as ct_state_file_var:
+# post-tool-use.sh reads up to five flags on every tool call, and each one read
+# through a command substitution cost a subshell.
+ct_read_flag_var() {
+  local sid="${1:-}" name="${2:-}" base
+  _CT_FLAG=""
   [ -n "$name" ] || return 0
   ct_state_file_var "$sid" || return 0
   base="$_CT_STATE_FILE"
   [ -r "${base}.${name}" ] || return 0
-  # `read` rather than `cat`, for the reason ct_read_counter gives: post-tool-use
-  # calls this twice on every timed tool call, and a builtin costs no process.
-  # Flags are written with printf '%s' and carry no trailing newline, so the
-  # read reports failure having already assigned -- discarded, not acted on.
-  IFS= read -r value < "${base}.${name}" 2>/dev/null || :
-  printf '%s' "$value"
+  # `read` rather than `cat`, for the reason ct_read_counter gives: a builtin
+  # costs no process. Flags are written with printf '%s' and carry no trailing
+  # newline, so the read reports failure having already assigned -- discarded,
+  # not acted on.
+  IFS= read -r _CT_FLAG < "${base}.${name}" 2>/dev/null || :
+  return 0
+}
+
+ct_read_flag() {
+  ct_read_flag_var "${1:-}" "${2:-}"
+  printf '%s' "$_CT_FLAG"
   return 0
 }
 
@@ -453,8 +465,13 @@ ct_turn_close() {
 #   $1 tool name   $2 duration in ms   $3 ok|fail   $4 threshold in seconds
 # A fact and nothing else: what to do about a slow call is the skill's
 # business, not this string's.
-ct_slow_tool_note() {
+#
+# The _var form assigns the sentence to _CT_NOTE (empty for none) rather than
+# printing it, so post-tool-use.sh pays no subshell to learn that a fast call
+# has nothing to say. ct_slow_tool_note prints the same sentence.
+ct_slow_tool_note_var() {
   local tool="${1:-}" ms="${2:-}" outcome="${3:-ok}" after="${4:-}" took
+  _CT_NOTE=""
   case "$ms"    in ''|*[!0-9]*) return 0 ;; esac
   case "$after" in ''|*[!0-9]*) return 0 ;; esac
   # "10#": a leading zero would otherwise read as octal. See post-tool-use.sh.
@@ -465,13 +482,19 @@ ct_slow_tool_note() {
   # milliseconds: the same test for non-negative numbers, and one that cannot
   # overflow however large the threshold is.
   [ $((ms / 1000)) -ge "$after" ] || return 0
-  took="$(ct_format_duration $((ms / 1000)))"
+  took="$(ct_format_duration $((ms / 1000)))" || took=""
   [ -n "$tool" ] || tool="tool"
   if [ "$outcome" = "fail" ]; then
-    printf 'That %s call failed after %s.' "$tool" "$took"
+    printf -v _CT_NOTE 'That %s call failed after %s.' "$tool" "$took"
   else
-    printf 'That %s call took %s.' "$tool" "$took"
+    printf -v _CT_NOTE 'That %s call took %s.' "$tool" "$took"
   fi
+  return 0
+}
+
+ct_slow_tool_note() {
+  ct_slow_tool_note_var "$@"
+  printf '%s' "$_CT_NOTE"
 }
 
 # The sentence telling the model how long the open turn has run, when a new
@@ -486,8 +509,15 @@ ct_slow_tool_note() {
 # Clock times are rendered with the zone and format the prompt hook staged, so
 # this never loads configuration. CT_TZ is declared local so that staging it
 # here cannot leak into the caller.
-ct_heartbeat_note() {
-  local sid="${1:-}" now="${2:-}" every="${3:-}" base start elapsed n last fmt CT_TZ
+#
+# The _var form assigns the sentence to _CT_NOTE (empty for none), and reads
+# its two counters with the builtin rather than through ct_read_counter, so a
+# call with no interval to report forks nothing. ct_heartbeat_note prints the
+# same sentence. Both files hold what ct_read_counter would accept or nothing:
+# anything else reads as 0, as it did there.
+ct_heartbeat_note_var() {
+  local sid="${1:-}" now="${2:-}" every="${3:-}" base start="" elapsed n last="" fmt CT_TZ
+  _CT_NOTE=""
   case "$now"   in ''|*[!0-9]*) return 0 ;; esac
   case "$every" in ''|*[!0-9]*) return 0 ;; esac
   every=$((10#$every))
@@ -496,25 +526,37 @@ ct_heartbeat_note() {
   base="$_CT_STATE_FILE"
   [ -r "$base" ] || return 0
   [ -e "${base}.closed" ] && return 0
-  start="$(ct_read_counter "$base")"
+  IFS= read -r start < "$base" 2>/dev/null || :
+  case "$start" in ''|*[!0-9]*) start=0 ;; esac
   [ "$start" -gt 0 ] || return 0
   elapsed=$((now - start))
   n=$((elapsed / every))
   [ "$n" -ge 1 ] || return 0
-  last="$(ct_read_counter "${base}.hb")"
+  if [ -r "${base}.hb" ]; then
+    IFS= read -r last < "${base}.hb" 2>/dev/null || :
+  fi
+  case "$last" in ''|*[!0-9]*) last=0 ;; esac
   [ "$n" -gt "$last" ] || return 0
   ct_state_ready || return 0
   printf '%s' "$n" > "${base}.hb"
 
+  ct_read_flag_var "$sid" tz
   # shellcheck disable=SC2034  # read by ct_format_epoch/ct_zone below, not here
-  CT_TZ="$(ct_read_flag "$sid" tz)"
-  fmt="$(ct_read_flag "$sid" ctxfmt)"
+  CT_TZ="$_CT_FLAG"
+  ct_read_flag_var "$sid" ctxfmt
+  fmt="$_CT_FLAG"
   [ -n "$fmt" ] || fmt="24h"
-  printf 'Turn running %s (prompt sent %s); now %s %s.' \
+  printf -v _CT_NOTE 'Turn running %s (prompt sent %s); now %s %s.' \
     "$(ct_format_duration "$elapsed")" \
     "$(ct_format_epoch "$start" "$fmt")" \
     "$(ct_format_epoch "$now" "$fmt")" \
     "$(ct_zone)"
+  return 0
+}
+
+ct_heartbeat_note() {
+  ct_heartbeat_note_var "$@"
+  printf '%s' "$_CT_NOTE"
 }
 
 # Record how long the user was away, and stage it for the divider.

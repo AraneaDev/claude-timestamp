@@ -86,10 +86,14 @@ Flags
   --projects=on|off           Record the project's directory name in each
                               history row. Off by default. Never a path.
   --tool-timing=on|off        Record what each tool call cost and report the
-                              slowest in the session summary. Off by default:
-                              it is the only setting that costs anything per
-                              tool call rather than per message.
-  --inject-context=true|false Tell Claude the time each prompt was sent.
+                              slowest in the session summary. Off by default.
+                              It, --heartbeat-after and --slow-tool-after cost
+                              a few milliseconds per tool call rather than per
+                              message; 0, 0 and off together bring back the
+                              free path.
+  --inject-context=true|false Tell Claude the time each prompt was sent. false
+                              also silences the heartbeat, slow tool,
+                              resumption and time-awareness pointer notes.
   --heartbeat-after=SECONDS   Tell Claude how long a turn has run, every this
                               many seconds (0 disables).
   --slow-tool-after=SECONDS   Tell Claude when one tool call took this long
@@ -717,12 +721,28 @@ session_report() {
     return 0
   fi
 
+  # The config loaded above is resolved from wherever this command runs, which
+  # need not be the project the session is in. The prompt hook staged the
+  # session's own answers, resolved against its cwd, so those win; the loaded
+  # config only fills in a flag the session never staged. CT_TZ is local so the
+  # staged zone reaches ct_format_epoch and ct_zone without outliving the
+  # report. A staged empty zone is a real answer (local time), which is why
+  # the zone tests for the file rather than for an empty value.
+  local tooltiming ctxfmt
+  local CT_TZ="$CT_TZ"
+  ct_read_flag_var "$sid" tooltiming; tooltiming="${_CT_FLAG:-$CT_TOOL_TIMING}"
+  ct_read_flag_var "$sid" ctxfmt;     ctxfmt="${_CT_FLAG:-$CT_CONTEXT_FORMAT}"
+  if [ -e "${base}.tz" ]; then
+    ct_read_flag_var "$sid" tz
+    CT_TZ="$_CT_FLAG"
+  fi
+
   ct_session_totals "$sid"
   now="$(date +%s)"
   echo "claude-timestamp session"
   echo
   if [ "$_CT_START" -gt 0 ]; then
-    echo "  started         $(ct_format_epoch "$_CT_START" "$CT_CONTEXT_FORMAT") $(ct_zone)"
+    echo "  started         $(ct_format_epoch "$_CT_START" "$ctxfmt") $(ct_zone)"
     echo "  elapsed         $(ct_format_duration $(( now - _CT_START )))"
   fi
   echo "  turns           $_CT_TURNS"
@@ -732,9 +752,9 @@ session_report() {
     echo "  current turn    none open"
   else
     turn_start="$(ct_read_counter "$base")"
-    echo "  current turn    running $(ct_format_duration $(( now - turn_start ))), since $(ct_format_epoch "$turn_start" "$CT_CONTEXT_FORMAT")"
+    echo "  current turn    running $(ct_format_duration $(( now - turn_start ))), since $(ct_format_epoch "$turn_start" "$ctxfmt")"
   fi
-  if [ "$CT_TOOL_TIMING" = "on" ]; then
+  if [ "$tooltiming" = "on" ]; then
     tools="$(ct_slowest_tools "${base}.tools" 5)"
     echo "  slowest tools   ${tools:-none timed yet}"
   else
@@ -1009,7 +1029,9 @@ SUMMARY=$CT_SUMMARY
 SUBAGENTS=$CT_SUBAGENTS
 
 # Record what each tool call cost and name the slowest in the session summary.
-# The only setting that costs anything per tool call rather than per message.
+# This, HEARTBEAT_AFTER and SLOW_TOOL_AFTER cost a few milliseconds per tool
+# call rather than per message; HEARTBEAT_AFTER=0, SLOW_TOOL_AFTER=0 and
+# TOOL_TIMING=off together bring back the free path.
 TOOL_TIMING=$CT_TOOL_TIMING
 
 # Record each finished session, and how many to keep. Timings only: no message
@@ -1019,7 +1041,8 @@ HISTORY=$CT_HISTORY
 HISTORY_LIMIT=$CT_HISTORY_LIMIT
 PROJECTS=$CT_PROJECTS
 
-# Tell Claude the local time each prompt was sent.
+# Tell Claude the local time each prompt was sent. false also silences the
+# heartbeat, slow tool, resumption and time-awareness pointer notes.
 INJECT_CONTEXT=$CT_INJECT_CONTEXT
 
 # Tell Claude how long the open turn has run, every this many seconds. 0 disables.
@@ -1436,9 +1459,10 @@ wizard() {
   # someone who answered "off" above away from the whole tool-breakdown
   # feature through the guided path.
   echo "Tool timing names the slowest tools in that summary and in --stats,"
-  echo "and records what each tool call cost into the session history. It is"
-  echo "the only setting that costs anything per tool call rather than per"
-  echo "message."
+  echo "and records what each tool call cost into the session history. Like"
+  echo "the turn-length and slow-tool notes Claude gets by default, it costs a"
+  echo "few milliseconds per tool call rather than per message. With it off"
+  echo "and HEARTBEAT_AFTER=0 and SLOW_TOOL_AFTER=0, that per-call cost goes away."
   ask "Record what each tool call cost? (on/off)" "$CT_TOOL_TIMING"; answer="$_CT_ANSWER"
   case "$answer" in on|off) CT_TOOL_TIMING="$answer" ;; esac
   echo

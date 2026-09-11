@@ -178,7 +178,7 @@
         "on",
         "off"
       ],
-      "describes": "stamp messages from subagents as well as the main conversation"
+      "describes": "stamp messages from subagents as well as the main conversation; also decides whether a subagent is told about its own slow tool calls"
     },
     "TOOL_TIMING": {
       "default": "off",
@@ -187,7 +187,7 @@
         "on",
         "off"
       ],
-      "describes": "record what each tool call cost; the only setting that costs anything per tool call rather than per message"
+      "describes": "record what each tool call cost; like HEARTBEAT_AFTER and SLOW_TOOL_AFTER it costs a few milliseconds per tool call rather than per message, and all three off (HEARTBEAT_AFTER=0, SLOW_TOOL_AFTER=0, TOOL_TIMING=off) bring back the free path"
     },
     "HISTORY": {
       "default": "on",
@@ -218,7 +218,7 @@
         "true",
         "false"
       ],
-      "describes": "tell Claude the local time each prompt was sent"
+      "describes": "tell Claude the local time each prompt was sent; false also silences the heartbeat, slow tool, resumption and time-awareness pointer notes"
     },
     "HEARTBEAT_AFTER": {
       "default": "900",

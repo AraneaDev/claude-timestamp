@@ -191,7 +191,10 @@ ct_load_config() {
   CT_DATE_ROLLOVER="on"
   CT_SUMMARY="on"
   CT_SUBAGENTS="on"
-  CT_TOOL_TIMING="off"        # adds two forks per tool call, so opt-in
+  # Any of TOOL_TIMING, HEARTBEAT_AFTER and SLOW_TOOL_AFTER left on costs a few
+  # ms per tool call; all three off (off, 0, 0) is the free path. Timing is
+  # opt-in; the two notes are on by default.
+  CT_TOOL_TIMING="off"
   CT_HISTORY="on"
   CT_HISTORY_LIMIT="200"      # sessions kept; older ones are dropped
   CT_PROJECTS="off"           # record the project name in the history row
@@ -472,7 +475,7 @@ ct_mtime() {
 #            under the threshold rather than being reported as ended.
 #   other    clear, compact and fork continue work that is already in view.
 ct_resume_note() {
-  local source="${1:-}" transcript="${2:-}" now="${3:-}" last="" label newest="" f gap
+  local source="${1:-}" transcript="${2:-}" now="${3:-}" last="" label newest="" f gap day clock
   case "$now" in ''|*[!0-9]*) return 0 ;; esac
   [ -n "$transcript" ] || return 0
   case "$source" in
@@ -513,8 +516,17 @@ ct_resume_note() {
   case "$last" in ''|*[!0-9]*) return 0 ;; esac
   gap=$((now - last))
   [ "$gap" -ge 3600 ] || return 0
-  printf '%s %s ago (%s).' "$label" "$(ct_humanize_gap "$gap")" \
-    "$(ct_format_epoch "$last" "%a $(ct_expand_format "${CT_CONTEXT_FORMAT:-24h}")")"
+  # The weekday and the clock are two renders rather than one "%a <format>"
+  # string: ct_format_epoch trims the 12h preset's leading zero only when it is
+  # handed the preset by name, and a combined format would put the zero after
+  # the weekday, out of its reach. Either render failing means no sentence,
+  # never one that ends in "()".
+  day="$(ct_format_epoch "$last" "%a")" || day=""
+  clock="$(ct_format_epoch "$last" "${CT_CONTEXT_FORMAT:-24h}")" || clock=""
+  if [ -z "$day" ] || [ -z "$clock" ]; then
+    return 0
+  fi
+  printf '%s %s ago (%s %s).' "$label" "$(ct_humanize_gap "$gap")" "$day" "$clock"
 }
 
 # The escape sequence for a colour, assigned rather than printed so a caller on

@@ -64,7 +64,7 @@ bash "${CLAUDE_SKILL_DIR}/../../hooks/scripts/setup.sh" --stats --project=NAME
 ```
 
 Sessions carry a project name only when the user turned on `PROJECTS`;
-otherwise they are listed as "(unnamed)". Tool timings are kept per tool name,
-not per command, and only with `TOOL_TIMING` on. "How long did `npm test`
-take" therefore has an answer only in the slow-call reminders already in this
-conversation.
+without it `--stats` shows no per-project breakdown. Tool timings are kept per
+tool name, not per command, and only with `TOOL_TIMING` on. "How long did
+`npm test` take" therefore has an answer only in the slow-call reminders
+already in this conversation.
