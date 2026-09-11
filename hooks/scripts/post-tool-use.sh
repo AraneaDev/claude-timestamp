@@ -18,7 +18,13 @@
 # off by default -- and it costs less than carrying a second measurement path
 # for the case.
 #
-# Never alters tool output: this hook only writes to its own state and exits 0.
+# It also tells the model two things, as additionalContext: that the call just
+# finished was slow (SLOW_TOOL_AFTER), and how long the open turn has run
+# (HEARTBEAT_AFTER). Both are staged by the prompt hook already resolved
+# against INJECT_CONTEXT and ENABLED, so this hook reads a number per note and
+# loads no configuration.
+#
+# Never alters tool output: it writes its own state, may add context, and exits 0.
 #
 # Invoked as `bash <this script>` (see hooks.json), so it does not depend on
 # the executable bit surviving clones, zips, or Windows checkouts.
@@ -39,14 +45,17 @@ ct_timing_wanted || exit 0
 command -v jq >/dev/null 2>&1 || exit 0
 
 input="$(cat)"
-IFS=$'\x1f' read -r session_id tool_name event ms <<< "$(printf '%s' "$input" \
-  | jq -r '[(.session_id // "-"), (.tool_name // ""), (.hook_event_name // ""), (.duration_ms // "" | tostring)] | join("\u001f")')"
+# agent_id is non-empty only inside a subagent, the same test stop.sh and
+# message-display.sh apply.
+IFS=$'\x1f' read -r session_id tool_name event ms agent_id <<< "$(printf '%s' "$input" \
+  | jq -r '[(.session_id // "-"), (.tool_name // ""), (.hook_event_name // ""), (.duration_ms // "" | tostring), (.agent_id // "")] | join("\u001f")')"
 
-# The prompt hook resolved both settings against the payload's cwd and left
+# The prompt hook resolved the settings against the payload's cwd and left
 # them here, so this hook honours the same project config the marker does
 # without resolving one itself. A session whose first prompt predates this
 # version has no staged answer; fall back to the process's own view, which is
-# what this hook used to do unconditionally.
+# what this hook used to do unconditionally. Such a session gets no notes
+# until its next prompt stages their thresholds.
 ct_enabled="$(ct_read_flag "$session_id" "enabled")"
 ct_timing="$(ct_read_flag "$session_id" "tooltiming")"
 if [ -z "$ct_enabled" ] || [ -z "$ct_timing" ]; then
@@ -56,26 +65,7 @@ if [ -z "$ct_enabled" ] || [ -z "$ct_timing" ]; then
 fi
 
 [ "$ct_enabled" = "on" ] || exit 0
-[ "$ct_timing" = "on" ] || exit 0
 
-# Absent, or not composed entirely of digits: there is no usable duration, so
-# the call goes unrecorded rather than logged with a made-up number. A
-# genuine zero passes this check and is recorded like any other value --
-# "took no time" is real information, not a reason to drop the line.
-case "$ms" in ''|*[!0-9]*) exit 0 ;; esac
-
-# Force base 10. "$ms" is all digits at this point, but a leading zero --
-# e.g. "0800" -- makes bash arithmetic read it as octal, where 8 is not a
-# valid digit, aborting the hook; "10#" pins the base so the digits are read
-# as the decimal the sender meant. Do not remove this as noise.
-ms=$((10#$ms))
-
-# Milliseconds to seconds, in the shell rather than through awk, so a hook that
-# already fires once per tool call does not fork a second time to divide by a
-# thousand.
-printf -v seconds '%d.%03d' "$((ms / 1000))" "$((ms % 1000))"
-
-log="$(ct_tool_log "$session_id")" || exit 0
 case "$tool_name" in ''|*[![:alnum:]_-]*) tool_name="unknown" ;; esac
 
 # The outcome is the third field on the line rather than a counter of its own.
@@ -85,13 +75,50 @@ case "$tool_name" in ''|*[![:alnum:]_-]*) tool_name="unknown" ;; esac
 outcome=ok
 [ "$event" = "PostToolUseFailure" ] && outcome=fail
 
-ct_state_ready || exit 0
-printf '%s %s %s\n' "$tool_name" "$seconds" "$outcome" >> "$log"
+# Absent, or not composed entirely of digits: there is no usable duration, so
+# the call goes unrecorded rather than logged with a made-up number, and no
+# slow-tool note can be based on it. A genuine zero is real information.
+#
+# Force base 10. A leading zero -- e.g. "0800" -- makes bash arithmetic read
+# it as octal, where 8 is not a valid digit, aborting the hook; "10#" pins the
+# base so the digits are read as the decimal the sender meant. Do not remove
+# this as noise.
+case "$ms" in ''|*[!0-9]*) ms="" ;; *) ms=$((10#$ms)) ;; esac
 
-# The session-wide log answers "what made this session slow"; this one
-# answers "what made this reply slow". Both need the same line.
-if turn_log="$(ct_turn_tool_log "$session_id")"; then
-  printf '%s %s %s\n' "$tool_name" "$seconds" "$outcome" >> "$turn_log"
+if [ "$ct_timing" = "on" ] && [ -n "$ms" ] && ct_state_ready \
+   && log="$(ct_tool_log "$session_id")"; then
+  # Milliseconds to seconds, in the shell rather than through awk, so a hook
+  # that already fires once per tool call does not fork a second time to
+  # divide by a thousand.
+  printf -v seconds '%d.%03d' "$((ms / 1000))" "$((ms % 1000))"
+  printf '%s %s %s\n' "$tool_name" "$seconds" "$outcome" >> "$log"
+
+  # The session-wide log answers "what made this session slow"; this one
+  # answers "what made this reply slow". Both need the same line.
+  if turn_log="$(ct_turn_tool_log "$session_id")"; then
+    printf '%s %s %s\n' "$tool_name" "$seconds" "$outcome" >> "$turn_log"
+  fi
+fi
+
+# What the model is told. Both notes are facts only; the time-awareness skill
+# is where the advice about them lives. A subagent's calls follow SUBAGENTS,
+# the same switch that decides whether its messages are stamped.
+note=""
+if [ -z "$agent_id" ] || [ "$(ct_read_flag "$session_id" "subagents")" = "on" ]; then
+  note="$(ct_slow_tool_note "$tool_name" "$ms" "$outcome" "$(ct_read_flag "$session_id" "slowtool")")"
+  hb_every="$(ct_read_flag "$session_id" "heartbeat")"
+  case "$hb_every" in
+    ''|0|*[!0-9]*) ;;
+    *)
+      hb="$(ct_heartbeat_note "$session_id" "$(date +%s)" "$hb_every")"
+      [ -n "$hb" ] && note="${note:+$note }$hb"
+      ;;
+  esac
+fi
+
+if [ -n "$note" ]; then
+  jq -n --arg event "${event:-PostToolUse}" --arg note "$note" \
+    '{hookSpecificOutput: {hookEventName: $event, additionalContext: $note}}'
 fi
 
 exit 0

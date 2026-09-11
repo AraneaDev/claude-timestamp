@@ -6420,6 +6420,66 @@ is "heartbeat: an unstaged interval says nothing" "" "$(ct_heartbeat_note hb 999
 is "heartbeat: no state says nothing" "" "$(ct_heartbeat_note nobody 99999 900)"
 
 echo
+echo "agent notes: the tool hook"
+
+if command -v jq >/dev/null 2>&1; then
+  tn_call() {  # $1 duration ms, $2 event, $3 extra JSON fields (optional, with leading comma)
+    printf '{"session_id":"tn","tool_name":"Bash","hook_event_name":"%s","duration_ms":%s%s}' \
+      "${2:-PostToolUse}" "$1" "${3:-}" | bash "$SCRIPTS/post-tool-use.sh"
+  }
+  tn_ctx() { printf '%s' "$1" | jq -r '.hookSpecificOutput.additionalContext // ""'; }
+
+  fresh
+  printf '{"session_id":"tn"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  is "tool hook: a fast call in a young turn says nothing" "" "$(tn_call 1000)"
+  out="$(tn_call 134000)"
+  is "tool hook: a slow call is told to the model" "That Bash call took 2m14s." "$(tn_ctx "$out")"
+  is "tool hook: under the event that fired" "PostToolUse" "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.hookEventName')"
+  out="$(tn_call 70000 PostToolUseFailure)"
+  is "tool hook: a slow failure says so" "That Bash call failed after 1m10s." "$(tn_ctx "$out")"
+  is "tool hook: a failure answers as PostToolUseFailure" "PostToolUseFailure" "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.hookEventName')"
+  refutes "tool hook: notes alone record no timings" test -e "$(ct_tool_log tn)"
+
+  printf '%s' "$(( $(date +%s) - 1000 ))" > "$(ct_state_file tn)"
+  contains "tool hook: a long turn gets a heartbeat" "Turn running 16m" "$(tn_ctx "$(tn_call 1000)")"
+  is "tool hook: the same interval is not told twice" "" "$(tn_call 1000)"
+
+  printf '%s' "$(( $(date +%s) - 1900 ))" > "$(ct_state_file tn)"
+  contains "tool hook: slow call and heartbeat share one sentence pair" \
+    "That Bash call took 1m30s. Turn running 31m" "$(tn_ctx "$(tn_call 90000)")"
+
+  fresh 'INJECT_CONTEXT=false'
+  printf '{"session_id":"tn"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  is "tool hook: INJECT_CONTEXT=false tells the model nothing" "" "$(tn_call 134000)"
+
+  fresh 'TOOL_TIMING=on'
+  printf '{"session_id":"tn"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  out="$(tn_call 134000)"
+  is "tool hook: timing still records alongside a note" "Bash 134.000 ok" "$(sed -n 1p "$(ct_tool_log tn)")"
+  contains "tool hook: and the note is still sent" "took 2m14s" "$(tn_ctx "$out")"
+
+  fresh 'SUBAGENTS=off'
+  printf '{"session_id":"tn"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  is "tool hook: SUBAGENTS=off sends a subagent no note" "" "$(tn_call 134000 PostToolUse ',"agent_id":"sub1"')"
+  contains "tool hook: the main conversation still gets one" "took 2m14s" "$(tn_ctx "$(tn_call 134000)")"
+
+  # Branch S only (see Task 0). With Branch P, replace the next two lines with:
+  #   fresh
+  #   printf '{"session_id":"tn"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  #   is "tool hook: a subagent's calls carry no note" "" "$(tn_call 134000 PostToolUse ',"agent_id":"sub1"')"
+  fresh
+  printf '{"session_id":"tn"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  contains "tool hook: SUBAGENTS=on lets a subagent hear about its slow call" "took 2m14s" \
+    "$(tn_ctx "$(tn_call 134000 PostToolUse ',"agent_id":"sub1"')")"
+else
+  for tn_label in "fast call silent" "slow call told" "event name" "slow failure" "failure event" \
+                  "no timings" "heartbeat" "not twice" "merged" "inject off" "timing records" \
+                  "note still sent" "subagents off" "main still told" "subagent branch"; do
+    skip "tool hook: $tn_label" "jq is not installed"
+  done
+fi
+
+echo
 echo "----"
 printf '%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
