@@ -6600,6 +6600,47 @@ is "resume: fork says nothing" "" "$(ct_resume_note fork "$rs_dir/conv.jsonl" "$
 is "resume: no transcript path says nothing" "" "$(ct_resume_note resume "" "$rs_now")"
 
 echo
+echo "agent notes: session start"
+
+if command -v jq >/dev/null 2>&1; then
+  ss_dir="$WORK/ss-transcripts"
+  # shellcheck disable=SC2119,SC2120  # the default source is "startup"; no case here needs another
+  ss_run() {
+    printf '{"session_id":"ss","source":"%s","transcript_path":"%s/self.jsonl"}' "${1:-startup}" "$ss_dir" \
+      | bash "$SCRIPTS/session-start.sh"
+  }
+  ss_ctx() { printf '%s' "$1" | jq -r '.hookSpecificOutput.additionalContext // ""'; }
+  rm -rf "$ss_dir"; mkdir -p "$ss_dir"
+  printf '{}\n' > "$ss_dir/self.jsonl"
+  printf '{}\n' > "$ss_dir/before.jsonl"; touch -t "$(rs_ago 870)" "$ss_dir/before.jsonl"
+
+  fresh
+  out="$(ss_run)"
+  contains "session start: tells Claude when the project was last active" \
+    "Previous session in this project ended 14h ago" "$(ss_ctx "$out")"
+  is "session start: under SessionStart" "SessionStart" "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.hookEventName')"
+
+  fresh 'RESUME_NOTE=off'
+  lacks "session start: RESUME_NOTE=off says nothing about it" "Previous session" "$(ss_ctx "$(ss_run)")"
+  fresh 'INJECT_CONTEXT=false'
+  lacks "session start: INJECT_CONTEXT=false says nothing about it" "Previous session" "$(ss_ctx "$(ss_run)")"
+  fresh 'ENABLED=off'
+  is "session start: ENABLED=off says nothing at all" "" "$(ss_run)"
+
+  fresh
+  rm -f "$CLAUDE_TIMESTAMP_CONFIG"
+  out="$(ss_run)"
+  is "session start: one object carries both audiences" "1" "$(printf '%s' "$out" | jq -s 'length')"
+  contains "session start: the user still gets the first-run note" "/timestamps" "$(printf '%s' "$out" | jq -r '.systemMessage // ""')"
+  contains "session start: and Claude gets the resumption note" "Previous session" "$(ss_ctx "$out")"
+else
+  for ss_label in "last active" "event name" "resume off" "inject off" "enabled off" \
+                  "one object" "user note" "claude note"; do
+    skip "session start: $ss_label" "jq is not installed"
+  done
+fi
+
+echo
 echo "----"
 printf '%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

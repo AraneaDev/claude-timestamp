@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # SessionStart hook.
 #
-# Three jobs, all one-time-per-session: make sure the plugin can actually run,
-# make sure a new user can find the config command, and publish facts.json --
+# Four jobs, all one-time-per-session: make sure the plugin can actually run,
+# make sure a new user can find the config command, publish facts.json --
 # what this machine can and cannot do, which /timestamps reads instead of
-# probing for itself. Everything here is advisory -- the session is never
-# blocked, so we always exit 0.
+# probing for itself, and tell Claude how long ago this conversation or
+# project was last active. Everything here is advisory -- the session is
+# never blocked, so we always exit 0.
 #
 # systemMessage is the documented way to put text in front of the USER. Plain
 # stdout would only reach the model, which is the wrong audience for all
@@ -88,7 +89,11 @@ fi
 CT_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib"
 source "$CT_LIB/state.sh"
 
-cwd="$(cat | jq -r '.cwd // empty' 2>/dev/null || true)"
+# origin is the payload's source: how this session began (startup, resume, clear, compact, fork),
+# and transcript_path is where Claude Code keeps it: together, all the
+# resumption note needs.
+IFS=$'\x1f' read -r cwd origin transcript <<< "$(jq -r \
+  '[(.cwd // ""), (.source // ""), (.transcript_path // "")] | join("\u001f")' 2>/dev/null || true)"
 
 ct_prune_state
 
@@ -218,13 +223,22 @@ if [ ! -r "$(ct_config_path)" ]; then
   _ct_add_note "claude-timestamp is running with default settings. Run /timestamps to pick a timezone, clock format, and color."
 fi
 
+# What Claude is told. systemMessage above goes to the user; this goes to the
+# model, as additionalContext, in the same object, because a hook returns one.
+context=""
+if [ "$CT_INJECT_CONTEXT" != "false" ] && [ "$CT_RESUME_NOTE" = "on" ]; then
+  context="$(ct_resume_note "$origin" "$transcript" "$(date +%s)")"
+fi
+
 # An `if` rather than `[ ... ] && jq ...`: under set -e an AND-list whose test
 # fails returns non-zero, and the only thing making that harmless here is the
 # `exit 0` on the next line. That is safety at a distance -- delete or move the
 # exit and a session with nothing to say starts reporting failure. The branch
 # carries its own exit status.
-if [ -n "$notes" ]; then
-  jq -n --arg msg "$notes" '{systemMessage: $msg}'
+if [ -n "$notes" ] || [ -n "$context" ]; then
+  jq -n --arg msg "$notes" --arg ctx "$context" '
+    (if $msg != "" then {systemMessage: $msg} else {} end)
+    + (if $ctx != "" then {hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $ctx}} else {} end)'
 fi
 
 exit 0
