@@ -225,9 +225,22 @@ fi
 
 # What Claude is told. systemMessage above goes to the user; this goes to the
 # model, as additionalContext, in the same object, because a hook returns one.
+# The pointer is what connects the notes the other hooks send to the skill
+# that explains them: without it, a model-invoked skill may never load.
 context=""
-if [ "$CT_INJECT_CONTEXT" != "false" ] && [ "$CT_RESUME_NOTE" = "on" ]; then
-  context="$(ct_resume_note "$origin" "$transcript" "$(date +%s)")"
+if [ "$CT_INJECT_CONTEXT" != "false" ]; then
+  if [ "$CT_RESUME_NOTE" = "on" ]; then
+    context="$(ct_resume_note "$origin" "$transcript" "$(date +%s)")"
+  fi
+  # With every note switched off there is nothing for the skill to explain,
+  # so the pointer says only what is still true. The values were validated as
+  # whole numbers on load, and `-eq` reads them as decimal, so "00" is 0 too.
+  if [ "$CT_HEARTBEAT_AFTER" -eq 0 ] && [ "$CT_SLOW_TOOL_AFTER" -eq 0 ] \
+     && [ "$CT_RESUME_NOTE" != "on" ]; then
+    context="The claude-timestamp:time-awareness skill can query session history."
+  else
+    context="${context:+$context }claude-timestamp reports turn length, slow tool calls and resumed sessions in system reminders; the claude-timestamp:time-awareness skill explains them and can query session history."
+  fi
 fi
 
 # An `if` rather than `[ ... ] && jq ...`: under set -e an AND-list whose test

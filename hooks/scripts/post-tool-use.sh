@@ -44,11 +44,12 @@ ct_timing_wanted || exit 0
 # hook needs to find its own state.
 command -v jq >/dev/null 2>&1 || exit 0
 
-input="$(cat)"
 # agent_id is non-empty only inside a subagent, the same test stop.sh and
-# message-display.sh apply.
-IFS=$'\x1f' read -r session_id tool_name event ms agent_id <<< "$(printf '%s' "$input" \
-  | jq -r '[(.session_id // "-"), (.tool_name // ""), (.hook_event_name // ""), (.duration_ms // "" | tostring), (.agent_id // "")] | join("\u001f")')"
+# message-display.sh apply. jq reads the payload from stdin itself: holding it
+# in a variable first cost a `cat` and a subshell on every tool call, for a
+# value nothing else here reads.
+IFS=$'\x1f' read -r session_id tool_name event ms agent_id <<< "$(jq -r \
+  '[(.session_id // "-"), (.tool_name // ""), (.hook_event_name // ""), (.duration_ms // "" | tostring), (.agent_id // "")] | join("\u001f")')"
 
 # The prompt hook resolved the settings against the payload's cwd and left
 # them here, so this hook honours the same project config the marker does
@@ -56,8 +57,12 @@ IFS=$'\x1f' read -r session_id tool_name event ms agent_id <<< "$(printf '%s' "$
 # version has no staged answer; fall back to the process's own view, which is
 # what this hook used to do unconditionally. Such a session gets no notes
 # until its next prompt stages their thresholds.
-ct_enabled="$(ct_read_flag "$session_id" "enabled")"
-ct_timing="$(ct_read_flag "$session_id" "tooltiming")"
+#
+# Every flag is read through the _var form, which assigns _CT_FLAG rather than
+# printing: this runs on every tool call, and a command substitution per flag
+# was a subshell each.
+ct_read_flag_var "$session_id" "enabled";    ct_enabled="$_CT_FLAG"
+ct_read_flag_var "$session_id" "tooltiming"; ct_timing="$_CT_FLAG"
 if [ -z "$ct_enabled" ] || [ -z "$ct_timing" ]; then
   ct_load_config
   ct_enabled="${ct_enabled:-$CT_ENABLED}"
@@ -92,8 +97,11 @@ case "$ms" in
   *) if [ "${#ms}" -gt 15 ]; then ms=""; else ms=$((10#$ms)); fi ;;
 esac
 
+# The two log paths are ct_tool_log and ct_turn_tool_log, spelled out from
+# ct_state_file_var so that resolving them forks nothing.
 if [ "$ct_timing" = "on" ] && [ -n "$ms" ] && ct_state_ready \
-   && log="$(ct_tool_log "$session_id")"; then
+   && ct_state_file_var "$session_id"; then
+  log="${_CT_STATE_FILE}.tools"
   # Milliseconds to seconds, in the shell rather than through awk, so a hook
   # that already fires once per tool call does not fork a second time to
   # divide by a thousand.
@@ -102,9 +110,7 @@ if [ "$ct_timing" = "on" ] && [ -n "$ms" ] && ct_state_ready \
 
   # The session-wide log answers "what made this session slow"; this one
   # answers "what made this reply slow". Both need the same line.
-  if turn_log="$(ct_turn_tool_log "$session_id")"; then
-    printf '%s %s %s\n' "$tool_name" "$seconds" "$outcome" >> "$turn_log"
-  fi
+  printf '%s %s %s\n' "$tool_name" "$seconds" "$outcome" >> "${_CT_STATE_FILE}.turntools"
 fi
 
 # What the model is told. Both notes are facts only; the time-awareness skill
@@ -117,17 +123,37 @@ fi
 # finding it already told; the elapsed time it reports is the turn's, which
 # belongs to the main conversation regardless of which call happens to
 # observe it.
+#
+# The note builders assign _CT_NOTE rather than print, so a call with nothing
+# to say forks nothing to find that out. `|| :` keeps a failure inside one of
+# them from ending the hook under errexit: a note that cannot be built is a
+# note not sent.
 note=""
-if [ -z "$agent_id" ] || [ "$(ct_read_flag "$session_id" "subagents")" = "on" ]; then
-  note="$(ct_slow_tool_note "$tool_name" "$ms" "$outcome" "$(ct_read_flag "$session_id" "slowtool")")"
+subagent_notes=""
+if [ -n "$agent_id" ]; then
+  ct_read_flag_var "$session_id" "subagents"; subagent_notes="$_CT_FLAG"
+fi
+if [ -z "$agent_id" ] || [ "$subagent_notes" = "on" ]; then
+  ct_read_flag_var "$session_id" "slowtool"
+  ct_slow_tool_note_var "$tool_name" "$ms" "$outcome" "$_CT_FLAG" || :
+  note="$_CT_NOTE"
 fi
 if [ -z "$agent_id" ]; then
-  hb_every="$(ct_read_flag "$session_id" "heartbeat")"
+  ct_read_flag_var "$session_id" "heartbeat"; hb_every="$_CT_FLAG"
   case "$hb_every" in
     ''|0|*[!0-9]*) ;;
     *)
-      hb="$(ct_heartbeat_note "$session_id" "$(date +%s)" "$hb_every")"
-      [ -n "$hb" ] && note="${note:+$note }$hb"
+      # The clock from the printf builtin where bash has one (4.2 and newer),
+      # sparing the `date` process; bash 3.2, which macOS still ships, has
+      # no %(...)T and keeps paying for it.
+      if [ "${BASH_VERSINFO[0]}" -gt 4 ] \
+         || { [ "${BASH_VERSINFO[0]}" -eq 4 ] && [ "${BASH_VERSINFO[1]}" -ge 2 ]; }; then
+        printf -v now '%(%s)T' -1
+      else
+        now="$(date +%s)"
+      fi
+      ct_heartbeat_note_var "$session_id" "$now" "$hb_every" || :
+      [ -n "$_CT_NOTE" ] && note="${note:+$note }$_CT_NOTE"
       ;;
   esac
 fi

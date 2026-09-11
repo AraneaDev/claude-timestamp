@@ -4,11 +4,12 @@
 #   bash tools/screenshots/make.sh            every shot
 #   bash tools/screenshots/make.sh doctor     just the doctor shot
 #
-# hero and picker each drive a real Claude Code session -- a working login,
-# tokens spent, and however long the model takes to answer. wizard, doctor,
-# stats, markers and session run local scripts only and are free and offline.
-# Plain `make.sh` with no argument therefore spends two real sessions every
-# time it runs; pass a single shot's name if that is not what you want.
+# hero, picker and skill each drive a real Claude Code session -- a working
+# login, tokens spent, and however long the model takes to answer. wizard,
+# doctor, stats, markers, session and session-report run local scripts only and
+# are free and offline. Plain `make.sh` with no argument therefore spends three
+# real sessions every time it runs; pass a single shot's name if that is not
+# what you want.
 #
 # Dependencies go in a virtualenv beside this script rather than in the system
 # python, which on most distributions refuses the install anyway (PEP 668).

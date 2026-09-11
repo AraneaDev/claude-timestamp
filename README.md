@@ -8,7 +8,7 @@
 [![Release](https://img.shields.io/github/v/release/AraneaDev/claude-timestamp)](https://github.com/AraneaDev/claude-timestamp/releases)
 [![Tool page](https://img.shields.io/badge/tool%20page-aranea--development.nl-0b7285)](https://aranea-development.nl/en/tools/claude-timestamp)
 [![CI](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml/badge.svg)](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-1259%20passing-2b8a3e)](tests/run.sh)
+[![Tests](https://img.shields.io/badge/tests-1289%20passing-2b8a3e)](tests/run.sh)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-364fc7)](#platform-notes)
 [![Conventional Commits](https://img.shields.io/badge/commits-conventional-fe5196?logo=conventionalcommits&logoColor=white)](https://www.conventionalcommits.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
@@ -24,6 +24,11 @@
 A Claude Code plugin. It puts your local time on every assistant message, shows
 how long each turn took, and tells Claude when your prompt was sent, so a long
 conversation can be scanned, timed, and referred back to.
+
+Claude gets more than the clock, too. It hears when a turn has run long, when
+one command was slow, and when a project or conversation is picked up after a
+gap, and a skill the plugin ships tells it what each of those is a reason to
+do.
 
 There is nothing to set up. The defaults work as soon as it is installed, and
 `/timestamps` changes them from inside Claude Code without restarting anything.
@@ -41,9 +46,13 @@ There is nothing to set up. The defaults work as soon as it is installed, and
 - **Marks where you stepped away.** A gap between messages is labelled, so a
   session you returned to the next morning still reads in order.
 - **Tells Claude the time.** The model receives the local time each prompt was
-  sent, and a short note when a turn runs long or a tool call is slow. See
-  [What Claude is told](#what-claude-is-told). You can switch this off and
+  sent, a short note when a turn runs long or a tool call is slow, and, when a
+  session starts, how long ago this project or conversation was last active.
+  See [What Claude is told](#what-claude-is-told). You can switch this off and
   keep the display-only marker.
+- **Lets Claude answer time questions.** Ask how long you have been at it, or
+  how much of it you spent waiting, and the bundled `time-awareness` skill
+  answers from the measured session rather than a guess.
 - **Summarises the session.** On exit: how long it ran, how many turns, how
   much of that you spent waiting, and how much you were away. Waiting and away
   never cover the same seconds, so the two add up to no more than the session
@@ -76,21 +85,35 @@ has a setting of its own.
 
 | When | What Claude reads | Setting |
 | --- | --- | --- |
+| A session starts | `claude-timestamp reports turn length, slow tool calls and resumed sessions in system reminders; the claude-timestamp:time-awareness skill explains them and can query session history.` | `INJECT_CONTEXT` |
 | Every prompt | `Message sent at local time 10:37:21 CEST, after a 3h break` | `INJECT_CONTEXT`, `CONTEXT_FORMAT` |
 | The first tool result after a turn passes 15 minutes, and every 15 after | `Turn running 15m02s (prompt sent 10:37:21); now 10:52:23 CEST.` | `HEARTBEAT_AFTER` |
 | One tool call takes a minute or more | `That Bash call took 2m14s.` | `SLOW_TOOL_AFTER` |
-| A session starts an hour or more after the last one in this project, or a conversation is resumed an hour or more after its last activity | `Previous session in this project ended 14h ago (Thu 20:12:05).` | `RESUME_NOTE` |
+| A session starts an hour or more after the last one in this project, or a conversation is resumed an hour or more after its last activity | `Previous session in this project ended 14h ago (Thu 20:12:05).` or `Resuming this conversation; last activity 14h ago (Thu 20:12:05).` | `RESUME_NOTE` |
 
-The notes state facts and give no instructions. A turn that has run for half
-an hour is a reason to check the work still matches the request, and a
-four-minute test run is a reason to run it in the background next time, but
-that is Claude's call to make.
+The notes state facts and give no instructions. The advice lives in one place,
+a skill the plugin ships, `time-awareness`, which Claude loads when a note
+arrives or when you ask something like "how long has this session been
+running?". It says what each note is a reason to do: check the work against
+the request after a long stretch, run a slow command in the background next
+time, re-check the branch and CI after a gap. It can also run
+`setup.sh --session` and `--stats` to answer from measurement. It does not
+appear in your `/` menu; `/timestamps` is still where you change settings.
+
+<p align="center">
+  <img src="assets/skill.webp" alt="Claude loading the time-awareness skill and answering how long the session has run from the measured report" width="760">
+</p>
+
+<sub>A real session, recorded as it happened. Claude loads the skill, runs
+`--session`, and answers with the measured numbers rather than an estimate.</sub>
 
 A note can only reach Claude when a hook runs, so the turn-length note waits
 for the next tool result. A single 31-minute command produces one note when
 it finishes, not one at 15 minutes and another at 30.
 
-Subagents hear about their own slow calls unless `SUBAGENTS` is `off`. The turn-length note goes to the main conversation only, since the turn is yours and theirs is a part of it.
+Subagents hear about their own slow calls unless `SUBAGENTS` is `off`. The
+turn-length note goes to the main conversation only, since the turn is yours
+and theirs is a part of it.
 
 The resumption note records nothing of its own. Claude Code already keeps a
 transcript per session in a folder per project, and the note reads the time
@@ -385,7 +408,7 @@ cannot run anything.
 | `ELAPSED_COLOR` | inherit | Colour of `%elapsed`; `SLOW_COLOR` still wins on a slow turn |
 | `TOOL_COLOR` | inherit | Colour of `%tool`; empty follows `COLOR` |
 | `ELAPSED` | `on` | Show how long the turn took |
-| `INJECT_CONTEXT` | `true` | Tell Claude the local time each prompt was sent |
+| `INJECT_CONTEXT` | `true` | Tell Claude the local time each prompt was sent. `false` also silences the heartbeat, slow tool, resumption and time-awareness pointer notes |
 | `HEARTBEAT_AFTER` | `900` | Tell Claude how long the open turn has run, every this many seconds. `0` disables, and `INJECT_CONTEXT=false` silences it too |
 | `SLOW_TOOL_AFTER` | `60` | Tell Claude when one tool call took at least this many seconds. `0` disables, and `INJECT_CONTEXT=false` silences it too |
 | `RESUME_NOTE` | `on` | Tell Claude, when a session starts, how long ago this conversation or project was last active. `INJECT_CONTEXT=false` silences it too |
@@ -394,7 +417,7 @@ cannot run anything.
 | `IDLE_AFTER` | `3600` | Mark a gap this long between messages, `0` disables |
 | `DATE_ROLLOVER` | `on` | Show the date on the first message after midnight |
 | `SUMMARY` | `on` | Report session totals on exit. Independent of `HISTORY`: both read the same counters, which are kept either way |
-| `SUBAGENTS` | `on` | Stamp subagent messages as well |
+| `SUBAGENTS` | `on` | Stamp subagent messages as well. Also decides whether a subagent is told about its own slow tool calls |
 | `TOOL_TIMING` | `off` | Record what each tool call cost and name the slowest |
 | `HISTORY` | `on` | Record each finished session, for `/timestamps` and `--stats`. Independent of `SUMMARY` |
 | `HISTORY_LIMIT` | `200` | How many recorded sessions to keep, 1 or more; `HISTORY=off` keeps none |
@@ -419,10 +442,16 @@ Clock formats render as `14:03:22` for `24h`, `14:03` for `short`, `2:03 PM`
 for `12h`, and `2026-08-19T14:03:22` for `iso`. Any value containing a `%` is
 treated as a strftime string, so the escape hatch needs no separate setting.
 
-`TOOL_TIMING` is off by default because it is the only setting that costs
-anything per tool call. Everything else costs once per message. Claude Code
-reports how long each call took, so the plugin no longer times them itself,
-but the hook that records the number still runs on every call.
+Three settings cost something per tool call rather than once per message:
+`TOOL_TIMING`, `HEARTBEAT_AFTER` and `SLOW_TOOL_AFTER`. While any of them is
+on, a hook reads every tool call's payload to decide whether to record it or
+tell Claude something. On the machine this was measured on, that came to a few
+milliseconds per tool call (roughly 3 to 5 ms above the idle path). The two
+notes are on by default and `TOOL_TIMING` is off. Setting `HEARTBEAT_AFTER=0`,
+`SLOW_TOOL_AFTER=0` and `TOOL_TIMING=off` together brings back the free path,
+where the hook exits before it reads the payload. Claude Code reports how long
+each call took, so the plugin no longer times them itself, but the hook that
+records the number still runs on every call.
 
 Those timings cover the call alone. Time a permission prompt spent waiting for
 you is not counted against the tool, so a slow turn you spent deciding through
@@ -437,8 +466,9 @@ state directory is writable, and which version is installed. That is what lets
 ## What the sessions add up to
 
 Ask Claude how long you've been at this, or how much of it was waiting, and it
-reads the totals straight out of `~/.claude/claude-timestamp-history.tsv` and
-answers in the chat, no command needed.
+answers in the chat, no command needed. The `time-awareness` skill runs one of
+the two reports below and answers from its numbers: `--session` for the
+session you are in, `--stats` for the ones already recorded.
 
 For a terminal view, run the script instead:
 
@@ -467,6 +497,18 @@ and which tool took the waiting:
 bash "$CLAUDE_PLUGIN_ROOT/hooks/scripts/setup.sh" --stats --since=7d
 bash "$CLAUDE_PLUGIN_ROOT/hooks/scripts/setup.sh" --stats --project=claude-timestamp
 ```
+
+`--stats` only sees sessions that have already ended. For the one still
+running, `--session` reports how long this session has run, from inside
+Claude Code:
+
+```bash
+bash "$CLAUDE_PLUGIN_ROOT/hooks/scripts/setup.sh" --session
+```
+
+<p align="center">
+  <img src="assets/session-report.webp" alt="The live report for the session in progress" width="660">
+</p>
 
 ## When something is wrong
 
@@ -498,17 +540,23 @@ doctor in the first place.
 
 ## How it works
 
-Six scripts across eight events, all of them harness-only, so none of this
-costs model context.
+Six scripts across eight events, and one skill. Most of it is harness-only and
+costs no model context. The exceptions are the short notes listed under
+[What Claude is told](#what-claude-is-told), which three of the hooks add and
+`INJECT_CONTEXT=false` switches off.
 
 | Hook | Job |
 | --- | --- |
-| `SessionStart` | Check `jq`, prune old state, point a new user at `/timestamps` |
+| `SessionStart` | Check `jq`, prune old state, point a new user at `/timestamps`; tell Claude how long ago this project or conversation was last active, and that the skill exists |
 | `UserPromptSubmit` | Open the turn, close one an interrupt left behind, tell Claude the local time |
 | `MessageDisplay` | Draw the marker on the first batch of each message |
 | `Stop` / `StopFailure` | Close the turn and record what it cost |
 | `SessionEnd` | Report the summary, record the session, clear its state |
-| `PostToolUse` / `PostToolUseFailure` | Record what each tool call cost, only when `TOOL_TIMING=on` |
+| `PostToolUse` / `PostToolUseFailure` | Tell Claude when a turn runs long or a call was slow; with `TOOL_TIMING=on`, record what each call cost |
+
+The skill, `skills/time-awareness/SKILL.md`, is plain instructions that Claude
+loads when a note arrives or a time question comes up. It adds nothing to a
+session until then.
 
 A turn is opened by the prompt that started it and closed by the event that
 ended it, so what a turn cost is measured once rather than accumulated as its
@@ -542,7 +590,7 @@ no database.
 ## Development
 
 ```bash
-bash tests/run.sh                                    # 1259 assertions, no framework
+bash tests/run.sh                                    # 1289 assertions, no framework
 shellcheck -S style -e SC1091 hooks/scripts/**/*.sh  # clean
 bash tools/check-docs.sh                             # README against the code
 ```
@@ -576,16 +624,18 @@ bash tools/screenshots/make.sh doctor   # just one
 ```
 
 It drives the real programs, then renders what was captured using a terminal
-emulator. Hero, picker and wizard run through a pty, so the shot shows a real
-terminal rather than a reconstruction; doctor, stats and markers capture plain
-output instead, since none of them draw anything a pty would change; session
-drives message-display.sh and session-end.sh directly with planted state, the
-way tests/run.sh does. Nothing in those images is mocked up. Hero and picker
-talk to an actual Claude Code session, so they need a working login and spend
-tokens; wizard, doctor, stats, markers and session run local scripts only and
-are free and offline. The hero shot's durations differ every run because they
-are real measurements. Python dependencies install into a virtualenv beside
-the script.
+emulator. Hero, picker, skill and wizard run through a pty, so the shot shows
+a real terminal rather than a reconstruction; doctor, stats and markers
+capture plain output instead, since none of them draw anything a pty would
+change; session and session-report drive the real scripts directly with
+planted state, the way tests/run.sh does. Nothing in those images is mocked
+up. Hero, picker and skill talk to an actual Claude Code session, so they need
+a working login and spend tokens; skill loads this checkout's plugin with
+`--plugin-dir` rather than the installed one. Wizard, doctor, stats, markers,
+session and session-report run local scripts only and are free and offline.
+The durations in the hero and skill shots differ every run because they are
+real measurements. Python dependencies install into a virtualenv beside the
+script.
 
 Every image is a lossless WebP, animation included: terminal captures are flat
 colour with hard edges, which lossless compression suits far better than a

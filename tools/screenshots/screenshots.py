@@ -42,7 +42,7 @@ handles extremely well and a lossy setting would only blur; save_image and
 save_animation are the two functions every shot's output passes through, so a
 future shot cannot quietly stay PNG.
 """
-import fcntl, json, os, pty, select, struct, stat, subprocess, sys, termios, time
+import fcntl, json, os, pty, select, shutil, struct, stat, subprocess, sys, tempfile, termios, time
 from pathlib import Path
 
 import pyte
@@ -976,9 +976,124 @@ def shot_session():
     render(raw, ASSETS / "session.webp", cols=100, rows=20, crlf=True)
 
 
+def shot_session_report():
+    """The real setup.sh --session output, over a planted live session.
+
+    Planted the way shot_session plants its summary, and the way tests/run.sh's
+    "session report" section does: .start/.turns/.wait/.idle, a tool log, and
+    an open turn (the base file, with no .closed beside it). The report is the
+    script's own output; only the numbers behind it are made up. The session
+    id is passed as CLAUDE_CODE_SESSION_ID, which is how the report finds the
+    session when Claude runs it from inside Claude Code.
+    """
+    work = WORK / "session-report"
+    (work / "home" / ".claude").mkdir(parents=True, exist_ok=True)
+    conf = work / "config.conf"
+    conf.write_text(SESSION_CONFIG)
+    tmp = work / "tmp"
+    # Per-uid, as ct_state_dir_var in hooks/scripts/lib/state.sh has it.
+    state_dir = tmp / f"claude-timestamp-{os.getuid()}"
+    state_dir.mkdir(parents=True, exist_ok=True)
+
+    sid = "demo-session"
+    now = int(time.time())
+    (state_dir / f"{sid}.start").write_text(str(now - 5400))
+    (state_dir / f"{sid}.turns").write_text("14")
+    (state_dir / f"{sid}.wait").write_text("1612")
+    (state_dir / f"{sid}.idle").write_text("2100")
+    # The turn in progress: opened 95 seconds ago and not closed yet.
+    (state_dir / sid).write_text(str(now - 95))
+    tools = (
+        "Bash 2.000 ok\n" * 19 + "Bash 7.200 fail\n"
+        + "WebFetch 8.100 ok\n"
+        + "Read 0.054 ok\n" * 40
+    )
+    (state_dir / f"{sid}.tools").write_text(tools)
+
+    env = dict(os.environ)
+    env["HOME"] = str(work / "home")
+    env["CLAUDE_TIMESTAMP_CONFIG"] = str(conf)
+    env["TMPDIR"] = str(tmp)
+    env["CLAUDE_CODE_SESSION_ID"] = sid
+    proc = subprocess.run(
+        ["bash", str(SCRIPTS / "setup.sh"), "--session"],
+        capture_output=True, env=env, cwd=str(work),
+    )
+    raw = proc.stdout + proc.stderr
+    (work / "session-report.raw").write_bytes(raw)
+    # The report lists up to five tools on one line; three fit in 90 columns
+    # instead of wrapping mid-entry.
+    render(raw, ASSETS / "session-report.webp", cols=90, rows=16, crlf=True)
+
+
+def shot_skill():
+    """The time-awareness skill answering a time question in a real session.
+
+    Driven like the picker shot: a real session, typed into through a pty. It
+    loads this repository's plugin with --plugin-dir rather than whatever
+    version is installed, and switches the installed copy off for the run, so
+    the shot shows the code in this tree and no marker is drawn twice. One
+    quick question first gives the session a second turn to report, then the
+    time question, which the skill answers by running setup.sh --session.
+    Bash and Skill are pre-allowed so no permission prompt covers the answer.
+
+    The numbers in the answer are real measurements of this recording, so
+    they differ every run. The same workspace-trust caveat as the picker shot
+    applies: run `claude` once by hand in the work directory if the capture
+    shows only the welcome banner.
+    """
+    if not subprocess.run(["which", "claude"], capture_output=True).returncode == 0:
+        raise SystemExit("claude is not on PATH; cannot capture the skill shot.")
+    work = WORK / "skill"
+    work.mkdir(parents=True, exist_ok=True)
+    conf = work / "config.conf"
+    conf.write_text(DEMO_CONFIG)
+
+    # The Bash call in the shot prints the plugin's path in full, so the plugin
+    # is loaded through a short symlink rather than wherever this checkout
+    # lives. The symlink sits in a fresh owner-private directory from mkdtemp,
+    # not at a fixed name in /tmp, which any local user could create first to
+    # block the capture; the directory is removed again however the run ends.
+    link_dir = Path(tempfile.mkdtemp(prefix="ct-", dir="/tmp"))
+    plugin = link_dir / "claude-timestamp"
+    plugin.symlink_to(ROOT)
+
+    cols, rows = 96, 60
+    os.chdir(work)
+    try:
+        raw = capture_pty(
+            ["claude", "--plugin-dir", str(plugin), "--model", "haiku",
+             "--settings", json.dumps({"enabledPlugins": {"claude-timestamp@aranea": False}}),
+             "--allowedTools", "Bash", "Skill"],
+            keys=[
+                (6.0, "What is the capital of Portugal? One word, no punctuation."), (7.5, "\r"),
+                (16.0, "How long has this session been running, and how much of that "
+                       "did I spend waiting for your replies?"), (17.5, "\r"),
+            ],
+            cols=cols, rows=rows, settle=12, total=110,
+            env={"CLAUDE_TIMESTAMP_CONFIG": str(conf)},
+        )
+    finally:
+        shutil.rmtree(link_dir, ignore_errors=True)
+    (work / "skill.raw").write_bytes(raw)
+
+    # Crop past the welcome banner, which carries the account's name, email
+    # and organisation, as the hero and picker shots do.
+    screen = DimScreen(cols, rows)
+    pyte.ByteStream(screen).feed(raw)
+    lines = screen.display
+    first = next((y for y in range(rows) if lines[y].lstrip().startswith("❯")), 12) - 1
+    # Stop at the last "✻ ... done" line, as the hero shot does: below it are
+    # the input box and the account's own status line, neither of which is
+    # part of the exchange being shown.
+    last = max((y for y in range(rows) if lines[y].strip().startswith("✻")), default=rows - 1)
+    render(raw, ASSETS / "skill.webp", cols, rows, first=first, last=last)
+
+
 SHOTS = {"hero": shot_hero, "picker": shot_picker, "wizard": shot_wizard,
          "doctor": shot_doctor, "stats": shot_stats,
-         "markers": shot_markers, "session": shot_session}
+         "markers": shot_markers, "session": shot_session,
+         "session-report": shot_session_report, "skill": shot_skill}
 
 if __name__ == "__main__":
     which = sys.argv[1] if len(sys.argv) > 1 else "all"

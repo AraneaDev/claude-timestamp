@@ -54,6 +54,8 @@ claude-timestamp setup
                               Only sessions on or after that date.
   setup.sh --stats --project=NAME
                               Only sessions recorded against that project.
+  setup.sh --session          How long this session has run, from inside
+                              Claude Code.
 
 Flags
   --tz=ZONE                   IANA timezone (Europe/Amsterdam), or "local".
@@ -84,10 +86,14 @@ Flags
   --projects=on|off           Record the project's directory name in each
                               history row. Off by default. Never a path.
   --tool-timing=on|off        Record what each tool call cost and report the
-                              slowest in the session summary. Off by default:
-                              it is the only setting that costs anything per
-                              tool call rather than per message.
-  --inject-context=true|false Tell Claude the time each prompt was sent.
+                              slowest in the session summary. Off by default.
+                              It, --heartbeat-after and --slow-tool-after cost
+                              a few milliseconds per tool call rather than per
+                              message; 0, 0 and off together bring back the
+                              free path.
+  --inject-context=true|false Tell Claude the time each prompt was sent. false
+                              also silences the heartbeat, slow tool,
+                              resumption and time-awareness pointer notes.
   --heartbeat-after=SECONDS   Tell Claude how long a turn has run, every this
                               many seconds (0 disables).
   --slow-tool-after=SECONDS   Tell Claude when one tool call took this long
@@ -699,6 +705,71 @@ ROWS
   return 0
 }
 
+# The live figures for the session this is run from. Claude Code puts the
+# session id in the environment of every command its Bash tool runs, which is
+# how the time-awareness skill answers "how long have we been at this" from
+# measurement instead of from an impression of the conversation.
+session_report() {
+  local sid="${CLAUDE_CODE_SESSION_ID:-}" base now turn_start tools
+  ct_load_config
+  if [ -z "$sid" ] || ! base="$(ct_state_file "$sid")"; then
+    echo "No current session id. Run this from inside Claude Code, which sets CLAUDE_CODE_SESSION_ID." >&2
+    return 2
+  fi
+  if [ ! -r "$base" ]; then
+    echo "claude-timestamp has no record of this session yet. It starts counting at the first prompt, and records nothing while ENABLED=off."
+    return 0
+  fi
+
+  # The config loaded above is resolved from wherever this command runs, which
+  # need not be the project the session is in. The prompt hook staged the
+  # session's own answers, resolved against its cwd, so those win; the loaded
+  # config only fills in a flag the session never staged. CT_TZ is local so the
+  # staged zone reaches ct_format_epoch and ct_zone without outliving the
+  # report. A staged empty zone is a real answer (local time), which is why
+  # the zone tests for the file rather than for an empty value.
+  local tooltiming ctxfmt
+  local CT_TZ="$CT_TZ"
+  ct_read_flag_var "$sid" tooltiming; tooltiming="${_CT_FLAG:-$CT_TOOL_TIMING}"
+  ct_read_flag_var "$sid" ctxfmt;     ctxfmt="${_CT_FLAG:-$CT_CONTEXT_FORMAT}"
+  if [ -e "${base}.tz" ]; then
+    ct_read_flag_var "$sid" tz
+    CT_TZ="$_CT_FLAG"
+  fi
+
+  ct_session_totals "$sid"
+  now="$(date +%s)"
+  echo "claude-timestamp session"
+  echo
+  if [ "$_CT_START" -gt 0 ]; then
+    echo "  started         $(ct_format_epoch "$_CT_START" "$ctxfmt") $(ct_zone)"
+    echo "  elapsed         $(ct_format_duration $(( now - _CT_START )))"
+  fi
+  echo "  turns           $_CT_TURNS"
+  echo "  waiting         $(ct_format_duration "$_CT_WAIT")"
+  echo "  away            $(ct_format_duration "$_CT_IDLE")"
+  if [ -e "${base}.closed" ]; then
+    echo "  current turn    none open"
+  else
+    turn_start="$(ct_read_counter "$base")"
+    # An empty or half-written turn file reads as 0, which would be a turn
+    # "running" since 1970. ct_turn_open writes it without a lock, so a report
+    # can land mid-write; say so instead of inventing a duration.
+    if [ "$turn_start" -gt 0 ]; then
+      echo "  current turn    running $(ct_format_duration $(( now - turn_start ))), since $(ct_format_epoch "$turn_start" "$ctxfmt")"
+    else
+      echo "  current turn    unknown"
+    fi
+  fi
+  if [ "$tooltiming" = "on" ]; then
+    tools="$(ct_slowest_tools "${base}.tools" 5)"
+    echo "  slowest tools   ${tools:-none timed yet}"
+  else
+    echo "  tool timing     off; turn it on with /timestamps to see which tools took longest"
+  fi
+  return 0
+}
+
 # A single place to answer "why is it not doing what I configured". Everything
 # here is something that has actually gone wrong: a missing jq, a config that
 # does not parse, or a pinned zone the platform cannot resolve.
@@ -965,7 +1036,9 @@ SUMMARY=$CT_SUMMARY
 SUBAGENTS=$CT_SUBAGENTS
 
 # Record what each tool call cost and name the slowest in the session summary.
-# The only setting that costs anything per tool call rather than per message.
+# This, HEARTBEAT_AFTER and SLOW_TOOL_AFTER cost a few milliseconds per tool
+# call rather than per message; HEARTBEAT_AFTER=0, SLOW_TOOL_AFTER=0 and
+# TOOL_TIMING=off together bring back the free path.
 TOOL_TIMING=$CT_TOOL_TIMING
 
 # Record each finished session, and how many to keep. Timings only: no message
@@ -975,7 +1048,8 @@ HISTORY=$CT_HISTORY
 HISTORY_LIMIT=$CT_HISTORY_LIMIT
 PROJECTS=$CT_PROJECTS
 
-# Tell Claude the local time each prompt was sent.
+# Tell Claude the local time each prompt was sent. false also silences the
+# heartbeat, slow tool, resumption and time-awareness pointer notes.
 INJECT_CONTEXT=$CT_INJECT_CONTEXT
 
 # Tell Claude how long the open turn has run, every this many seconds. 0 disables.
@@ -1392,9 +1466,10 @@ wizard() {
   # someone who answered "off" above away from the whole tool-breakdown
   # feature through the guided path.
   echo "Tool timing names the slowest tools in that summary and in --stats,"
-  echo "and records what each tool call cost into the session history. It is"
-  echo "the only setting that costs anything per tool call rather than per"
-  echo "message."
+  echo "and records what each tool call cost into the session history. Like"
+  echo "the turn-length and slow-tool notes Claude gets by default, it costs a"
+  echo "few milliseconds per tool call rather than per message. With it off"
+  echo "and HEARTBEAT_AFTER=0 and SLOW_TOOL_AFTER=0, that per-call cost goes away."
   ask "Record what each tool call cost? (on/off)" "$CT_TOOL_TIMING"; answer="$_CT_ANSWER"
   case "$answer" in on|off) CT_TOOL_TIMING="$answer" ;; esac
   echo
@@ -1548,7 +1623,7 @@ main() {
   # below can be detected without re-deriving it from `action` -- which
   # --since=* and --project=* both also set unconditionally, and set the
   # same way whether or not a setting flag came with them.
-  local saw_stats_bare=0 saw_since_flag=0 since_flag_value=""
+  local saw_stats_bare=0 saw_since_flag=0 since_flag_value="" saw_session=0
   local saw_project_filter=0
 
   while [ $# -gt 0 ]; do
@@ -1559,6 +1634,7 @@ main() {
       --show)      action="show";   interactive=0 ;;
       --doctor)    action="doctor"; interactive=0 ;;
       --stats)     action="stats";  interactive=0; saw_stats_bare=1 ;;
+      --session)   action="session"; interactive=0; saw_session=1 ;;
       --since=*)
         action="stats"; interactive=0
         value="${arg#*=}"
@@ -1681,6 +1757,11 @@ main() {
   # anything that writes a setting -- a --key=value flag (named_count), or
   # bare --project selecting write scope.
   if [ "$project_scope" = "1" ] || [ "$named_count" -gt 0 ]; then
+    if [ "$saw_session" = "1" ]; then
+      echo "--session reports on the running session; it does not write a setting." >&2
+      echo "Drop --session to write settings, or drop the setting flags to see the report." >&2
+      exit 2
+    fi
     if [ "$saw_stats_bare" = "1" ]; then
       echo "--stats reports on recorded sessions; it does not write a setting." >&2
       echo "Drop --stats to write settings, or drop the setting flags to see the report." >&2
@@ -1702,6 +1783,7 @@ main() {
   if [ "$action" = "show" ]; then show_config; exit 0; fi
   if [ "$action" = "doctor" ]; then doctor; exit $?; fi
   if [ "$action" = "stats" ]; then stats; exit $?; fi
+  if [ "$action" = "session" ]; then session_report; exit $?; fi
   if [ "$interactive" = "1" ]; then wizard; exit 0; fi
 
   # Non-interactive: start from what is already configured so each flag is a

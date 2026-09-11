@@ -191,7 +191,10 @@ ct_load_config() {
   CT_DATE_ROLLOVER="on"
   CT_SUMMARY="on"
   CT_SUBAGENTS="on"
-  CT_TOOL_TIMING="off"        # adds two forks per tool call, so opt-in
+  # Any of TOOL_TIMING, HEARTBEAT_AFTER and SLOW_TOOL_AFTER left on costs a few
+  # ms per tool call; all three off (off, 0, 0) is the free path. Timing is
+  # opt-in; the two notes are on by default.
+  CT_TOOL_TIMING="off"
   CT_HISTORY="on"
   CT_HISTORY_LIMIT="200"      # sessions kept; older ones are dropped
   CT_PROJECTS="off"           # record the project name in the history row
@@ -472,7 +475,7 @@ ct_mtime() {
 #            under the threshold rather than being reported as ended.
 #   other    clear, compact and fork continue work that is already in view.
 ct_resume_note() {
-  local source="${1:-}" transcript="${2:-}" now="${3:-}" last="" label newest="" f gap
+  local source="${1:-}" transcript="${2:-}" now="${3:-}" last="" label newest="" f gap day clock
   case "$now" in ''|*[!0-9]*) return 0 ;; esac
   [ -n "$transcript" ] || return 0
   case "$source" in
@@ -513,8 +516,17 @@ ct_resume_note() {
   case "$last" in ''|*[!0-9]*) return 0 ;; esac
   gap=$((now - last))
   [ "$gap" -ge 3600 ] || return 0
-  printf '%s %s ago (%s).' "$label" "$(ct_humanize_gap "$gap")" \
-    "$(ct_format_epoch "$last" "%a $(ct_expand_format "${CT_CONTEXT_FORMAT:-24h}")")"
+  # The weekday and the clock are two renders rather than one "%a <format>"
+  # string: ct_format_epoch trims the 12h preset's leading zero only when it is
+  # handed the preset by name, and a combined format would put the zero after
+  # the weekday, out of its reach. Either render failing means no sentence,
+  # never one that ends in "()".
+  day="$(ct_format_epoch "$last" "%a")" || day=""
+  clock="$(ct_format_epoch "$last" "${CT_CONTEXT_FORMAT:-24h}")" || clock=""
+  if [ -z "$day" ] || [ -z "$clock" ]; then
+    return 0
+  fi
+  printf '%s %s ago (%s %s).' "$label" "$(ct_humanize_gap "$gap")" "$day" "$clock"
 }
 
 # The escape sequence for a colour, assigned rather than printed so a caller on
@@ -1033,6 +1045,35 @@ ct_project_name() {
     */*)      base="${dir##*/}"; _ct_project_basename "$base" ;;
     *)        _ct_project_basename "$dir" ;;
   esac
+}
+
+# The worst tools in a tool log, summed per tool, as one line:
+#   Bash 41.2s (18 calls), WebFetch 8.1s (1 call)
+# Shared by the end-of-session summary and setup.sh --session, so the two can
+# never describe the same log differently.
+#
+# `|| true`: on a log with many distinct tools, `head` can close the pipe
+# before `sort` is done writing, which sends `sort` SIGPIPE even though every
+# line `head` needed was already delivered. Under a caller's errexit/pipefail
+# that nonzero exit would abort it, for the same reason ct_tool_digest needs
+# the same guard.
+ct_slowest_tools() {
+  local log="${1:-}" n="${2:-3}"
+  [ -s "$log" ] || return 0
+  case "$n" in ''|*[!0-9]*) n=3 ;; esac
+  # Byte-identical to the filter ct_tool_digest applies, so a blank line or a
+  # line torn off mid-write cannot become a tool on screen that the history
+  # then does not carry: the two aggregations read the same log and must
+  # agree on what counts as a usable line.
+  awk '
+    $1 == "" || $2 !~ /^[0-9]+(\.[0-9]+)?$/ { next }
+    { sum[$1] += $2; n[$1]++ }
+    END { for (t in sum) printf "%.3f\t%s\t%d\n", sum[t], t, n[t] }' "$log" \
+    | sort -rn | head -n "$n" \
+    | awk -F'\t' '{
+        calls = ($3 == 1) ? "1 call" : $3 " calls"
+        printf "%s%s %.1fs (%s)", (NR > 1 ? ", " : ""), $2, $1, calls
+      }' || true
 }
 
 # One session's tool log reduced to the history row's tool column:
