@@ -219,6 +219,20 @@
         "false"
       ],
       "describes": "tell Claude the local time each prompt was sent"
+    },
+    "HEARTBEAT_AFTER": {
+      "default": "900",
+      "validator": "ct_is_seconds",
+      "type": "seconds",
+      "zero": "disables",
+      "describes": "tell Claude how long the open turn has run, every this many seconds; INJECT_CONTEXT=false silences it"
+    },
+    "SLOW_TOOL_AFTER": {
+      "default": "60",
+      "validator": "ct_is_seconds",
+      "type": "seconds",
+      "zero": "disables",
+      "describes": "tell Claude when one tool call took at least this many seconds; INJECT_CONTEXT=false silences it"
     }
   },
   "preview_context": {

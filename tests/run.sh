@@ -1652,7 +1652,7 @@ is "a rejected format cannot smuggle a second setting into the file" "on" "$CT_E
 # to be wrong, so flag twenty-one is covered the day it is added.
 fresh 'ENABLED=on'
 flag_table="$(sed -n '/^CT_FLAG_TABLE="$/,/^"$/p' "$SCRIPTS/setup.sh" | sed '1d;$d')"
-is "every setting has a flag in the table" "21" \
+is "every setting has a flag in the table" "23" \
   "$(printf '%s\n' "$flag_table" | grep -c '^[a-z]')"
 # shellcheck disable=SC2034  # t_rest is read to consume the rest of the row
 while read -r t_flag t_rest; do
@@ -1806,6 +1806,11 @@ is "invalid: ct_is_bool asks for true/false, not on/off" \
 is "invalid: ct_is_seconds is labelled by the flag as typed" \
    "--slow-after must be a whole number of seconds, got 'soon'." \
    "$(invalid --slow-after=soon)"
+
+# A number that is merely too large gets the rule it broke, not only the one
+# it already satisfies.
+contains "invalid: an oversized number of seconds names the limit" \
+   "999999999" "$(invalid --slow-after=9999999999)"
 
 # HISTORY_LIMIT has no "0 disables" reading, so its message carries a second
 # line pointing at the switch that does turn history off. Both lines matter:
@@ -2509,6 +2514,10 @@ is "a strftime format is accepted"  "0" "$(ct_is_valid_format '%H:%M' && echo 0 
 is "a nonsense format is rejected"  "1" "$(ct_is_valid_format wat     && echo 0 || echo 1)"
 is "a number is seconds"            "0" "$(ct_is_seconds 30           && echo 0 || echo 1)"
 is "a word is not seconds"          "1" "$(ct_is_seconds soon         && echo 0 || echo 1)"
+# Bounded, because every seconds setting ends up in shell arithmetic, which
+# wraps a large enough number silently instead of failing.
+is "nine digits are seconds"        "0" "$(ct_is_seconds 999999999    && echo 0 || echo 1)"
+is "ten digits are not"             "1" "$(ct_is_seconds 9999999999   && echo 0 || echo 1)"
 is "an empty timezone is fine"      "0" "$(ct_is_valid_tz ''          && echo 0 || echo 1)"
 is "an absolute timezone path is not" "1" "$(ct_is_valid_tz /etc/passwd && echo 0 || echo 1)"
 is "a traversing timezone is not"   "1" "$(ct_is_valid_tz a/../b      && echo 0 || echo 1)"
@@ -6322,6 +6331,201 @@ printf 'not conventional at all\n' > "$cmt_dir/bad"
 asserts "commit-msg hook: an accepted title passes"  bash "$ROOT/.githooks/commit-msg" "$cmt_dir/good"
 refutes "commit-msg hook: a bad title is rejected"    bash "$ROOT/.githooks/commit-msg" "$cmt_dir/bad"
 rm -rf "$cmt_dir"
+
+echo
+echo "agent notes: settings"
+
+fresh
+is "notes: heartbeat defaults to 900" "900" "$CT_HEARTBEAT_AFTER"
+is "notes: slow tool note defaults to 60" "60" "$CT_SLOW_TOOL_AFTER"
+
+fresh 'HEARTBEAT_AFTER=0' 'SLOW_TOOL_AFTER=120'
+is "notes: heartbeat reads 0" "0" "$CT_HEARTBEAT_AFTER"
+is "notes: slow tool reads a value" "120" "$CT_SLOW_TOOL_AFTER"
+
+fresh 'HEARTBEAT_AFTER=often' 'SLOW_TOOL_AFTER=-5'
+is "notes: an invalid heartbeat falls back" "900" "$CT_HEARTBEAT_AFTER"
+is "notes: an invalid slow tool falls back" "60" "$CT_SLOW_TOOL_AFTER"
+contains "notes: the invalid heartbeat is reported" "HEARTBEAT_AFTER=often is not valid, using 900" "$CT_CONFIG_PROBLEMS"
+
+fresh
+bash "$SCRIPTS/setup.sh" --heartbeat-after=600 --slow-tool-after=30 >/dev/null 2>&1
+ct_load_config
+is "notes: --heartbeat-after is written" "600" "$CT_HEARTBEAT_AFTER"
+is "notes: --slow-tool-after is written" "30" "$CT_SLOW_TOOL_AFTER"
+refutes "notes: --heartbeat-after refuses a word" bash "$SCRIPTS/setup.sh" --heartbeat-after=soon
+contains "notes: --show lists the heartbeat" "Heartbeat" "$(bash "$SCRIPTS/setup.sh" --show 2>&1)"
+
+echo
+echo "agent notes: epoch formatting"
+
+fresh 'TZ=UTC'
+is "format_epoch: 24h in the pinned zone" "00:01:40" "$(ct_format_epoch 100 24h)"
+is "format_epoch: short" "00:01" "$(ct_format_epoch 100 short)"
+is "format_epoch: a raw strftime string" "1970-01-01 Thu" "$(ct_format_epoch 100 '%Y-%m-%d %a')"
+refutes "format_epoch: refuses a word" ct_format_epoch soon 24h
+refutes "format_epoch: refuses empty" ct_format_epoch "" 24h
+
+echo
+echo "agent notes: staging"
+
+fresh
+printf '{"session_id":"stage-a"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+is "stage: heartbeat default is staged" "900" "$(ct_read_flag stage-a heartbeat)"
+is "stage: slow tool default is staged" "60" "$(ct_read_flag stage-a slowtool)"
+is "stage: the context format is staged" "24h" "$(ct_read_flag stage-a ctxfmt)"
+is "stage: the subagents setting is staged" "on" "$(ct_read_flag stage-a subagents)"
+asserts "stage: notes alone open the tool gate" test -e "$(ct_state_file stage-a).timing-on"
+
+fresh 'INJECT_CONTEXT=false'
+printf '{"session_id":"stage-b"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+is "stage: INJECT_CONTEXT=false stages no heartbeat" "0" "$(ct_read_flag stage-b heartbeat)"
+is "stage: INJECT_CONTEXT=false stages no slow tool note" "0" "$(ct_read_flag stage-b slowtool)"
+refutes "stage: no timing and no notes keeps the gate shut" test -e "$(ct_state_file stage-b).timing-on"
+
+fresh 'HEARTBEAT_AFTER=0' 'SLOW_TOOL_AFTER=0'
+printf '{"session_id":"stage-c"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+refutes "stage: both notes at 0 keep the gate shut" test -e "$(ct_state_file stage-c).timing-on"
+
+fresh 'ENABLED=off'
+printf '{"session_id":"stage-d"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+is "stage: ENABLED=off stages no heartbeat" "0" "$(ct_read_flag stage-d heartbeat)"
+refutes "stage: ENABLED=off keeps the gate shut" test -e "$(ct_state_file stage-d).timing-on"
+
+fresh
+ct_turn_open stage-e 1000
+printf '3' > "$(ct_state_file stage-e).hb"
+ct_turn_open stage-e 2000
+refutes "stage: a new turn forgets the last heartbeat" test -e "$(ct_state_file stage-e).hb"
+
+echo
+echo "agent notes: note builders"
+
+fresh
+is "slow note: 1 ms under the threshold says nothing" "" "$(ct_slow_tool_note Bash 59999 ok 60)"
+is "slow note: at the threshold" "That Bash call took 1m00s." "$(ct_slow_tool_note Bash 60000 ok 60)"
+is "slow note: a failed call says so" "That Bash call failed after 2m14s." "$(ct_slow_tool_note Bash 134000 fail 60)"
+is "slow note: leading zeros are decimal" "That Bash call took 1m20s." "$(ct_slow_tool_note Bash 080000 ok 60)"
+is "slow note: 0 disables it" "" "$(ct_slow_tool_note Bash 999999 ok 0)"
+is "slow note: no duration says nothing" "" "$(ct_slow_tool_note Bash '' ok 60)"
+is "slow note: an unstaged threshold says nothing" "" "$(ct_slow_tool_note Bash 999999 ok '')"
+# A threshold this large overflowed when it was multiplied into milliseconds,
+# turning negative and making every call slow.
+is "slow note: a huge threshold cannot overflow into every call" "" \
+  "$(ct_slow_tool_note Bash 1000 ok 9223372036854777)"
+
+ct_turn_open hb 1000
+ct_stage_flag hb tz UTC
+ct_stage_flag hb ctxfmt short
+is "heartbeat: silent before the first interval" "" "$(ct_heartbeat_note hb 1899 900)"
+# The zone is asked of the platform, as zone_utc explains in the "zone"
+# section: Git Bash on Windows calls TZ=UTC "GMT".
+is "heartbeat: fires at the first interval" \
+  "Turn running 15m00s (prompt sent 00:16); now 00:31 $zone_utc." "$(ct_heartbeat_note hb 1900 900)"
+is "heartbeat: silent again within that interval" "" "$(ct_heartbeat_note hb 2500 900)"
+contains "heartbeat: fires at the second interval" "Turn running 30m00s" "$(ct_heartbeat_note hb 2800 900)"
+is "heartbeat: an interval is told once" "" "$(ct_heartbeat_note hb 2801 900)"
+ct_turn_open hb 5000
+contains "heartbeat: a new turn counts from its own start" "Turn running 15m00s" "$(ct_heartbeat_note hb 5900 900)"
+ct_close_turn "$(ct_state_file hb)" 6000
+is "heartbeat: a closed turn says nothing" "" "$(ct_heartbeat_note hb 9000 900)"
+ct_turn_open hb 10000
+is "heartbeat: 0 disables it" "" "$(ct_heartbeat_note hb 99999 0)"
+is "heartbeat: an unstaged interval says nothing" "" "$(ct_heartbeat_note hb 99999 '')"
+is "heartbeat: no state says nothing" "" "$(ct_heartbeat_note nobody 99999 900)"
+
+echo
+echo "agent notes: the tool hook"
+
+if command -v jq >/dev/null 2>&1; then
+  tn_call() {  # $1 duration ms, $2 event, $3 extra JSON fields (optional, with leading comma)
+    printf '{"session_id":"tn","tool_name":"Bash","hook_event_name":"%s","duration_ms":%s%s}' \
+      "${2:-PostToolUse}" "$1" "${3:-}" | bash "$SCRIPTS/post-tool-use.sh"
+  }
+  tn_ctx() { printf '%s' "$1" | jq -r '.hookSpecificOutput.additionalContext // ""'; }
+
+  fresh
+  printf '{"session_id":"tn"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  is "tool hook: a fast call in a young turn says nothing" "" "$(tn_call 1000)"
+  out="$(tn_call 134000)"
+  is "tool hook: a slow call is told to the model" "That Bash call took 2m14s." "$(tn_ctx "$out")"
+  is "tool hook: under the event that fired" "PostToolUse" "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.hookEventName')"
+  out="$(tn_call 70000 PostToolUseFailure)"
+  is "tool hook: a slow failure says so" "That Bash call failed after 1m10s." "$(tn_ctx "$out")"
+  is "tool hook: a failure answers as PostToolUseFailure" "PostToolUseFailure" "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.hookEventName')"
+  refutes "tool hook: notes alone record no timings" test -e "$(ct_tool_log tn)"
+
+  printf '%s' "$(( $(date +%s) - 1000 ))" > "$(ct_state_file tn)"
+  contains "tool hook: a long turn gets a heartbeat" "Turn running 16m" "$(tn_ctx "$(tn_call 1000)")"
+  is "tool hook: the same interval is not told twice" "" "$(tn_call 1000)"
+
+  printf '%s' "$(( $(date +%s) - 1900 ))" > "$(ct_state_file tn)"
+  contains "tool hook: slow call and heartbeat share one sentence pair" \
+    "That Bash call took 1m30s. Turn running 31m" "$(tn_ctx "$(tn_call 90000)")"
+
+  fresh 'INJECT_CONTEXT=false'
+  printf '{"session_id":"tn"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  is "tool hook: INJECT_CONTEXT=false tells the model nothing" "" "$(tn_call 134000)"
+
+  fresh 'TOOL_TIMING=on'
+  printf '{"session_id":"tn"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  out="$(tn_call 134000)"
+  is "tool hook: timing still records alongside a note" "Bash 134.000 ok" "$(sed -n 1p "$(ct_tool_log tn)")"
+  contains "tool hook: and the note is still sent" "took 2m14s" "$(tn_ctx "$out")"
+
+  fresh 'SUBAGENTS=off'
+  printf '{"session_id":"tn"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  is "tool hook: SUBAGENTS=off sends a subagent no note" "" "$(tn_call 134000 PostToolUse ',"agent_id":"sub1"')"
+  contains "tool hook: the main conversation still gets one" "took 2m14s" "$(tn_ctx "$(tn_call 134000)")"
+
+  # Branch S only (see Task 0). With Branch P, replace the next two lines with:
+  #   fresh
+  #   printf '{"session_id":"tn"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  #   is "tool hook: a subagent's calls carry no note" "" "$(tn_call 134000 PostToolUse ',"agent_id":"sub1"')"
+  fresh
+  printf '{"session_id":"tn"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  contains "tool hook: SUBAGENTS=on lets a subagent hear about its slow call" "took 2m14s" \
+    "$(tn_ctx "$(tn_call 134000 PostToolUse ',"agent_id":"sub1"')")"
+
+  # A subagent shares the session's single heartbeat record with the main
+  # conversation rather than keeping one of its own, so a subagent call that
+  # crosses an interval must not claim it -- otherwise the main conversation's
+  # next call would find that interval already told.
+  fresh
+  printf '{"session_id":"tn"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  printf '%s' "$(( $(date +%s) - 1000 ))" > "$(ct_state_file tn)"
+  is "tool hook: a subagent's call earns no heartbeat" "" \
+    "$(tn_ctx "$(tn_call 1000 PostToolUse ',"agent_id":"sub1"')")"
+  contains "tool hook: the main conversation still hears it right after" "Turn running 16m" \
+    "$(tn_ctx "$(tn_call 1000)")"
+
+  # An older harness that sends no duration_ms field at all still owes the
+  # main conversation its heartbeat: the heartbeat does not depend on there
+  # being a usable duration, only on the interval and the caller being the
+  # main conversation.
+  fresh
+  printf '{"session_id":"tn"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  printf '%s' "$(( $(date +%s) - 1000 ))" > "$(ct_state_file tn)"
+  out="$(printf '{"session_id":"tn","tool_name":"Bash","hook_event_name":"PostToolUse"}' \
+    | bash "$SCRIPTS/post-tool-use.sh")"
+  contains "tool hook: a heartbeat still arrives with no duration_ms field" "Turn running 16m" \
+    "$(tn_ctx "$out")"
+
+  # A duration too long to be real would wrap in shell arithmetic, so it is
+  # treated like one that is missing: no log line and no note built on it.
+  fresh 'TOOL_TIMING=on'
+  printf '{"session_id":"tn"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  is "tool hook: an oversized duration_ms tells the model nothing" "" "$(tn_call 99999999999999999999)"
+  refutes "tool hook: and records nothing" test -s "$(ct_tool_log tn)"
+else
+  for tn_label in "fast call silent" "slow call told" "event name" "slow failure" "failure event" \
+                  "no timings" "heartbeat" "not twice" "merged" "inject off" "timing records" \
+                  "note still sent" "subagents off" "main still told" "subagent branch" \
+                  "subagent no heartbeat" "main heartbeat after subagent" "no duration heartbeat" \
+                  "oversized duration silent" "oversized duration unrecorded"; do
+    skip "tool hook: $tn_label" "jq is not installed"
+  done
+fi
 
 echo
 echo "----"

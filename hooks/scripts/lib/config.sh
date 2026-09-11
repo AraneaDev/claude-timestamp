@@ -164,6 +164,8 @@ _ct_read_config_file() {
       HISTORY_LIMIT)  CT_HISTORY_LIMIT="$value" ;;
       PROJECTS)       CT_PROJECTS="$value" ;;
       INJECT_CONTEXT) CT_INJECT_CONTEXT="$value" ;;
+      HEARTBEAT_AFTER) CT_HEARTBEAT_AFTER="$value" ;;
+      SLOW_TOOL_AFTER) CT_SLOW_TOOL_AFTER="$value" ;;
     esac
   done < "$file"
 }
@@ -193,6 +195,8 @@ ct_load_config() {
   CT_HISTORY_LIMIT="200"      # sessions kept; older ones are dropped
   CT_PROJECTS="off"           # record the project name in the history row
   CT_INJECT_CONTEXT="true"
+  CT_HEARTBEAT_AFTER="900"    # seconds; 0 disables. Tells the model, so INJECT_CONTEXT gates it too
+  CT_SLOW_TOOL_AFTER="60"     # seconds; 0 disables. Tells the model, so INJECT_CONTEXT gates it too
 
   CT_CONFIG_PROBLEMS=""
   CT_PROJECT_CONFIG=""
@@ -238,7 +242,10 @@ ct_is_valid_color()  { case "${1:-}" in none|off|dim|gray|grey|red|green|yellow|
 # the check in the single place the loader and setup.sh already share.
 ct_has_control()     { case "${1:-}" in *[[:cntrl:]]*) return 0 ;; *) return 1 ;; esac; }
 ct_is_valid_format() { ct_has_control "${1:-}" && return 1; case "${1:-}" in *%*|24h|short|12h|iso) return 0 ;; *) return 1 ;; esac; }
-ct_is_seconds()      { case "${1:-}" in ''|*[!0-9]*) return 1 ;; *) return 0 ;; esac; }
+# At most nine digits, about 31 years. Every seconds setting ends up in shell
+# arithmetic, and bash wraps a number past 64 bits silently rather than
+# failing, so an unbounded value would come back as a different one.
+ct_is_seconds()      { case "${1:-}" in ''|*[!0-9]*) return 1 ;; *) [ "${#1}" -le 9 ] ;; esac; }
 
 # A retention count, which unlike SLOW_AFTER and IDLE_AFTER has no "0 disables"
 # reading: keeping zero sessions is what HISTORY=off means, and 0 here used to
@@ -316,6 +323,8 @@ ct_validate_config() {
   _ct_require HISTORY_LIMIT  ct_is_history_limit 200
   _ct_require PROJECTS       ct_is_onoff        off
   _ct_require INJECT_CONTEXT ct_is_bool         true
+  _ct_require HEARTBEAT_AFTER ct_is_seconds     900
+  _ct_require SLOW_TOOL_AFTER ct_is_seconds     60
 }
 
 # Preset name -> strftime string. Anything containing a % is already a strftime
@@ -408,6 +417,27 @@ ct_date_days_ago() {
 # Current timezone abbreviation (CEST, JST...) for the model-facing string.
 ct_zone() {
   if ct_tz_honoured; then TZ="$CT_TZ" date '+%Z'; else date '+%Z'; fi
+}
+
+# Render a moment other than now, the way ct_now renders now. GNU date takes
+# -d @EPOCH and BSD date takes -r EPOCH; ct_date_days_ago tries them in the
+# same order. The 12h preset drops its leading zero here as ct_now does, so a
+# time reads the same whichever function produced it.
+ct_format_epoch() {
+  local epoch="${1:-}" fmt out
+  case "$epoch" in ''|*[!0-9]*) return 1 ;; esac
+  fmt="$(ct_expand_format "${2:-24h}")"
+  if ct_tz_honoured; then
+    out="$(TZ="$CT_TZ" date -d "@$epoch" "+$fmt" 2>/dev/null)" \
+      || out="$(TZ="$CT_TZ" date -r "$epoch" "+$fmt" 2>/dev/null)" \
+      || return 1
+  else
+    out="$(date -d "@$epoch" "+$fmt" 2>/dev/null)" \
+      || out="$(date -r "$epoch" "+$fmt" 2>/dev/null)" \
+      || return 1
+  fi
+  [ "${2:-}" = "12h" ] && out="${out#0}"
+  printf '%s' "$out"
 }
 
 # The escape sequence for a colour, assigned rather than printed so a caller on
