@@ -92,6 +92,8 @@ Flags
                               many seconds (0 disables).
   --slow-tool-after=SECONDS   Tell Claude when one tool call took this long
                               (0 disables).
+  --resume-note=on|off        Tell Claude, when a session starts, how long ago
+                              this conversation or project was last active.
   --enabled=on|off            Master switch. off silences every hook without
                               uninstalling the plugin.
   --project                   Write to this project instead of your account,
@@ -157,6 +159,7 @@ projects        PROJECTS        CT_PROJECTS         ct_is_onoff             -   
 inject-context  INJECT_CONTEXT  CT_INJECT_CONTEXT   ct_is_bool              -        ignore
 heartbeat-after HEARTBEAT_AFTER CT_HEARTBEAT_AFTER  ct_is_seconds           -        ignore
 slow-tool-after SLOW_TOOL_AFTER CT_SLOW_TOOL_AFTER  ct_is_seconds           -        ignore
+resume-note     RESUME_NOTE     CT_RESUME_NOTE      ct_is_onoff             -        ignore
 "
 
 # --- validation -------------------------------------------------------------
@@ -819,6 +822,7 @@ doctor() {
   echo "  tool timing     $CT_TOOL_TIMING"
   echo "  heartbeat       $([ "$CT_HEARTBEAT_AFTER" -gt 0 ] 2>/dev/null && echo "every ${CT_HEARTBEAT_AFTER}s" || echo "off")"
   echo "  slow tool note  $([ "$CT_SLOW_TOOL_AFTER" -gt 0 ] 2>/dev/null && echo "after ${CT_SLOW_TOOL_AFTER}s" || echo "off")"
+  echo "  resume note     $CT_RESUME_NOTE"
   echo
 
   echo "State"
@@ -979,6 +983,10 @@ HEARTBEAT_AFTER=$CT_HEARTBEAT_AFTER
 
 # Tell Claude when one tool call took at least this many seconds. 0 disables.
 SLOW_TOOL_AFTER=$CT_SLOW_TOOL_AFTER
+
+# Tell Claude, when a session starts, how long ago this conversation or
+# project was last active. Read from Claude Code's own transcripts.
+RESUME_NOTE=$CT_RESUME_NOTE
 CONF
   echo "Wrote $(ct_tilde "$file")"
 }
@@ -1184,6 +1192,7 @@ show_config() {
   echo "  Inject context  $CT_INJECT_CONTEXT"
   echo "  Heartbeat       $CT_HEARTBEAT_AFTER s"
   echo "  Slow tool note  $CT_SLOW_TOOL_AFTER s"
+  echo "  Resume note     $CT_RESUME_NOTE"
   echo
   echo -n "  Preview         "; preview
 }
@@ -1265,10 +1274,10 @@ ask() {
 # ELAPSED and its threshold, IDLE_AFTER, SUMMARY, TOOL_TIMING, COLOR, the
 # marker template, HISTORY and PROJECTS -- plus the one model-facing setting,
 # INJECT_CONTEXT and its format. Finer controls such as the per-part colours,
-# SLOW_COLOR, DATE_ROLLOVER, SUBAGENTS, HISTORY_LIMIT, HEARTBEAT_AFTER and
-# SLOW_TOOL_AFTER are reachable only through their own flags; a curated set of
-# ready-made marker templates is offered separately, through the /timestamps
-# slash command's looks picker.
+# SLOW_COLOR, DATE_ROLLOVER, SUBAGENTS, HISTORY_LIMIT, HEARTBEAT_AFTER,
+# SLOW_TOOL_AFTER and RESUME_NOTE are reachable only through their own flags;
+# a curated set of ready-made marker templates is offered separately, through
+# the /timestamps slash command's looks picker.
 wizard() {
   ct_load_config
 

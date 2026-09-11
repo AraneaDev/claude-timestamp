@@ -166,6 +166,7 @@ _ct_read_config_file() {
       INJECT_CONTEXT) CT_INJECT_CONTEXT="$value" ;;
       HEARTBEAT_AFTER) CT_HEARTBEAT_AFTER="$value" ;;
       SLOW_TOOL_AFTER) CT_SLOW_TOOL_AFTER="$value" ;;
+      RESUME_NOTE)    CT_RESUME_NOTE="$value" ;;
     esac
   done < "$file"
 }
@@ -197,6 +198,7 @@ ct_load_config() {
   CT_INJECT_CONTEXT="true"
   CT_HEARTBEAT_AFTER="900"    # seconds; 0 disables. Tells the model, so INJECT_CONTEXT gates it too
   CT_SLOW_TOOL_AFTER="60"     # seconds; 0 disables. Tells the model, so INJECT_CONTEXT gates it too
+  CT_RESUME_NOTE="on"         # tell the model how long ago this conversation or project was last active
 
   CT_CONFIG_PROBLEMS=""
   CT_PROJECT_CONFIG=""
@@ -325,6 +327,7 @@ ct_validate_config() {
   _ct_require INJECT_CONTEXT ct_is_bool         true
   _ct_require HEARTBEAT_AFTER ct_is_seconds     900
   _ct_require SLOW_TOOL_AFTER ct_is_seconds     60
+  _ct_require RESUME_NOTE    ct_is_onoff        on
 }
 
 # Preset name -> strftime string. Anything containing a % is already a strftime

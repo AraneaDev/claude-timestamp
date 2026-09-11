@@ -1652,7 +1652,7 @@ is "a rejected format cannot smuggle a second setting into the file" "on" "$CT_E
 # to be wrong, so flag twenty-one is covered the day it is added.
 fresh 'ENABLED=on'
 flag_table="$(sed -n '/^CT_FLAG_TABLE="$/,/^"$/p' "$SCRIPTS/setup.sh" | sed '1d;$d')"
-is "every setting has a flag in the table" "23" \
+is "every setting has a flag in the table" "24" \
   "$(printf '%s\n' "$flag_table" | grep -c '^[a-z]')"
 # shellcheck disable=SC2034  # t_rest is read to consume the rest of the row
 while read -r t_flag t_rest; do
@@ -6526,6 +6526,22 @@ else
     skip "tool hook: $tn_label" "jq is not installed"
   done
 fi
+
+echo
+echo "agent notes: resume setting"
+
+fresh
+is "resume setting: on by default" "on" "$CT_RESUME_NOTE"
+fresh 'RESUME_NOTE=off'
+is "resume setting: reads off" "off" "$CT_RESUME_NOTE"
+fresh 'RESUME_NOTE=maybe'
+is "resume setting: an invalid value falls back" "on" "$CT_RESUME_NOTE"
+contains "resume setting: and is reported" "RESUME_NOTE=maybe is not valid, using on" "$CT_CONFIG_PROBLEMS"
+fresh
+bash "$SCRIPTS/setup.sh" --resume-note=off >/dev/null 2>&1
+ct_load_config
+is "resume setting: --resume-note is written" "off" "$CT_RESUME_NOTE"
+contains "resume setting: --show lists it" "Resume note" "$(bash "$SCRIPTS/setup.sh" --show 2>&1)"
 
 echo
 echo "----"
