@@ -6681,6 +6681,19 @@ else
 fi
 
 echo
+echo "time-awareness skill"
+
+ta_skill="$ROOT/skills/time-awareness/SKILL.md"
+asserts "skill: SKILL.md ships" test -r "$ta_skill"
+is "skill: named after its directory" "time-awareness" "$(sed -n 's/^name: //p' "$ta_skill" 2>/dev/null)"
+is "skill: hidden from the slash menu" "false" "$(sed -n 's/^user-invocable: //p' "$ta_skill" 2>/dev/null)"
+asserts "skill: the script it runs is where it says" test -r "$ROOT/skills/time-awareness/../../hooks/scripts/setup.sh"
+for ta_quote in "Turn running" "That Bash call took" "Previous session in this project ended" "Resuming this conversation"; do
+  contains "skill: explains '$ta_quote'" "$ta_quote" "$(cat "$ta_skill" 2>/dev/null)"
+done
+lacks "skill: no em dashes" "—" "$(cat "$ta_skill" 2>/dev/null)"
+
+echo
 echo "----"
 printf '%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
