@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.25](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.24...v0.0.25) (2026-09-15)
+
+
+### Features
+
+* add Codex compatibility ([#69](https://github.com/AraneaDev/claude-timestamp/issues/69)) ([04b384c](https://github.com/AraneaDev/claude-timestamp/commit/04b384c3f59cb402d5569f67b702d68021175f62))
+
 ## [0.0.24](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.23...v0.0.24) (2026-09-11)
 
 
