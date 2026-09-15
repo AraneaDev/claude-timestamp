@@ -2023,6 +2023,15 @@ if command -v jq >/dev/null 2>&1; then
   contains "Codex PostToolUse derives a slow-call note" "That Bash call took" "$cout"
   refutes "Codex PostToolUse clears the per-call start" test -e "$cstart"
 
+  printf '{"session_id":"codex","tool_use_id":"codex-scalar","tool_name":"Bash"}' \
+    | CT_CODEX_HOOK=1 CT_CLIENT=codex bash "$SCRIPTS/pre-tool-use.sh"
+  cscalar_start="$(ct_tool_start_file codex codex-scalar)"
+  printf '%s' "$(( $(date +%s) - 2 ))" > "$cscalar_start"
+  cscalar_out="$(printf '{"session_id":"codex","tool_use_id":"codex-scalar","tool_name":"Bash","tool_response":"error"}' \
+    | CT_CLIENT=codex bash "$SCRIPTS/post-tool-use.sh")"
+  contains "Codex scalar tool_response still gets a timing note" "That Bash call took" "$cscalar_out"
+  refutes "Codex scalar tool_response clears the per-call start" test -e "$cscalar_start"
+
   printf '{"session_id":"tools","tool_use_id":"t5","tool_name":"Bash","duration_ms":"soon"}' \
     | bash "$SCRIPTS/post-tool-use.sh"
   is "a duration that is not a number is not logged" "3" "$(wc -l < "$log" | tr -d ' ')"

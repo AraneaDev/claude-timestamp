@@ -50,7 +50,7 @@ command -v jq >/dev/null 2>&1 || exit 0
 # value nothing else here reads.
 IFS=$'\x1f' read -r session_id tool_name event ms tool_use_id agent_id outcome <<< "$(jq -r \
   '[(.session_id // "-"), (.tool_name // ""), (.hook_event_name // ""), (.duration_ms // "" | tostring), (.tool_use_id // ""), (.agent_id // ""),
-    (if .hook_event_name == "PostToolUseFailure" or .error != null or .success == false or .status == "error" or .status == "failed" or .tool_response.error != null then "fail" else "ok" end)] | join("\u001f")')"
+    (if .hook_event_name == "PostToolUseFailure" or .error != null or .success == false or .status == "error" or .status == "failed" or (.tool_response | if type == "object" then .error != null else false end) then "fail" else "ok" end)] | join("\u001f")')"
 
 # The prompt hook resolved the settings against the payload's cwd and left
 # them here, so this hook honours the same project config the marker does
