@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.27](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.26...v0.0.27) (2026-09-15)
+
+
+### Documentation
+
+* **readme:** credit the author and link the write-up ([#73](https://github.com/AraneaDev/claude-timestamp/issues/73)) ([f26cbb2](https://github.com/AraneaDev/claude-timestamp/commit/f26cbb274e4ea52a351efadb1441037c50be2d36))
+
 ## [0.0.26](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.25...v0.0.26) (2026-09-15)
 
 
