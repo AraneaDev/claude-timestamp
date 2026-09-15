@@ -212,7 +212,7 @@ jobs:
 
       - name: Validate JSON
         run: |
-          for f in .claude-plugin/plugin.json hooks/hooks.json; do
+          for f in .claude-plugin/plugin.json .codex-plugin/plugin.json plugin.json hooks/hooks.json hooks/codex-hooks.json; do
             jq -e . "$f" > /dev/null && echo "$f ok"
           done
 
@@ -231,4 +231,12 @@ jobs:
               status=1
             fi
           done < <(jq -r '.hooks[][].hooks[].command | scan("\\$CLAUDE_PLUGIN_ROOT/[^\"]+")' hooks/hooks.json)
+          while read -r path; do
+            if [ -f "$path" ]; then
+              echo "ok   $path"
+            else
+              echo "MISSING $path"
+              status=1
+            fi
+          done < <(jq -r '.hooks[][].hooks[].command | scan("hooks/scripts/[A-Za-z0-9_.-]+\\.sh")' hooks/codex-hooks.json | sort -u)
           exit $status

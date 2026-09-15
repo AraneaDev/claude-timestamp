@@ -1,13 +1,13 @@
 ---
 name: time-awareness
-description: Use when a claude-timestamp system reminder says how long a turn has run, that a tool call was slow, or that a conversation or project is resumed after a gap; when the user asks how long something took, when they started, or where their time went; and before writing a date into notes, memory, a commit or a document.
+description: Use when a claude-timestamp system reminder or Codex hook context says how long a turn has run, that a tool call was slow, or that a conversation or project is resumed after a gap; when the user asks how long something took, when they started, or where their time went; and before writing a date into notes, memory, a commit or a document.
 user-invocable: false
 ---
 
 # Time awareness
 
-claude-timestamp tells you about time in short system reminders. They state
-facts and nothing else. This is what to do with them.
+claude-timestamp tells you about time in short system reminders or hook context.
+They state facts and nothing else. This is what to do with them.
 
 ## The reminders
 
@@ -52,7 +52,11 @@ pull requests and CI runs, and files the user may have edited meanwhile.
 This session so far:
 
 ```bash
-bash "${CLAUDE_SKILL_DIR}/../../hooks/scripts/setup.sh" --session
+setup="$(git rev-parse --show-toplevel 2>/dev/null || true)/hooks/scripts/setup.sh"
+if [ ! -f "$setup" ] && [ -n "${CLAUDE_SKILL_DIR:-}" ]; then
+  setup="${CLAUDE_SKILL_DIR}/../../hooks/scripts/setup.sh"
+fi
+bash "$setup" --session
 ```
 
 In both reports, **waiting** is the time the user spent waiting for your
@@ -63,9 +67,13 @@ waiting for the user.
 Recorded sessions, all of them, the last week, or one project:
 
 ```bash
-bash "${CLAUDE_SKILL_DIR}/../../hooks/scripts/setup.sh" --stats
-bash "${CLAUDE_SKILL_DIR}/../../hooks/scripts/setup.sh" --stats --since=7d
-bash "${CLAUDE_SKILL_DIR}/../../hooks/scripts/setup.sh" --stats --project=NAME
+setup="$(git rev-parse --show-toplevel 2>/dev/null || true)/hooks/scripts/setup.sh"
+if [ ! -f "$setup" ] && [ -n "${CLAUDE_SKILL_DIR:-}" ]; then
+  setup="${CLAUDE_SKILL_DIR}/../../hooks/scripts/setup.sh"
+fi
+bash "$setup" --stats
+bash "$setup" --stats --since=7d
+bash "$setup" --stats --project=NAME
 ```
 
 Sessions carry a project name only when the user turned on `PROJECTS`;

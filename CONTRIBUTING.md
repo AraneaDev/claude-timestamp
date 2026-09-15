@@ -101,8 +101,8 @@ Automated by [release-please](https://github.com/googleapis/release-please) via
 
 1. Write commits on `main` following the convention above.
 2. release-please keeps a **Release PR** open and up to date, bumping
-   `.claude-plugin/plugin.json`, `version.txt` and the release manifest, and
-   writing `CHANGELOG.md`, all from those commits.
+   the Claude, Codex and universal plugin manifests, `version.txt` and the
+   release manifest, and writing `CHANGELOG.md`, all from those commits.
 3. CI runs on the Release PR by itself, because the workflow opens it with the
    `RELEASE_PLEASE_TOKEN` secret. Review it and merge.
 4. Merging that PR creates the `vX.Y.Z` tag and the GitHub Release, then the

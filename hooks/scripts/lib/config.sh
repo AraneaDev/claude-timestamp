@@ -1170,7 +1170,7 @@ ct_facts_path() {
 # "unknown", which covers a Claude Code too old to name itself as well as a
 # name that has no business being part of a filename or a JSON key.
 ct_client_key() {
-  local key="${CLAUDE_CODE_ENTRYPOINT:-}"
+  local key="${CLAUDE_CODE_ENTRYPOINT:-${CT_CLIENT:-}}"
   case "$key" in
     "" | *[!A-Za-z0-9_-]*) printf 'unknown' ;;
     *) printf '%s' "$key" ;;

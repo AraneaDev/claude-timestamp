@@ -1,0 +1,14 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "claude-timestamp",
+  "version": "0.0.24",
+  "description": "Track local time, turn duration, tool timing and session totals for Claude Code and Codex.",
+  "author": {
+    "name": "AraneaDev",
+    "url": "https://github.com/AraneaDev"
+  },
+  "homepage": "https://github.com/AraneaDev/claude-timestamp",
+  "repository": "https://github.com/AraneaDev/claude-timestamp",
+  "license": "MIT",
+  "keywords": ["timestamps", "time", "elapsed", "tool-timing", "session-tracking"]
+}

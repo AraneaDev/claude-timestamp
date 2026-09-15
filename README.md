@@ -8,7 +8,7 @@
 [![Release](https://img.shields.io/github/v/release/AraneaDev/claude-timestamp)](https://github.com/AraneaDev/claude-timestamp/releases)
 [![Tool page](https://img.shields.io/badge/tool%20page-aranea--development.nl-0b7285)](https://aranea-development.nl/en/tools/claude-timestamp)
 [![CI](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml/badge.svg)](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-1289%20passing-2b8a3e)](tests/run.sh)
+[![Tests](https://img.shields.io/badge/tests-1294%20passing-2b8a3e)](tests/run.sh)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-364fc7)](#platform-notes)
 [![Conventional Commits](https://img.shields.io/badge/commits-conventional-fe5196?logo=conventionalcommits&logoColor=white)](https://www.conventionalcommits.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
@@ -185,6 +185,35 @@ display event to attach a marker to, so nothing here can reach them. Cloud
 sessions on the web read hooks from the repository and from managed settings
 rather than from your `~/.claude`, so a personal install does not apply there
 either.
+
+### Codex compatibility
+
+The repository also carries the universal `plugin.json` and Codex
+`.codex-plugin/plugin.json` manifests. When the plugin is installed in Codex,
+its lifecycle hooks provide the prompt send time, slow-tool and heartbeat notes,
+resumption context, and end-of-session totals. Codex may ask you to review and
+trust the hooks in `/hooks` before they run; that is a Codex safety step, not a
+plugin setting. See the official [Codex hooks
+documentation](https://learn.chatgpt.com/docs/hooks).
+
+Codex has no Claude Code `MessageDisplay` event, so it cannot receive the
+per-message visual marker. Its model-facing timing context and session summary
+still work. Codex tool timing is measured from `PreToolUse` to `PostToolUse`
+when the payload does not include Claude Code's `duration_ms`, so those
+measurements have whole-second precision and include the local hook lifecycle.
+
+The `time-awareness` and `timestamps` skills are bundled for Codex. When using
+the repository directly, Codex also reads the root [AGENTS.md](AGENTS.md), and
+the CLI can show or change settings with the same validated configuration:
+
+```bash
+bash "$(git rev-parse --show-toplevel)/hooks/scripts/setup.sh" --show
+bash "$(git rev-parse --show-toplevel)/hooks/scripts/setup.sh" --tz=Europe/Amsterdam
+```
+
+The `/timestamps` command remains the Claude Code interface. Both clients use
+the same `~/.claude/claude-timestamp.conf` and history file, while active call
+state stays isolated by session.
 
 ### Windows: WSL and the desktop app are separate installs
 
@@ -590,7 +619,7 @@ no database.
 ## Development
 
 ```bash
-bash tests/run.sh                                    # 1289 assertions, no framework
+bash tests/run.sh                                    # 1294 assertions, no framework
 shellcheck -S style -e SC1091 hooks/scripts/**/*.sh  # clean
 bash tools/check-docs.sh                             # README against the code
 ```
@@ -654,10 +683,10 @@ While the version is below `1.0.0`, a feature bumps the patch number and a
 breaking change bumps the minor one, so the shape of the configuration can
 still settle without spending major versions on it.
 
-Merging the Release PR tags the release as `v<version>` and updates
-`plugin.json`, `version.txt`, the release manifest and the changelog together.
-`tools/check-docs.sh` fails if those ever disagree, and the release workflow
-checks the tag matches what it released.
+Merging the Release PR tags the release as `v<version>` and updates the Claude,
+Codex and universal plugin manifests, `version.txt`, the release manifest and
+the changelog together. `tools/check-docs.sh` fails if those ever disagree, and
+the release workflow checks the tag matches what it released.
 
 Versions and tags are not hand-edited. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
