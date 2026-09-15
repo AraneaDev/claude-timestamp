@@ -196,6 +196,26 @@ trust the hooks in `/hooks` before they run; that is a Codex safety step, not a
 plugin setting. See the official [Codex hooks
 documentation](https://learn.chatgpt.com/docs/hooks).
 
+#### Install in Codex CLI
+
+Codex CLI uses Codex-format marketplaces. In a Codex session, open `/plugins`,
+choose a configured marketplace that contains `claude-timestamp`, install it,
+and start a new session so the plugin is loaded. The equivalent CLI commands
+are:
+
+```bash
+codex plugin marketplace list
+codex plugin add claude-timestamp@aranea
+```
+
+The Claude marketplace URL in [Install](#install) is a Claude Code feed and
+cannot be passed directly to `codex plugin marketplace add` on current Codex
+CLI versions. Codex accepts a local or Git marketplace root containing
+`.agents/plugins/marketplace.json`; this repository currently provides the
+plugin package and its Codex manifest, but is not itself a marketplace root.
+If you maintain or receive a Codex marketplace entry for Aranea, add that
+marketplace first and then use the commands above.
+
 Codex has no Claude Code `MessageDisplay` event, so it cannot receive the
 per-message visual marker. Its model-facing timing context and session summary
 still work. Codex tool timing is measured from `PreToolUse` to `PostToolUse`
