@@ -710,10 +710,15 @@ the release workflow checks the tag matches what it released.
 
 Versions and tags are not hand-edited. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## Further reading
+
+- [Your Claude Code session has no clock](https://tim-schipper.nl/en/blog/claude-code-timestamps)
+
 ## License
 
 MIT
 
 ---
 
-Built by [Aranea Development](https://aranea-development.nl).
+Built by [Tim Schipper](https://tim-schipper.nl/en) and released as open source under
+[Aranea Development](https://aranea-development.nl).
