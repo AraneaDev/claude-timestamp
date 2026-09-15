@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.0.28](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.27...v0.0.28) (2026-09-15)
+
+
+### Continuous integration
+
+* **pr-title:** drop the duplicate Conventional Commit check ([#77](https://github.com/AraneaDev/claude-timestamp/issues/77)) ([b80acbd](https://github.com/AraneaDev/claude-timestamp/commit/b80acbd18172e8646d42f4c107e825c7864813f2))
+* **pr-title:** refuse a pull request title that is not a Conventional Commit ([#75](https://github.com/AraneaDev/claude-timestamp/issues/75)) ([59a71b3](https://github.com/AraneaDev/claude-timestamp/commit/59a71b3ba3353f0cb9f40495842a5859c600d788))
+
 ## [0.0.27](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.26...v0.0.27) (2026-09-15)
 
 
