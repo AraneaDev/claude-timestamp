@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.26](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.25...v0.0.26) (2026-09-15)
+
+
+### Documentation
+
+* clarify Codex installation ([#71](https://github.com/AraneaDev/claude-timestamp/issues/71)) ([6bd2e03](https://github.com/AraneaDev/claude-timestamp/commit/6bd2e0391cb1e84f2aee854d6180b4559f5203d8))
+
 ## [0.0.25](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.24...v0.0.25) (2026-09-15)
 
 
