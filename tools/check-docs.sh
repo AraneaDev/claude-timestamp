@@ -662,15 +662,20 @@ else
 fi
 
 echo "version agreement"
-# Three files carry the version, and release-please updates all of them. If
+# Five files carry the version, and release-please updates all of them. If
 # they ever disagree, an install and a release would claim different things.
 plugin_version="$(jq -r .version .claude-plugin/plugin.json)"
+codex_plugin_version="$(jq -r .version .codex-plugin/plugin.json)"
+portable_plugin_version="$(jq -r .version plugin.json)"
 file_version="$(tr -d '[:space:]' < version.txt)"
 manifest_version="$(jq -r '."."' .release-please-manifest.json)"
-if [ "$plugin_version" = "$file_version" ] && [ "$plugin_version" = "$manifest_version" ]; then
-  note "plugin.json, version.txt and the release manifest all say $plugin_version"
+if [ "$plugin_version" = "$codex_plugin_version" ] &&
+   [ "$plugin_version" = "$portable_plugin_version" ] &&
+   [ "$plugin_version" = "$file_version" ] &&
+   [ "$plugin_version" = "$manifest_version" ]; then
+  note "all plugin manifests, version.txt and the release manifest agree at $plugin_version"
 else
-  note "disagreement: plugin.json=$plugin_version version.txt=$file_version manifest=$manifest_version"
+  note "disagreement: claude=$plugin_version codex=$codex_plugin_version portable=$portable_plugin_version version.txt=$file_version manifest=$manifest_version"
   status=1
 fi
 

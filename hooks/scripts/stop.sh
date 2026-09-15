@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Stop and StopFailure hook -- closes the turn a prompt opened.
+# Stop, StopFailure and Codex Interrupt hook -- closes the turn a prompt opened.
 #
 # This is the event that knows a turn ended. Before it was bound, the elapsed
 # marker's own measurement was the closest thing available, so message-display

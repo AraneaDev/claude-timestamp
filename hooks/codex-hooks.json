@@ -1,0 +1,85 @@
+{
+  "description": "Codex lifecycle hooks for claude-timestamp.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CT_CLIENT=codex bash \"${PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/hooks/scripts/session-start.sh\"",
+            "timeout": 5,
+            "additionalContextLimit": 1000
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CT_CLIENT=codex bash \"${PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/hooks/scripts/user-prompt-submit.sh\"",
+            "timeout": 5,
+            "additionalContextLimit": 1000
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CT_CLIENT=codex CT_CODEX_HOOK=1 bash \"${PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/hooks/scripts/pre-tool-use.sh\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CT_CLIENT=codex CT_CODEX_HOOK=1 bash \"${PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/hooks/scripts/post-tool-use.sh\"",
+            "timeout": 5,
+            "additionalContextLimit": 1000
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CT_CLIENT=codex bash \"${PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/hooks/scripts/stop.sh\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Interrupt": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CT_CLIENT=codex bash \"${PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/hooks/scripts/stop.sh\"",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CT_CLIENT=codex bash \"${PLUGIN_ROOT:-$CLAUDE_PLUGIN_ROOT}/hooks/scripts/session-end.sh\"",
+            "timeout": 3
+          }
+        ]
+      }
+    ]
+  }
+}

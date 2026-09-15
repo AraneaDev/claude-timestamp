@@ -175,6 +175,20 @@ ct_turn_tool_log() {
   printf '%s.turntools' "$_CT_STATE_FILE"
 }
 
+# The Claude hook payload includes duration_ms. Codex's PostToolUse payload
+# does not promise that field, so its PreToolUse compatibility hook records a
+# small per-call start marker and post-tool-use.sh can derive the duration when
+# needed. The tool id is reduced with the same rule as session ids so payload
+# data never becomes a path.
+ct_tool_start_file() {
+  local sid tid
+  ct_state_file_var "${1:-}" || return 1
+  tid="${2:-}"
+  tid="${tid//[!A-Za-z0-9_-]/}"
+  [ -n "$tid" ] || return 1
+  printf '%s.tool-%s.start' "$_CT_STATE_FILE" "$tid"
+}
+
 # Name the tool responsible for a slow turn, or say nothing.
 #
 # A tool has to account for at least half the turn before it is worth naming.

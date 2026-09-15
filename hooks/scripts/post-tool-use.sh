@@ -48,8 +48,9 @@ command -v jq >/dev/null 2>&1 || exit 0
 # message-display.sh apply. jq reads the payload from stdin itself: holding it
 # in a variable first cost a `cat` and a subshell on every tool call, for a
 # value nothing else here reads.
-IFS=$'\x1f' read -r session_id tool_name event ms agent_id <<< "$(jq -r \
-  '[(.session_id // "-"), (.tool_name // ""), (.hook_event_name // ""), (.duration_ms // "" | tostring), (.agent_id // "")] | join("\u001f")')"
+IFS=$'\x1f' read -r session_id tool_name event ms tool_use_id agent_id outcome <<< "$(jq -r \
+  '[(.session_id // "-"), (.tool_name // ""), (.hook_event_name // ""), (.duration_ms // "" | tostring), (.tool_use_id // ""), (.agent_id // ""),
+    (if .hook_event_name == "PostToolUseFailure" or .error != null or .success == false or .status == "error" or .status == "failed" or .tool_response.error != null then "fail" else "ok" end)] | join("\u001f")')"
 
 # The prompt hook resolved the settings against the payload's cwd and left
 # them here, so this hook honours the same project config the marker does
@@ -77,8 +78,24 @@ case "$tool_name" in ''|*[![:alnum:]_-]*) tool_name="unknown" ;; esac
 # Tool calls run in parallel, so a counter would be a read-modify-write on a
 # file several copies of this hook hold open at once, which is the lost-update
 # hazard the log's own append-only shape exists to avoid.
-outcome=ok
-[ "$event" = "PostToolUseFailure" ] && outcome=fail
+# Claude Code supplies duration_ms. Codex measures from its PreToolUse hook
+# when that field is absent. A whole-second fallback is intentional: Codex's
+# documented payload has no subsecond duration, and inventing precision here
+# would make the displayed number look more exact than the measurement.
+if [ -z "$ms" ] && [ -n "$tool_use_id" ]; then
+  start_file="$(ct_tool_start_file "$session_id" "$tool_use_id" 2>/dev/null || true)"
+  if [ -n "$start_file" ] && [ -r "$start_file" ]; then
+    started="$(ct_read_counter "$start_file")"
+    rm -f "$start_file" 2>/dev/null || true
+    now="$(date +%s)"
+    if [ "$started" -gt 0 ] && [ "$now" -ge "$started" ]; then
+      ms=$(( (now - started) * 1000 ))
+    fi
+  fi
+elif [ -n "$tool_use_id" ]; then
+  start_file="$(ct_tool_start_file "$session_id" "$tool_use_id" 2>/dev/null || true)"
+  [ -z "$start_file" ] || rm -f "$start_file" 2>/dev/null || true
+fi
 
 # Absent, or not composed entirely of digits: there is no usable duration, so
 # the call goes unrecorded rather than logged with a made-up number, and no
@@ -96,6 +113,10 @@ case "$ms" in
   ''|*[!0-9]*) ms="" ;;
   *) if [ "${#ms}" -gt 15 ]; then ms=""; else ms=$((10#$ms)); fi ;;
 esac
+
+# The outcome is parsed above so Codex's single PostToolUse event can still
+# contribute to failure counts. Claude Code's PostToolUseFailure remains
+# covered by the same expression.
 
 # The two log paths are ct_tool_log and ct_turn_tool_log, spelled out from
 # ct_state_file_var so that resolving them forks nothing.

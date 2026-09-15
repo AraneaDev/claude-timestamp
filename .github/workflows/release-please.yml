@@ -67,6 +67,10 @@ jobs:
         env:
           TAG: ${{ steps.release.outputs.tag_name }}
         run: |
-          version="$(jq -r .version .claude-plugin/plugin.json)"
-          echo "tag: $TAG   plugin.json: $version"
-          [ "$TAG" = "v${version}" ]
+          claude_version="$(jq -r .version .claude-plugin/plugin.json)"
+          codex_version="$(jq -r .version .codex-plugin/plugin.json)"
+          portable_version="$(jq -r .version plugin.json)"
+          echo "tag: $TAG   Claude: $claude_version   Codex: $codex_version   universal: $portable_version"
+          [ "$TAG" = "v${claude_version}" ]
+          [ "$claude_version" = "$codex_version" ]
+          [ "$claude_version" = "$portable_version" ]
