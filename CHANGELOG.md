@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.30](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.29...v0.0.30) (2026-09-16)
+
+
+### Continuous integration
+
+* **pr-title:** check out the base branch, not the pull request's pinned base commit ([#80](https://github.com/AraneaDev/claude-timestamp/issues/80)) ([515f6ec](https://github.com/AraneaDev/claude-timestamp/commit/515f6ec725e791873764bc5f87042805fa066389))
+
 ## [0.0.29](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.28...v0.0.29) (2026-09-16)
 
 
