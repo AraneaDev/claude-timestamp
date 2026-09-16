@@ -15,15 +15,19 @@
 
 <img src="assets/timestamps.webp" alt="A real Claude Code session, timestamps on assistant messages, with a slow turn highlighted" width="840">
 
-<sub>Two fast turns render dim. The third crosses the slow threshold, so its duration is coloured and, with `TOOL_TIMING` on, named after the tool that caused it. Tool timing is off by default, so a plain install will not show this on its own. This is a real session played back at real speed -- nothing here is sped up or looped faster than it happened.</sub>
+<sub>Two fast turns render dim. The third crosses the slow threshold, so its duration is coloured and, with `TOOL_TIMING` on, named after the tool that caused it. Tool timing is off by default, so a plain install will not show this on its own. This is a real session played back at real speed. Nothing here is sped up or looped faster than it happened.</sub>
 
 </div>
 
 ---
 
-A Claude Code plugin. It puts your local time on every assistant message, shows
-how long each turn took, and tells Claude when your prompt was sent, so a long
-conversation can be scanned, timed, and referred back to.
+**TL;DR:** Claude Timestamp adds local time and turn duration to Claude Code's display. Its
+plugin hook measures prompts, replies, gaps, and tool calls, then marks slow work on screen and
+optionally sends concise timing context to Claude.
+
+It puts your local time on every assistant message, shows how long each turn took, and tells
+Claude when your prompt was sent, so a long conversation can be scanned, timed, and referred back
+to.
 
 Claude gets more than the clock, too. It hears when a turn has run long, when
 one command was slow, and when a project or conversation is picked up after a
@@ -56,15 +60,15 @@ There is nothing to set up. The defaults work as soon as it is installed, and
 - **Summarises the session.** On exit: how long it ran, how many turns, how
   much of that you spent waiting, and how much you were away. Waiting and away
   never cover the same seconds, so the two add up to no more than the session
-  itself. Optionally which tools were slowest and how many calls failed.
+  itself. It can also list the slowest tools and the calls that failed.
 
 ```text
 claude-timestamp: session lasted 1h30m over 12 turns, 24m18s of it waiting, 35m00s away.
 slowest tools: Bash 41.2s (18 calls), WebFetch 8.1s (1 call), Read 2.0s (37 calls). 2 failed
 ```
 
-The gap divider and that closing summary, in one screenshot -- the same session
-this example is drawn from:
+The gap divider and closing summary appear in one screenshot from the same session
+used for this example:
 
 <p align="center">
   <img src="assets/session.webp" alt="An idle divider above a stamped message, and the end-of-session summary below it" width="700">

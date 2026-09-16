@@ -12,6 +12,7 @@
       "bump-patch-for-minor-pre-major": true,
 
       "changelog-path": "CHANGELOG.md",
+      "exclude-paths": ["README.md", "CHANGELOG.md", "docs", "test", "tests", ".github", "assets"],
       "changelog-sections": [
         { "type": "feat",     "section": "Features" },
         { "type": "fix",      "section": "Fixes" },
