@@ -402,17 +402,19 @@ fi
 echo "commit title types agree with release-please"
 # tools/check-commit-title.sh reads its accepted types from
 # release-please-config.json via jq, except when jq is unavailable -- the
-# commit-msg hook's case, never CI's -- where it falls back to a hardcoded
-# copy of the same list. A copy is a second thing to keep in step, so assert
-# it still says what the config says.
+# commit-msg hook's case, never CI's -- where it falls back to the conventional
+# set. That fallback is deliberately a superset: accepting a type the config
+# does not list costs a local commit a second attempt, while failing to accept
+# one it does list refuses a commit that is actually fine. What must never
+# happen is a configured type the fallback would reject, so assert that.
 ct_config_types="$(jq -r '.packages["."]["changelog-sections"][].type' release-please-config.json | sort -u)"
-ct_fallback_types="$(sed -n '/types="feat$/,/chore"$/p' tools/check-commit-title.sh |
-  sed 's/^[[:space:]]*types="//;s/"$//' | sort -u)"
-if [ "$ct_config_types" = "$ct_fallback_types" ]; then
-  gate commit-title-types 1 "check-commit-title.sh's no-jq fallback matches release-please-config.json"
+ct_fallback_types="$(sed -n "s/^types='\(.*\)'$/\1/p" tools/check-commit-title.sh | tr '|' '\n' | sort -u)"
+ct_missing="$(comm -23 <(printf '%s\n' "$ct_config_types") <(printf '%s\n' "$ct_fallback_types") | tr '\n' ' ')"
+if [ -n "$ct_fallback_types" ] && [ -z "${ct_missing// /}" ]; then
+  gate commit-title-types 1 "check-commit-title.sh's no-jq fallback covers every type in release-please-config.json"
 else
   gate commit-title-types 0 \
-    "check-commit-title.sh's no-jq fallback ($ct_fallback_types) disagrees with release-please-config.json ($ct_config_types)"
+    "check-commit-title.sh's no-jq fallback is missing configured types ($ct_missing)"
 fi
 
 echo "CONTRIBUTING's commit type list agrees with release-please"
