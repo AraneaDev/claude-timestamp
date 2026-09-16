@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.0.32](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.31...v0.0.32) (2026-09-16)
+
+
+### Fixes
+
+* ignore release configuration changes ([#86](https://github.com/AraneaDev/claude-timestamp/issues/86)) ([10e5d91](https://github.com/AraneaDev/claude-timestamp/commit/10e5d917bc9ddbfeddf62d908d6386157f7db044))
+
+
+### Documentation
+
+* refresh README and release filters ([#84](https://github.com/AraneaDev/claude-timestamp/issues/84)) ([a792878](https://github.com/AraneaDev/claude-timestamp/commit/a792878422c1db0d52d6e0e4a6beca203039259d))
+
 ## [0.0.31](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.30...v0.0.31) (2026-09-16)
 
 
