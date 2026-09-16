@@ -1,0 +1,58 @@
+name: PR Title
+
+# pull_request_target, not pull_request: the workflow definition and the script
+# it runs are taken from the base branch, so a pull request cannot weaken or
+# delete this check in the same change it is meant to police. That trigger runs
+# in a trusted context, so this job MUST stay base-only -- it checks out the
+# base commit, never the pull request's own tree, and runs nothing from it.
+#
+# The consequence to know: the version that runs is the one on main, so an edit
+# to the check itself is only exercised after it merges.
+on:
+  pull_request_target:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  conventional-title:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # The base commit, at full depth: the commit walk below needs the history
+      # the pull request branched from, and the script comes from here rather
+      # than from the branch under review.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      # A squash merge of a multi-commit branch takes the PR title as the commit
+      # subject, so the title -- not the branch's own commits -- is what
+      # release-please parses on main.
+      #
+      # The title is passed through the environment rather than interpolated
+      # into the script: it is attacker-controlled text, and under
+      # pull_request_target this is a trusted runner.
+      - name: Check the pull request title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: bash tools/check-commit-title.sh "$PR_TITLE"
+
+      # A branch that is rebased onto main instead of squashed puts its own
+      # subjects on main, so those are checked too. The pull request's commits
+      # are fetched as data and never executed.
+      - name: Check every commit on the branch
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          git fetch --quiet origin "refs/pull/$PR_NUMBER/head"
+          status=0
+          while IFS= read -r subject; do
+            [ -n "$subject" ] || continue
+            bash tools/check-commit-title.sh "$subject" || status=1
+          done < <(git log --format='%s' "$BASE_SHA..FETCH_HEAD")
+          exit "$status"
