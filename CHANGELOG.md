@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.31](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.30...v0.0.31) (2026-09-16)
+
+
+### Continuous integration
+
+* **release:** allow Release Please to be run by hand ([#82](https://github.com/AraneaDev/claude-timestamp/issues/82)) ([5b521bb](https://github.com/AraneaDev/claude-timestamp/commit/5b521bbb88cf114d059ae77c0c5d9f334c2dd059))
+
 ## [0.0.30](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.29...v0.0.30) (2026-09-16)
 
 
