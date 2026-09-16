@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "claude-timestamp",
-  "version": "0.0.28",
+  "version": "0.0.29",
   "description": "Track local time, turn duration, tool timing and session totals for Claude Code and Codex.",
   "author": {
     "name": "AraneaDev",

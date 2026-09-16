@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.29](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.28...v0.0.29) (2026-09-16)
+
+
+### Continuous integration
+
+* **pr-title:** move the title check to pull_request_target and the house rule ([#78](https://github.com/AraneaDev/claude-timestamp/issues/78)) ([abacbeb](https://github.com/AraneaDev/claude-timestamp/commit/abacbeb6d4ec212a65a40fea516c2f92cc5fef7b))
+
 ## [0.0.28](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.27...v0.0.28) (2026-09-15)
 
 
