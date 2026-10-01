@@ -849,3 +849,32 @@ ct_prune_state() {
   fi
   return 0
 }
+
+# Keep the duration memory small: the last 20 runs of each command in each
+# project, nothing older than 90 days, and 5,000 lines at most, newest kept.
+# Anything that is not a whole five-field line is dropped on the way.
+#   $1 the file   $2 now (epoch)
+#
+# Written to a temp file and moved into place, so a reader never sees half a
+# file. A line appended by another session between the read and the move is
+# lost; that costs one sample, never the file.
+ct_prune_commands() {
+  local file="${1:-}" now="${2:-}" tmp
+  [ -f "$file" ] || return 0
+  case "$now" in ''|*[!0-9]*) return 0 ;; esac
+  tmp="$file.$$"
+  if awk -F '\t' -v cutoff="$(( now - 7776000 ))" '
+      NF == 5 && $1 ~ /^[0-9]+$/ && $4 ~ /^[0-9]+$/ && ($5 == "ok" || $5 == "fail") && $1 + 0 >= cutoff {
+        line[++n] = $0; k[n] = $2 "\t" $3
+      }
+      END {
+        kept = 0
+        for (i = n; i >= 1; i--) if (++seen[k[i]] <= 20 && ++kept <= 5000) keep[i] = 1
+        for (i = 1; i <= n; i++) if (keep[i]) print line[i]
+      }' "$file" > "$tmp" 2>/dev/null; then
+    mv "$tmp" "$file" 2>/dev/null || rm -f "$tmp" 2>/dev/null
+  else
+    rm -f "$tmp" 2>/dev/null
+  fi
+  return 0
+}

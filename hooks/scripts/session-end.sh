@@ -27,6 +27,11 @@ IFS=$'\x1f' read -r session_id cwd <<< "$(printf '%s' "$input" \
 
 ct_load_config "$cwd"
 
+# Pruned here, once per session, rather than at the rate it is written.
+# Independent of ENABLED and COMMAND_MEMORY: switching either off keeps the
+# file, and keeping it bounded is still this plugin's job.
+ct_prune_commands "$(ct_commands_path)" "$(date +%s)"
+
 # The master switch gates everything that draws on screen or talks to the
 # model, but not cleanup: a session switched off mid-way still accumulated
 # state files, and skipping the clear here would strand them until the 7-day

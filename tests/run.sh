@@ -7044,6 +7044,30 @@ else
 fi
 
 echo
+echo "command memory: pruning"
+
+fresh
+pr_now=2000000000
+pr_file="$WORK/prune.tsv"
+awk -v now="$pr_now" 'BEGIN { for (i = 1; i <= 25; i++) printf "%d\tp\tnpm test\t%d\tok\n", now - 100 + i, i }' > "$pr_file"
+{
+  printf '%s\tp\tmake\t5\tok\n' "$(( pr_now - 8000000 ))"
+  printf '%s\tp\tbroken\n' "$pr_now"
+  printf '%s\tp\ttorn\t12' "$pr_now"
+} >> "$pr_file"
+ct_prune_commands "$pr_file" "$pr_now"
+is "prune: twenty runs per key are kept" "20" "$(grep -c 'npm test' "$pr_file")"
+is "prune: the oldest go first" "6" "$(head -n 1 "$pr_file" | cut -f4)"
+refutes "prune: runs older than 90 days go" grep -q 'make' "$pr_file"
+refutes "prune: a malformed line goes" grep -q 'broken' "$pr_file"
+refutes "prune: a torn line goes" grep -q 'torn' "$pr_file"
+awk -v now="$pr_now" 'BEGIN { for (i = 1; i <= 5100; i++) printf "%d\tp\tk%d\t1\tok\n", now, i }' > "$pr_file"
+ct_prune_commands "$pr_file" "$pr_now"
+is "prune: at most 5000 lines" "5000" "$(wc -l < "$pr_file" | tr -d ' ')"
+is "prune: the newest are kept" "k101" "$(head -n 1 "$pr_file" | cut -f3)"
+asserts "prune: a missing file is fine" ct_prune_commands "$WORK/absent.tsv" "$pr_now"
+
+echo
 echo "----"
 printf '%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
