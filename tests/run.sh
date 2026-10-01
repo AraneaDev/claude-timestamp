@@ -7018,6 +7018,15 @@ body line")"
   # Subshells and groups are keyed on the command inside them.
   is "key: a subshell keys on its command" "npm test" "$(ck '(cd sub && npm test)')"
   is "key: a group keys on its command" "npm test" "$(ck '{ cd sub && npm test; }')"
+  # ${...} and $(...) belong to the word they sit in, so an env prefix
+  # carrying one is still stripped whole.
+  # shellcheck disable=SC2016  # the $ is the input under test, not an expansion
+  {
+    is "key: an env prefix with \${} is stripped whole" "npm test" "$(ck 'NODE_ENV=${ENV} npm test')"
+    is "key: an env prefix with \$() is stripped whole" "make build" "$(ck 'GIT_SHA=$(git rev-parse HEAD) make build')"
+    is "key: a PATH prefix with \$() is stripped whole" "make" "$(ck 'PATH=$PATH:$(pwd)/bin make')"
+    is "key: a command substitution as the program is no key" "" "$(ck '$(cat token) --flag')"
+  }
   is "key: braces inside quotes are left alone" "awk file" "$(ck "awk '{print \$1}' file")"
   is "key: at most 60 characters" "60" "$(ck "$(printf 'x%.0s' $(seq 1 200))" | tr -d '\r\n' | wc -c | tr -d ' ')"
 else
@@ -7025,7 +7034,7 @@ else
                   "heredoc" "pipe" "two args" "test file" "assignment" "empty" "non-string" \
                   "tabs" "non-ascii" "user@host" "scp" "ssh clone" "scoped" "node id" "echo" \
                   "printf" "token" "long" "long fast" "sudo flag" "time flag" "subshell" "group" \
-                  "quoted braces" "60 chars"; do
+                  "quoted braces" "env brace" "env paren" "path paren" "subst program" "60 chars"; do
     skip "key: $ck_label" "jq is not installed"
   done
 fi
@@ -7321,6 +7330,12 @@ if command -v jq >/dev/null 2>&1; then
   out="$(bash "$SCRIPTS/setup.sh" --commands --stats 2>&1)"; rc=$?
   is "report fixes: --commands with --stats is refused" "2" "$rc"
   contains "report fixes: and says to pick one" "Pick one report" "$out"
+  is "report fixes: --project=all says so in JSON" "null true" \
+    "$(bash "$SCRIPTS/setup.sh" --commands --project=all --json | jq -r '"\(.project) \(.all)"')"
+  is "report fixes: a project named all is a name in JSON" "all false" \
+    "$(cd "$WORK/all" && bash "$SCRIPTS/setup.sh" --commands --json | jq -r '"\(.project) \(.all)"')"
+  out="$(bash "$SCRIPTS/setup.sh" --commands --session 2>&1)"; rc=$?
+  is "report fixes: --commands with --session is refused" "2" "$rc"
   out="$(bash "$SCRIPTS/setup.sh" --commands --turns 2>&1)"; rc=$?
   is "report fixes: --commands with --turns is refused" "2" "$rc"
   out="$(cd "$WORK/hm" && HOME="$WORK/hm" bash "$SCRIPTS/setup.sh" --commands 2>&1)"
@@ -7339,6 +7354,7 @@ if command -v jq >/dev/null 2>&1; then
     "$(bash "$SCRIPTS/setup.sh" --commands --project=cols | awk '/4m00s/ { print index($0, "4m00s") }' | sort -u | wc -l | tr -d ' ')"
 else
   for rf_label in "named all" "only own" "stderr" "note" "project all" "stats refused" "pick one" \
+                  "json all mode" "json all name" "session refused" \
                   "turns refused" "outside project" "project config" "doctor" "columns"; do
     skip "report fixes: $rf_label" "jq is not installed"
   done

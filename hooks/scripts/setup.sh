@@ -842,8 +842,10 @@ _ct_turn_rows() {
       # cannot have run for less than nothing.
       secs=$(( now - start ))
       if [ "$secs" -lt 0 ]; then secs=0; fi
+      start_iso="-"
+      [ "$want_iso" = "1" ] && start_iso="$(ct_format_epoch "$start" "$iso")"
       printf '%s\t%s\t-\t%s\t-\t-\t-\t%s\topen\t%s\t-\n' "$(ct_read_counter "${base}.turns")" "$start" \
-        "$secs" "$(ct_read_counter "${base}.hb")" "$(ct_format_epoch "$start" "$iso")"
+        "$secs" "$(ct_read_counter "${base}.hb")" "$start_iso"
     fi
   fi
   return 0
@@ -945,7 +947,7 @@ commands_report() {
   if [ -z "$mode" ] && { [ -z "$project" ] || [ "$project" = "-" ]; }; then
     if [ "$CT_JSON" = "1" ]; then
       command -v jq >/dev/null 2>&1 || { echo "--json needs jq." >&2; return 2; }
-      jq -n '{project: null, commands: []}'
+      jq -n '{project: null, all: false, commands: []}'
       return $?
     fi
     echo "claude-timestamp keeps commands per project, and this directory is not in one."
@@ -955,8 +957,9 @@ commands_report() {
   rows="$(ct_command_stats "$file" "$project" "$mode")"
   if [ "$CT_JSON" = "1" ]; then
     command -v jq >/dev/null 2>&1 || { echo "--json needs jq." >&2; return 2; }
-    printf '%s\n' "$rows" | jq -R -s --arg project "${mode:-$project}" --arg mode "$mode" '
-      {project: $project,
+    # project is only ever a name; the all-projects mode says so in all.
+    printf '%s\n' "$rows" | jq -R -s --arg project "$project" --arg mode "$mode" '
+      {project: (if $mode == "all" then null else $project end), all: ($mode == "all"),
        commands: [split("\n")[] | select(length > 0) | split("\t")
          | if $mode == "all"
            then {project: .[0], key: .[1], runs: (.[2] | tonumber), median_ms: (.[3] | tonumber), last_ms: (.[4] | tonumber), failed: (.[5] | tonumber)}

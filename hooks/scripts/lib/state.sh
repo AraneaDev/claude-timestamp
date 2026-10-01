@@ -27,7 +27,9 @@
 # call it already makes. Written without regex builtins, which a jq built
 # without oniguruma lacks; 34 and 39 are the double and single quote, and
 # 40, 41, 123 and 125 the parentheses and braces of a subshell or a group,
-# blanked outside quotes so the command inside them is what gets keyed.
+# blanked outside quotes so the command inside them is what gets keyed. After
+# a $ (36) they open ${...} or $(...) instead, which is skipped like a quote:
+# it belongs to the word it sits in, so NODE_ENV=${ENV} stays one prefix.
 #
 #   first line only (heredocs) -> quoted text blanked -> last segment of
 #   && || ; -> first segment of | -> leading VAR=x, env, time, sudo, nice,
@@ -42,11 +44,13 @@
 # shellcheck disable=SC2016,SC2034  # jq source, not shell; read by the hooks that source this file
 CT_JQ_CMDKEY='def ct_cmdkey:
   def unquote:
-    [foreach explode[] as $c ({q: null, e: null};
-      if .q != null then (if $c == .q then .q = null else . end) | .e = null
-      elif $c == 34 or $c == 39 then .q = $c | .e = 32
-      elif $c == 40 or $c == 41 or $c == 123 or $c == 125 then .e = 32
-      else .e = $c end;
+    [foreach explode[] as $c ({q: null, e: null, p: null};
+      (if .q != null then (if $c == .q then .q = null else . end) | .e = null
+       elif .p == 36 and $c == 40 then .q = 41 | .e = null
+       elif .p == 36 and $c == 123 then .q = 125 | .e = null
+       elif $c == 34 or $c == 39 then .q = $c | .e = 32
+       elif $c == 40 or $c == 41 or $c == 123 or $c == 125 then .e = 32
+       else .e = $c end) | .p = $c;
       .e // empty)] | implode;
   def splitall($seps): reduce $seps[] as $s ([.]; (map(split($s)) | add) // []);
   def words: split(" ") | map(select(length > 0));
@@ -476,12 +480,14 @@ ct_turn_tool_summary() {
 
 # Append a closed turn to the session's timeline, <state>.turnlog. Called from
 # ct_close_turn only, after .closed is written, so a turn is recorded once.
-#   $1 state file   $2 start   $3 end   $4 stop|interrupted
+#   $1 state file   $2 start   $3 end   $4 stop|interrupted|error
+#   $5 the tool timing in force during the turn (optional)
 #
 # Read before the next ct_turn_open, which is the only thing that clears .hb;
 # the per-turn tool log is cleared by the prompt hook after the close, too.
-# Whether tool timing was on comes from the flag the prompt hook staged, so
-# "no calls" (0) and "not measured" (-) stay distinguishable.
+# Whether tool timing was on comes from $5 or, without it, from the flag the
+# prompt hook staged, so "no calls" (0) and "not measured" (-) stay
+# distinguishable.
 ct_append_turn() {
   local base="${1:-}" started="${2:-0}" ended="${3:-0}" how="${4:-stop}" timing="${5:-}" n hb tools
   [ -n "$base" ] || return 0
@@ -951,7 +957,8 @@ ct_slow_commands_note() {
     return 0
   fi
   while IFS=$'\t' read -r key runs med _; do
-    case "$runs$med" in ''|*[!0-9]*) continue ;; esac
+    case "$runs" in ''|*[!0-9]*) continue ;; esac
+    case "$med" in ''|*[!0-9]*) continue ;; esac
     [ "$runs" -ge 3 ] || continue
     [ $(( med / 1000 )) -ge "$after" ] || continue
     list="${list:+$list, }$key ~$(ct_format_duration $(( med / 1000 ))) ($runs runs)"
