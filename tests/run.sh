@@ -6835,6 +6835,52 @@ else
 fi
 
 echo
+echo "turn timeline: reports"
+
+if command -v jq >/dev/null 2>&1; then
+  tr_run() { env CLAUDE_CODE_SESSION_ID=tr bash "$SCRIPTS/setup.sh" "$@" 2>&1; }
+  fresh 'TZ=UTC'
+  printf '{"session_id":"tr"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  printf '{"session_id":"tr","hook_event_name":"Stop"}' | bash "$SCRIPTS/stop.sh"
+  printf '{"session_id":"tr"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  out="$(tr_run --turns)"
+  contains "turns: a header" "claude-timestamp turns" "$out"
+  contains "turns: the closed turn, closed by Stop" "stop" "$out"
+  contains "turns: the open turn last" "open" "$out"
+  js="$(tr_run --turns --json)"
+  is "turns json: two turns" "2" "$(printf '%s' "$js" | jq '.turns | length')"
+  is "turns json: the open turn has no end" "null" "$(printf '%s' "$js" | jq '.turns[1].end')"
+  is "turns json: unmeasured tools are null" "null" "$(printf '%s' "$js" | jq '.turns[0].tools')"
+  is "turns json: local start carries the zone offset" "+0000" "$(printf '%s' "$js" | jq -r '.turns[0].start_local[-5:]')"
+  sj="$(tr_run --session --json)"
+  is "session json: turn count" "2" "$(printf '%s' "$sj" | jq '.turn_count')"
+  is "session json: carries the turns" "2" "$(printf '%s' "$sj" | jq '.turns | length')"
+  contains "session json: waiting agrees with the plain report" \
+    "waiting         $(ct_format_duration "$(printf '%s' "$sj" | jq '.waiting')")" "$(tr_run --session)"
+
+  # A half-written last line is an append cut short; it is skipped, not parsed.
+  printf '3\t17' >> "$(ct_state_file tr).turnlog"
+  is "turns json: a torn line is skipped" "2" "$(tr_run --turns --json | jq '.turns | length')"
+
+  # Run from a directory whose config pins another zone: the session's staged zone wins.
+  printf 'TZ=Asia/Tokyo\n' > "$CLAUDE_TIMESTAMP_CONFIG"
+  is "turns json: the session's staged zone wins" "+0000" "$(tr_run --turns --json | jq -r '.turns[0].start_local[-5:]')"
+
+  out="$(tr_run --stats --json)"; rc=$?
+  is "json: refused with --stats" "2" "$rc"
+  out="$(tr_run --turns --tool-timing=on)"; rc=$?
+  is "turns: refuses a setting flag" "2" "$rc"
+  out="$(CLAUDE_CODE_SESSION_ID='' bash "$SCRIPTS/setup.sh" --turns 2>&1)"; rc=$?
+  is "turns: without a session id it exits 2" "2" "$rc"
+else
+  for tr_label in "header" "closed" "open" "two turns" "open end" "tools null" "offset" \
+                  "turn count" "turns" "waiting" "torn line" "staged zone" "stats json" \
+                  "refuses setting" "no id"; do
+    skip "turn reports: $tr_label" "jq is not installed"
+  done
+fi
+
+echo
 echo "----"
 printf '%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
