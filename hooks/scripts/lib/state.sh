@@ -17,6 +17,50 @@
 # is the day something fails at load time in a hook nobody is watching. Do not
 # "simplify" a consumer to source this file on its own.
 
+# The jq definition that reduces a Bash command to the key the duration memory
+# stores: the program and up to two plain arguments, e.g. "npm test" or
+# "bash tests/run.sh". Never the full command: quoted text, flags, absolute
+# paths, home-relative paths, URLs and numbers are never kept, and the first
+# argument that is one of those ends the key.
+#
+# A string rather than a file so post-tool-use.sh can prepend it to the one jq
+# call it already makes. Written without regex builtins, which a jq built
+# without oniguruma lacks; 34 and 39 are the double and single quote.
+#
+#   first line only (heredocs) -> quoted text blanked -> last segment of
+#   && || ; -> first segment of | -> leading VAR=x, env, time, sudo, nice,
+#   command stripped -> basename of the program -> at most two arguments made
+#   of [A-Za-z0-9._/@:+-], not starting with - / ~, without :// or .., not all
+#   digits -> 60 characters.
+# shellcheck disable=SC2016,SC2034  # jq source, not shell; read by the hooks that source this file
+CT_JQ_CMDKEY='def ct_cmdkey:
+  def unquote:
+    reduce explode[] as $c ({q: null, o: []};
+      if .q != null then (if $c == .q then .q = null else . end)
+      elif $c == 34 or $c == 39 then .q = $c | .o += [32]
+      else .o += [$c] end) | .o | implode;
+  def splitall($seps): reduce $seps[] as $s ([.]; (map(split($s)) | add) // []);
+  def words: split(" ") | map(select(length > 0));
+  def plain: explode | length > 0 and all(.[];
+      (. >= 48 and . <= 57) or (. >= 65 and . <= 90) or (. >= 97 and . <= 122)
+      or . == 46 or . == 95 or . == 47 or . == 64 or . == 58 or . == 43 or . == 45);
+  def digits: explode | all(.[]; . >= 48 and . <= 57);
+  def stops: startswith("-") or contains("://") or contains("..")
+      or startswith("/") or startswith("~") or digits or (plain | not);
+  def prefix: contains("=") or . == "env" or . == "time" or . == "sudo" or . == "nice" or . == "command";
+  def strip: if length > 0 and (.[0] | prefix) then .[1:] | strip else . end;
+  def take: if length == 0 or (.[0] | stops) then [] else [.[0]] + (.[1:] | take) end;
+  if type != "string" then "" else
+    ((split("\n") | .[0]) // "") | unquote | split("\t") | join(" ")
+    | [splitall(["&&", "||", ";"])[] | select(words | length > 0)] | (last // "")
+    | ((split("|") | .[0]) // "") | words | strip
+    | if length == 0 then ""
+      else (.[0] | split("/") | last) as $prog
+        | if ($prog | plain | not) then ""
+          else ([$prog] + (.[1:] | take | .[0:2])) | join(" ") | .[0:60] end
+      end
+  end;'
+
 # Where per-session state lives.
 #
 # Per-user, because ${TMPDIR:-/tmp} is shared ground on a multi-user machine

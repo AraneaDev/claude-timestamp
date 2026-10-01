@@ -6970,6 +6970,37 @@ is "command memory: the file lives beside the history" "$WORK/commands.tsv" "$(c
 contains "command memory: --show lists it" "Command memory  off" "$(bash "$SCRIPTS/setup.sh" --show)"
 
 echo
+echo "command memory: key"
+
+if command -v jq >/dev/null 2>&1; then
+  ck() { jq -rn --arg c "$1" "$CT_JQ_CMDKEY"' $c | ct_cmdkey'; }
+  is "key: last && segment, env prefix and -- dropped" "npm test" "$(ck 'cd x && FOO=1 npm test -- src/a.test.ts')"
+  is "key: a relative script path is kept" "bash tests/run.sh" "$(ck 'bash tests/run.sh')"
+  is "key: run ids and flags end it" "gh run watch" "$(ck 'gh run watch 12345 --exit-status')"
+  is "key: quoted text never splits or leaks" "git commit" "$(ck 'git commit -m "fix && stuff; more"')"
+  is "key: absolute paths reduced to the program" "python3" "$(ck '/usr/bin/python3 /home/u/x.py')"
+  is "key: sudo stripped" "apt-get install jq" "$(ck 'sudo apt-get install jq')"
+  is "key: URLs dropped" "curl" "$(ck 'curl https://example.com/api')"
+  is "key: a heredoc keys on its first line, redirection ends it" "cat" "$(ck "cat <<'EOF' > file
+body line")"
+  is "key: the first pipe segment names the command" "npm test" "$(ck 'cd x && npm test 2>&1 | tail -5')"
+  is "key: two arguments at most" "npm run build" "$(ck 'npm run build extra more')"
+  is "key: a test file path is kept" "pytest spec/unit/test_x.py" "$(ck 'pytest spec/unit/test_x.py -q')"
+  is "key: an assignment alone has no key" "" "$(ck 'FOO=1')"
+  is "key: an empty command has no key" "" "$(ck '')"
+  is "key: a non-string has no key" "" "$(jq -rn "$CT_JQ_CMDKEY"' null | ct_cmdkey')"
+  is "key: tabs are spaces" "make test" "$(ck "$(printf 'make\ttest')")"
+  is "key: a non-ASCII program has no key" "" "$(ck 'bühne start')"
+  is "key: at most 60 characters" "60" "$(ck "$(printf 'x%.0s' $(seq 1 200))" | tr -d '\n' | wc -c | tr -d ' ')"
+else
+  for ck_label in "and segment" "script path" "run ids" "quotes" "abs path" "sudo" "url" \
+                  "heredoc" "pipe" "two args" "test file" "assignment" "empty" "non-string" \
+                  "tabs" "non-ascii" "60 chars"; do
+    skip "key: $ck_label" "jq is not installed"
+  done
+fi
+
+echo
 echo "----"
 printf '%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
