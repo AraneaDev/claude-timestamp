@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.33](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.32...v0.0.33) (2026-10-01)
+
+
+### Features
+
+* remember how long commands take, and tell Claude which are slow ([#90](https://github.com/AraneaDev/claude-timestamp/issues/90)) ([e34af7f](https://github.com/AraneaDev/claude-timestamp/commit/e34af7f3c15ea9b347eae6f5cef543663ea5febf))
+
 ## [0.0.32](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.31...v0.0.32) (2026-10-01)
 
 
