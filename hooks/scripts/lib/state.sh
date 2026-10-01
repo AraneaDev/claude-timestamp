@@ -730,7 +730,7 @@ ct_session_totals() {
 # two. A session with no recorded start (pruned, or never prompted) gets no
 # sentence rather than one about 1970.
 ct_compact_note() {
-  local sid="${1:-}" now="${2:-}" fmt="${3:-24h}" base ago start secs longest="" count=0 noun="turns"
+  local sid="${1:-}" now="${2:-}" fmt="${3:-24h}" base ago start secs open open_start longest="" count=0 noun="turns"
   case "$now" in ''|*[!0-9]*) return 0 ;; esac
   ct_state_file_var "$sid" || return 0
   base="$_CT_STATE_FILE"
@@ -738,13 +738,23 @@ ct_compact_note() {
   [ "$_CT_START" -gt 0 ] || return 0
   ago=$(( now - _CT_START ))
   [ "$ago" -lt 0 ] && ago=0
-  if [ -r "${base}.turnlog" ]; then
-    while IFS=$'\t' read -r start secs; do
-      longest="${longest:+$longest, }$(ct_format_epoch "$start" "$fmt") ($(ct_format_duration "$secs"))"
-      count=$(( count + 1 ))
-    done < <(awk -F '\t' 'NF == 9 && $2 ~ /^[0-9]+$/ && $4 ~ /^[0-9]+$/ && $4 >= 300 { print $2 "\t" $4 }' \
-               "${base}.turnlog" | sort -t "$(printf '\t')" -k2,2nr | head -n 2)
+  # The turn in progress is a candidate too: compaction usually lands in the
+  # middle of a long turn, and that turn is then the longest of all.
+  open_start=0
+  if [ -r "$base" ] && [ ! -e "${base}.closed" ]; then
+    open_start="$(ct_read_counter "$base")"
   fi
+  while IFS=$'\t' read -r start secs open; do
+    longest="${longest:+$longest, }$(ct_format_epoch "$start" "$fmt") ($(ct_format_duration "$secs")${open:+, still running})"
+    count=$(( count + 1 ))
+  done < <({
+             if [ -r "${base}.turnlog" ]; then
+               awk -F '\t' 'NF == 9 && $2 ~ /^[0-9]+$/ && $4 ~ /^[0-9]+$/ && $4 >= 300 { print $2 "\t" $4 "\t" }' "${base}.turnlog"
+             fi
+             if [ "$open_start" -gt 0 ] && [ $(( now - open_start )) -ge 300 ]; then
+               printf '%s\t%s\topen\n' "$open_start" "$(( now - open_start ))"
+             fi
+           } | sort -t "$(printf '\t')" -k2,2nr | head -n 2)
   [ "$_CT_TURNS" -eq 1 ] && noun="turn"
   printf 'Conversation compacted. Session started %s (%s ago), %s %s so far, %s of it waiting.' \
     "$(ct_format_epoch "$_CT_START" "$fmt")" "$(ct_format_duration "$ago")" \

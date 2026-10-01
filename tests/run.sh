@@ -6706,6 +6706,15 @@ lacks "compaction: no turn of five minutes, no longest clause" "Longest" "$(ct_c
 rm -f "$cn_base.start"
 is "compaction: a session with no recorded start says nothing" "" "$(ct_compact_note cn 12000 24h)"
 is "compaction: an unknown session says nothing" "" "$(ct_compact_note never 12000 24h)"
+# Compaction usually lands in the middle of a long turn, which is then the
+# longest of all; leaving it out would make the note's claim false.
+printf '1000' > "$cn_base.start"
+printf '3' > "$cn_base.turns"
+printf '1\t3000\t3360\t360\t-\t-\t-\t0\tstop\n' > "$cn_base.turnlog"
+printf '10000' > "$cn_base"
+rm -f "$cn_base.closed"
+contains "compaction: the turn in progress counts, and says so" \
+  "Longest turns: 02:46:40 (33m20s, still running), 00:50:00 (6m00s)." "$(ct_compact_note cn 12000 24h)"
 
 if command -v jq >/dev/null 2>&1; then
   cn_run() {
@@ -6892,7 +6901,7 @@ if command -v jq >/dev/null 2>&1; then
   out="$(tr_run --turns)"
   contains "turns: a header" "claude-timestamp turns" "$out"
   contains "turns: the closed turn, closed by Stop" "stop" "$out"
-  contains "turns: the open turn last" "open" "$out"
+  is "turns: the open turn last" "open" "$(printf '%s\n' "$out" | tail -n 1 | awk '{print $NF}')"
   js="$(tr_run --turns --json)"
   is "turns json: two turns" "2" "$(printf '%s' "$js" | jq '.turns | length')"
   is "turns json: the open turn has no end" "null" "$(printf '%s' "$js" | jq '.turns[1].end')"
@@ -6905,12 +6914,26 @@ if command -v jq >/dev/null 2>&1; then
     "waiting         $(ct_format_duration "$(printf '%s' "$sj" | jq '.waiting')")" "$(tr_run --session)"
 
   # A half-written last line is an append cut short; it is skipped, not parsed.
-  printf '3\t17' >> "$(ct_state_file tr).turnlog"
+  printf '3\t17\n4\t1\t2\t1\t-\t-\t-\t0\tsto\n' >> "$(ct_state_file tr).turnlog"
   is "turns json: a torn line is skipped" "2" "$(tr_run --turns --json | jq '.turns | length')"
 
   # Run from a directory whose config pins another zone: the session's staged zone wins.
   printf 'TZ=Asia/Tokyo\n' > "$CLAUDE_TIMESTAMP_CONFIG"
   is "turns json: the session's staged zone wins" "+0000" "$(tr_run --turns --json | jq -r '.turns[0].start_local[-5:]')"
+
+  # --json on a session with no record yet still prints JSON.
+  is "turns json: an unrecorded session is an empty list" "0" \
+    "$(env CLAUDE_CODE_SESSION_ID=never-seen bash "$SCRIPTS/setup.sh" --turns --json 2>/dev/null | jq '.turns | length')"
+  is "session json: an unrecorded session has no turns" "0" \
+    "$(env CLAUDE_CODE_SESSION_ID=never-seen bash "$SCRIPTS/setup.sh" --session --json 2>/dev/null | jq '.turn_count')"
+
+  # A clock that moved backwards leaves the open turn starting in the future.
+  printf '%s' "$(( $(date +%s) + 100 ))" > "$(ct_state_file tr)"
+  rm -f "$(ct_state_file tr).closed"
+  tr_run --turns >/dev/null; rc=$?
+  is "turns: a turn starting in the future does not abort the report" "0" "$rc"
+  is "turns json: and its length is not negative" "0" "$(tr_run --turns --json | jq '.turns[-1].secs')"
+  is "session json: nor is the open turn's" "0" "$(tr_run --session --json | jq '.current_turn.secs')"
 
   out="$(tr_run --stats --json)"; rc=$?
   is "json: refused with --stats" "2" "$rc"
@@ -6920,7 +6943,8 @@ if command -v jq >/dev/null 2>&1; then
   is "turns: without a session id it exits 2" "2" "$rc"
 else
   for tr_label in "header" "closed" "open" "two turns" "open end" "tools null" "offset" \
-                  "turn count" "turns" "waiting" "torn line" "staged zone" "stats json" \
+                  "turn count" "turns" "waiting" "torn line" "staged zone" "unrecorded turns" \
+                  "unrecorded session" "future no abort" "future secs" "future current" "stats json" \
                   "refuses setting" "no id"; do
     skip "turn reports: $tr_label" "jq is not installed"
   done

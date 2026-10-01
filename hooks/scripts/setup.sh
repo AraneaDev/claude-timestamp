@@ -715,8 +715,9 @@ ROWS
 # timing it staged. The staged answers win over the config found from the
 # current directory, for the reason session_report gives. The caller declares
 # `local CT_TZ="$CT_TZ"` first, so the zone set here does not outlive it.
-# Returns 2 with a message on stderr when there is no session id, 1 with a
-# message on stdout when the session has no record yet.
+# Returns 2 with a message on stderr when there is no session id, and 1 when
+# the session has no record yet. That message goes to stdout for a person and
+# to stderr under --json, whose stdout must stay a JSON document.
 _ct_report_session() {
   _CT_R_SID="${CLAUDE_CODE_SESSION_ID:-}"
   ct_load_config
@@ -724,8 +725,14 @@ _ct_report_session() {
     echo "No current session id. Run this from inside Claude Code, which sets CLAUDE_CODE_SESSION_ID." >&2
     return 2
   fi
+  _CT_R_TIMING="$CT_TOOL_TIMING"
+  _CT_R_FMT="$CT_CONTEXT_FORMAT"
   if [ ! -r "$_CT_R_BASE" ]; then
-    echo "claude-timestamp has no record of this session yet. It starts counting at the first prompt, and records nothing while ENABLED=off."
+    if [ "$CT_JSON" = "1" ]; then
+      echo "claude-timestamp has no record of this session yet." >&2
+    else
+      echo "claude-timestamp has no record of this session yet. It starts counting at the first prompt, and records nothing while ENABLED=off."
+    fi
     return 1
   fi
   ct_read_flag_var "$_CT_R_SID" tooltiming; _CT_R_TIMING="${_CT_FLAG:-$CT_TOOL_TIMING}"
@@ -744,7 +751,15 @@ _ct_report_session() {
 session_report() {
   local now turn_start tools rc base sid ctxfmt tooltiming
   local CT_TZ="${CT_TZ:-}"
-  _ct_report_session || { rc=$?; [ "$rc" -eq 1 ] && return 0; return "$rc"; }
+  # No record yet (1) is a report of its own for a person, and an empty
+  # document under --json.
+  rc=0
+  _ct_report_session || rc=$?
+  case "$rc" in
+    0) ;;
+    1) [ "$CT_JSON" = "1" ] || return 0 ;;
+    *) return "$rc" ;;
+  esac
   base="$_CT_R_BASE"; sid="$_CT_R_SID"; ctxfmt="$_CT_R_FMT"; tooltiming="$_CT_R_TIMING"
   ct_session_totals "$sid"
   now="$(date +%s)"
@@ -800,8 +815,12 @@ _ct_turn_rows() {
   if [ ! -e "${base}.closed" ]; then
     start="$(ct_read_counter "$base")"
     if [ "$start" -gt 0 ]; then
+      # A clock stepped backwards can put the start in the future; a turn
+      # cannot have run for less than nothing.
+      secs=$(( now - start ))
+      if [ "$secs" -lt 0 ]; then secs=0; fi
       printf '%s\t%s\t-\t%s\t-\t-\t-\t%s\topen\t%s\t-\n' "$(ct_read_counter "${base}.turns")" "$start" \
-        "$(( now - start ))" "$(ct_read_counter "${base}.hb")" "$(ct_format_epoch "$start" "$iso")"
+        "$secs" "$(ct_read_counter "${base}.hb")" "$(ct_format_epoch "$start" "$iso")"
     fi
   fi
   return 0
@@ -820,12 +839,16 @@ _ct_turns_json() {
 }
 
 _ct_session_json() {
-  local base="$1" now="$2" timing="$3" turns current="null" start slowest=""
+  local base="$1" now="$2" timing="$3" turns current="null" start secs slowest=""
   command -v jq >/dev/null 2>&1 || { echo "--json needs jq." >&2; return 2; }
   turns="$(_ct_turns_json "$base" "$now")" || turns='[]'
   if [ ! -e "${base}.closed" ]; then
     start="$(ct_read_counter "$base")"
-    [ "$start" -gt 0 ] && current="{\"start\":$start,\"secs\":$(( now - start ))}"
+    if [ "$start" -gt 0 ]; then
+      secs=$(( now - start ))
+      if [ "$secs" -lt 0 ]; then secs=0; fi
+      current="{\"start\":$start,\"secs\":$secs}"
+    fi
   fi
   [ "$timing" = "on" ] && slowest="$(ct_slowest_tools "${base}.tools" 5)"
   jq -n --argjson start "$_CT_START" --arg start_local "$(ct_format_epoch "$_CT_START" '%Y-%m-%dT%H:%M:%S%z' 2>/dev/null)" \
@@ -834,7 +857,7 @@ _ct_session_json() {
      --arg slowest "$slowest" --argjson turns "$turns" '
     {started: (if $start > 0 then $start else null end),
      started_local: (if $start > 0 then $start_local else null end),
-     elapsed: (if $start > 0 then $now - $start else 0 end),
+     elapsed: (if $start > 0 then ([$now - $start, 0] | max) else 0 end),
      turn_count: $turn_count, waiting: $waiting, away: $away,
      current_turn: $current, tool_timing: ($timing == "on"),
      slowest_tools: (if $slowest == "" then null else $slowest end),
@@ -845,7 +868,15 @@ _ct_session_json() {
 turns_report() {
   local rc n start secs tools slow how took slowest now
   local CT_TZ="${CT_TZ:-}"
-  _ct_report_session || { rc=$?; [ "$rc" -eq 1 ] && return 0; return "$rc"; }
+  # No record yet (1) is a report of its own for a person, and an empty
+  # document under --json.
+  rc=0
+  _ct_report_session || rc=$?
+  case "$rc" in
+    0) ;;
+    1) [ "$CT_JSON" = "1" ] || return 0 ;;
+    *) return "$rc" ;;
+  esac
   now="$(date +%s)"
   if [ "$CT_JSON" = "1" ]; then
     command -v jq >/dev/null 2>&1 || { echo "--json needs jq." >&2; return 2; }
@@ -856,7 +887,7 @@ turns_report() {
   echo
   printf '  %4s  %-10s %-12s %-6s %-16s %s\n' "#" "started" "took" "tools" "slowest" "how"
   while IFS=$'\t' read -r n start _ secs tools _ slow _ how _; do
-    took="$(ct_format_duration "$secs")"
+    took="$(ct_format_duration "$secs")" || took="?"
     [ "$how" = "open" ] && took="running $took"
     slowest="-"
     if [ "$slow" != "-" ]; then
