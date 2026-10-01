@@ -7331,7 +7331,7 @@ if command -v jq >/dev/null 2>&1; then
     "$(bash "$SCRIPTS/setup.sh" --doctor 2>&1)"
   fresh
   for i in 1 2 3; do
-    printf '%s\tcols\tbash tests/a-very-long-script-name-for-alignment.sh\t240000\tok\n' "$(date +%s)" >> "$CLAUDE_TIMESTAMP_COMMANDS"
+    printf '%s\tcols\tbash spec/a-very-long-script-name-for-alignment.sh\t240000\tok\n' "$(date +%s)" >> "$CLAUDE_TIMESTAMP_COMMANDS"
     printf '%s\tcols\tmake\t240000\tok\n' "$(date +%s)" >> "$CLAUDE_TIMESTAMP_COMMANDS"
   done
   is "report fixes: columns line up under a long key" "1" \
