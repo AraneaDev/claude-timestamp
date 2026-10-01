@@ -420,6 +420,18 @@ ct_read_counter() {
   case "$value" in ''|*[!0-9]*) printf '0' ;; *) printf '%s' "$value" ;; esac
 }
 
+# The current epoch into _CT_NOW, from the printf builtin where bash has one
+# (4.2 and newer), sparing a `date` process; bash 3.2, which macOS still
+# ships, has no %(...)T and pays for it.
+ct_epoch_var() {
+  if [ "${BASH_VERSINFO[0]}" -gt 4 ] \
+     || { [ "${BASH_VERSINFO[0]}" -eq 4 ] && [ "${BASH_VERSINFO[1]}" -ge 2 ]; }; then
+    printf -v _CT_NOW '%(%s)T' -1
+  else
+    _CT_NOW="$(date +%s)"
+  fi
+}
+
 # One turn's tool calls, summarised for the timeline: how many, how many
 # seconds in total, and the tool that took at least half the turn, as
 # "Tool:secs". Three tab-separated fields; "-" for each when there is no log,

@@ -6398,7 +6398,8 @@ refutes "format_epoch: refuses empty" ct_format_epoch "" 24h
 echo
 echo "agent notes: staging"
 
-fresh
+# Memory off, so what opens the gate here is the notes alone.
+fresh 'COMMAND_MEMORY=off'
 printf '{"session_id":"stage-a"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
 is "stage: heartbeat default is staged" "900" "$(ct_read_flag stage-a heartbeat)"
 is "stage: slow tool default is staged" "60" "$(ct_read_flag stage-a slowtool)"
@@ -6406,13 +6407,13 @@ is "stage: the context format is staged" "24h" "$(ct_read_flag stage-a ctxfmt)"
 is "stage: the subagents setting is staged" "on" "$(ct_read_flag stage-a subagents)"
 asserts "stage: notes alone open the tool gate" test -e "$(ct_state_file stage-a).timing-on"
 
-fresh 'INJECT_CONTEXT=false'
+fresh 'INJECT_CONTEXT=false' 'COMMAND_MEMORY=off'
 printf '{"session_id":"stage-b"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
 is "stage: INJECT_CONTEXT=false stages no heartbeat" "0" "$(ct_read_flag stage-b heartbeat)"
 is "stage: INJECT_CONTEXT=false stages no slow tool note" "0" "$(ct_read_flag stage-b slowtool)"
 refutes "stage: no timing and no notes keeps the gate shut" test -e "$(ct_state_file stage-b).timing-on"
 
-fresh 'HEARTBEAT_AFTER=0' 'SLOW_TOOL_AFTER=0'
+fresh 'HEARTBEAT_AFTER=0' 'SLOW_TOOL_AFTER=0' 'COMMAND_MEMORY=off'
 printf '{"session_id":"stage-c"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
 refutes "stage: both notes at 0 keep the gate shut" test -e "$(ct_state_file stage-c).timing-on"
 
@@ -6997,6 +6998,48 @@ else
                   "heredoc" "pipe" "two args" "test file" "assignment" "empty" "non-string" \
                   "tabs" "non-ascii" "60 chars"; do
     skip "key: $ck_label" "jq is not installed"
+  done
+fi
+
+echo
+echo "command memory: recording"
+
+if command -v jq >/dev/null 2>&1; then
+  mkdir -p "$WORK/proj-a"
+  cm_prompt() { printf '{"session_id":"cm","cwd":"%s"}' "$WORK/proj-a" | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null; }
+  cm_call() {  # $1 ms, $2 command, $3 event, $4 run_in_background, $5 tool
+    jq -cn --argjson ms "$1" --arg c "$2" --arg ev "${3:-PostToolUse}" --argjson bg "${4:-false}" --arg t "${5:-Bash}" \
+      '{session_id: "cm", tool_name: $t, hook_event_name: $ev, duration_ms: $ms, tool_input: {command: $c, run_in_background: $bg}}' \
+      | bash "$SCRIPTS/post-tool-use.sh" >/dev/null
+  }
+  cm_lines() { if [ -r "$CLAUDE_TIMESTAMP_COMMANDS" ]; then wc -l < "$CLAUDE_TIMESTAMP_COMMANDS" | tr -d ' '; else echo 0; fi; }
+
+  fresh
+  cm_prompt
+  cm_call 4000 'cd x && npm test'
+  is "recording: project, key, duration, outcome" "proj-a	npm test	4000	ok" "$(cut -f2-5 "$CLAUDE_TIMESTAMP_COMMANDS")"
+  cm_call 4000 'npm test' PostToolUse true
+  is "recording: a background call is not recorded" "1" "$(cm_lines)"
+  cm_call 9000 'npm test' PostToolUseFailure
+  is "recording: a failure is recorded as fail" "fail" "$(sed -n 2p "$CLAUDE_TIMESTAMP_COMMANDS" | cut -f5)"
+  cm_call 9000 'whatever' PostToolUse false Read
+  is "recording: other tools are not recorded" "2" "$(cm_lines)"
+  cm_call 9000 'FOO=1'
+  is "recording: a command without a key is not recorded" "2" "$(cm_lines)"
+
+  fresh 'COMMAND_MEMORY=off'
+  cm_prompt; cm_call 4000 'npm test'
+  is "recording: COMMAND_MEMORY=off records nothing" "0" "$(cm_lines)"
+  fresh 'ENABLED=off'
+  cm_prompt; cm_call 4000 'npm test'
+  is "recording: ENABLED=off records nothing" "0" "$(cm_lines)"
+  # Memory alone keeps the tool hook awake, with every note and timing off.
+  fresh 'HEARTBEAT_AFTER=0' 'SLOW_TOOL_AFTER=0'
+  cm_prompt; cm_call 4000 'npm test'
+  is "recording: memory alone opens the tool hook" "1" "$(cm_lines)"
+else
+  for cm_label in "row" "background" "failure" "other tools" "no key" "off" "enabled off" "memory alone"; do
+    skip "recording: $cm_label" "jq is not installed"
   done
 fi
 
