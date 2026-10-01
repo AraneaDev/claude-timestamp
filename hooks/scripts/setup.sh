@@ -39,6 +39,9 @@ ZONEINFO="${CLAUDE_TIMESTAMP_ZONEINFO:-/usr/share/zoneinfo}"
 CT_STATS_SINCE=""
 CT_STATS_SINCE_DAYS=""
 CT_STATS_PROJECT=""
+# Set by --commands --project=all: list every project rather than one named
+# "all", so a directory that really is called all stays reachable.
+CT_COMMANDS_ALL=0
 
 # Set by --json: --session, --turns and --commands print JSON instead of a table.
 CT_JSON=0
@@ -927,22 +930,39 @@ turns_report() {
 # last and the failures, for this directory's project unless --project names
 # another or "all".
 commands_report() {
-  local file project rows key runs med last failed proj
-  ct_load_config
+  local file project mode="" rows key runs med last failed proj kw=7 pw=7
+  ct_load_config "$PWD"
   file="$(ct_commands_path)"
-  project="${CT_STATS_PROJECT:-$(ct_project_name "$PWD")}"
-  rows="$(ct_command_stats "$file" "$project")"
+  if [ "$CT_COMMANDS_ALL" = "1" ]; then
+    mode="all"
+    project=""
+  else
+    project="${CT_STATS_PROJECT:-$(ct_project_name "$PWD")}"
+  fi
+  # Commands are kept per project, so outside one there is nothing to show
+  # unless a project is named.
+  if [ -z "$mode" ] && { [ -z "$project" ] || [ "$project" = "-" ]; }; then
+    if [ "$CT_JSON" = "1" ]; then
+      command -v jq >/dev/null 2>&1 || { echo "--json needs jq." >&2; return 2; }
+      jq -n '{project: null, commands: []}'
+      return $?
+    fi
+    echo "claude-timestamp keeps commands per project, and this directory is not in one."
+    echo "Pass --project=NAME or --project=all."
+    return 0
+  fi
+  rows="$(ct_command_stats "$file" "$project" "$mode")"
   if [ "$CT_JSON" = "1" ]; then
     command -v jq >/dev/null 2>&1 || { echo "--json needs jq." >&2; return 2; }
-    printf '%s\n' "$rows" | jq -R -s --arg project "$project" '
+    printf '%s\n' "$rows" | jq -R -s --arg project "${mode:-$project}" --arg mode "$mode" '
       {project: $project,
        commands: [split("\n")[] | select(length > 0) | split("\t")
-         | if $project == "all"
+         | if $mode == "all"
            then {project: .[0], key: .[1], runs: (.[2] | tonumber), median_ms: (.[3] | tonumber), last_ms: (.[4] | tonumber), failed: (.[5] | tonumber)}
            else {key: .[0], runs: (.[1] | tonumber), median_ms: (.[2] | tonumber), last_ms: (.[3] | tonumber), failed: (.[4] | tonumber)} end]}'
     return $?
   fi
-  if [ "$project" = "all" ]; then
+  if [ "$mode" = "all" ]; then
     echo "claude-timestamp commands, all projects"
   else
     echo "claude-timestamp commands in $project"
@@ -956,16 +976,25 @@ commands_report() {
     echo "  Nothing recorded yet."
     return 0
   fi
-  if [ "$project" = "all" ]; then
-    printf '  %-20s %-30s %5s %9s %9s %7s\n' "project" "command" "runs" "median" "last" "failed"
+  # Columns as wide as their longest entry, so a long key does not push the
+  # figures on its row out of line with the others.
+  if [ "$mode" = "all" ]; then
+    while IFS=$'\t' read -r proj key _; do
+      [ "${#proj}" -gt "$pw" ] && pw="${#proj}"
+      [ "${#key}" -gt "$kw" ] && kw="${#key}"
+    done <<< "$rows"
+    printf "  %-${pw}s  %-${kw}s %5s %9s %9s %7s\n" "project" "command" "runs" "median" "last" "failed"
     while IFS=$'\t' read -r proj key runs med last failed; do
-      printf '  %-20s %-30s %5s %9s %9s %7s\n' "$proj" "$key" "$runs" \
+      printf "  %-${pw}s  %-${kw}s %5s %9s %9s %7s\n" "$proj" "$key" "$runs" \
         "$(ct_format_duration $(( med / 1000 )))" "$(ct_format_duration $(( last / 1000 )))" "$failed"
     done <<< "$rows"
   else
-    printf '  %-30s %5s %9s %9s %7s\n' "command" "runs" "median" "last" "failed"
+    while IFS=$'\t' read -r key _; do
+      [ "${#key}" -gt "$kw" ] && kw="${#key}"
+    done <<< "$rows"
+    printf "  %-${kw}s %5s %9s %9s %7s\n" "command" "runs" "median" "last" "failed"
     while IFS=$'\t' read -r key runs med last failed; do
-      printf '  %-30s %5s %9s %9s %7s\n' "$key" "$runs" \
+      printf "  %-${kw}s %5s %9s %9s %7s\n" "$key" "$runs" \
         "$(ct_format_duration $(( med / 1000 )))" "$(ct_format_duration $(( last / 1000 )))" "$failed"
     done <<< "$rows"
   fi
@@ -1096,7 +1125,16 @@ doctor() {
   echo "  heartbeat       $([ "$CT_HEARTBEAT_AFTER" -gt 0 ] 2>/dev/null && echo "every ${CT_HEARTBEAT_AFTER}s" || echo "off")"
   echo "  slow tool note  $([ "$CT_SLOW_TOOL_AFTER" -gt 0 ] 2>/dev/null && echo "after ${CT_SLOW_TOOL_AFTER}s" || echo "off")"
   echo "  resume note     $CT_RESUME_NOTE"
-  echo "  command memory  $CT_COMMAND_MEMORY, $( [ -r "$(ct_commands_path)" ] && wc -l < "$(ct_commands_path)" | tr -d ' ' || echo 0) runs recorded"
+  local cm_file cm_dir cm_runs=0 cm_write="not writable"
+  cm_file="$(ct_commands_path)"
+  cm_dir="$(dirname "$cm_file")"
+  [ -r "$cm_file" ] && cm_runs="$(wc -l < "$cm_file" | tr -d ' ')"
+  if [ -e "$cm_file" ]; then
+    [ -w "$cm_file" ] && cm_write="writable"
+  elif [ -d "$cm_dir" ] && [ -w "$cm_dir" ]; then
+    cm_write="writable"
+  fi
+  echo "  command memory  $CT_COMMAND_MEMORY, $cm_runs runs recorded, $cm_write"
   echo
 
   echo "State"
@@ -1956,6 +1994,14 @@ main() {
   # filters the command report instead, and --since has nothing to filter.
   if [ "$saw_commands" = "1" ]; then
     action="commands"
+    if [ "$saw_stats_bare" = "1" ] || [ "$saw_session" = "1" ] || [ "$saw_turns" = "1" ]; then
+      echo "Pick one report: --commands, --stats, --session or --turns." >&2
+      exit 2
+    fi
+    if [ "$CT_STATS_PROJECT" = "all" ]; then
+      CT_COMMANDS_ALL=1
+      CT_STATS_PROJECT=""
+    fi
     if [ "$saw_since_flag" = "1" ]; then
       echo "--since filters --stats; --commands keeps the last 20 runs of each command." >&2
       exit 2
@@ -1966,7 +2012,7 @@ main() {
     case "$CT_STATS_PROJECT" in
       on|off)
         echo "--project=$CT_STATS_PROJECT looks like a typo for --projects=$CT_STATS_PROJECT." >&2
-        echo "--project=NAME filters --stats by name; --projects=on|off is the setting" >&2
+        echo "--project=NAME filters a report by name; --projects=on|off is the setting" >&2
         echo "that turns recording project names on or off. No project is named '$CT_STATS_PROJECT'." >&2
         exit 2
         ;;

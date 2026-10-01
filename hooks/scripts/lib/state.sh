@@ -901,18 +901,26 @@ ct_prune_commands() {
 }
 
 # Per command in one project, over its last 20 runs: key, runs, median ms,
-# last ms and failures, tab-separated, slowest median first. "all" lists every project, with the
-# project as an extra first column. The median of an even count is the mean of
-# the middle two, rounded down. Lines that are not whole are skipped.
+# last ms and failures, tab-separated, slowest median first.
+#   $1 the memory file   $2 project   $3 "all" to list every project instead,
+#   with the project as an extra first column
+# The median of an even count is the mean of the middle two, rounded down.
+# Rows that pruning would drop are skipped here too.
 ct_command_stats() {
-  local file="${1:-}" project="${2:-}" col=3
+  local file="${1:-}" project="${2:-}" mode="${3:-}" col=3
   [ -r "$file" ] || return 0
-  [ -n "$project" ] || return 0
-  [ "$project" = "all" ] && col=4
-  awk -F '\t' -v want="$project" '
+  # "all" is a mode, never a project name, so a directory called all is
+  # still just a project.
+  if [ "$mode" = "all" ]; then
+    col=4
+  else
+    mode=""
+    [ -n "$project" ] || return 0
+  fi
+  awk -F '\t' -v want="$project" -v mode="$mode" '
     NF == 5 && $1 ~ /^[0-9]+$/ && $4 ~ /^[0-9]+$/ && ($5 == "ok" || $5 == "fail") \
-      && (want == "all" || $2 == want) {
-      id = (want == "all") ? $2 "\t" $3 : $3
+      && (mode == "all" || $2 == want) {
+      id = (mode == "all") ? $2 "\t" $3 : $3
       c = ++n[id]; v[id, c] = $4; bad[id, c] = ($5 == "fail"); last[id] = $4
     }
     END {
@@ -943,6 +951,7 @@ ct_slow_commands_note() {
     return 0
   fi
   while IFS=$'\t' read -r key runs med _; do
+    case "$runs$med" in ''|*[!0-9]*) continue ;; esac
     [ "$runs" -ge 3 ] || continue
     [ $(( med / 1000 )) -ge "$after" ] || continue
     list="${list:+$list, }$key ~$(ct_format_duration $(( med / 1000 ))) ($runs runs)"

@@ -7117,7 +7117,7 @@ is "stats: an even count takes the middle two" "x	4	2500	10000	0" \
 # Only the last 20 runs count, also before session end prunes the rest.
 is "stats: only the last twenty runs count" "w	20	50	0	0" \
   "$(awk 'BEGIN { for (i = 1; i <= 10; i++) printf "1\tq\tw\t0\tok\n"; for (i = 1; i <= 10; i++) printf "1\tq\tw\t100\tok\n"; printf "1\tq\tw\t0\tok\n" }' > "$WORK/window.tsv"; ct_command_stats "$WORK/window.tsv" q)"
-is "stats: all projects carry the project first" "other	make" "$(ct_command_stats "$sc_file" all | head -n 1 | cut -f1-2)"
+is "stats: all projects carry the project first" "other	make" "$(ct_command_stats "$sc_file" "" all | head -n 1 | cut -f1-2)"
 is "note: three at most, at least three runs, over the threshold, this project only" \
   "Usually slow in this project: cargo build ~6m40s (3 runs), bash tests/run.sh ~4m00s (3 runs), npm test ~1m30s (3 runs)." \
   "$(ct_slow_commands_note "$sc_file" sc-proj 60)"
@@ -7296,6 +7296,51 @@ if command -v jq >/dev/null 2>&1; then
   is "plumbing: a call outside any project is not recorded" "0" "$(pl_lines)"
 else
   for pl_label in "no duration" "no project"; do skip "plumbing: $pl_label" "jq is not installed"; done
+fi
+
+echo
+echo "command memory: report fixes"
+
+if command -v jq >/dev/null 2>&1; then
+  fresh
+  mkdir -p "$WORK/all" "$WORK/hm" "$WORK/pc/.claude"
+  for i in 1 2 3; do
+    printf '%s\tall\tnpm test\t90000\tok\n' "$(date +%s)" >> "$CLAUDE_TIMESTAMP_COMMANDS"
+    printf '%s\tother\tmake\t5000\tok\n' "$(date +%s)" >> "$CLAUDE_TIMESTAMP_COMMANDS"
+  done
+  out="$(cd "$WORK/all" && bash "$SCRIPTS/setup.sh" --commands 2>&1)"
+  contains "report fixes: a project named all reports its own commands" "npm test" "$out"
+  lacks "report fixes: and only its own" "make" "$out"
+  rf_err="$(printf '{"session_id":"rf","source":"startup","cwd":"%s"}' "$WORK/all" | bash "$SCRIPTS/session-start.sh" 2>&1 >/dev/null)"
+  is "report fixes: its session start writes nothing to stderr" "" "$rf_err"
+  contains "report fixes: and names its slow command" "Usually slow in this project: npm test" \
+    "$(printf '{"session_id":"rf","source":"startup","cwd":"%s"}' "$WORK/all" | bash "$SCRIPTS/session-start.sh" | jq -r '.hookSpecificOutput.additionalContext // ""')"
+  out="$(bash "$SCRIPTS/setup.sh" --commands --project=all 2>&1)"
+  contains "report fixes: --project=all still lists every project" "make" "$out"
+  out="$(bash "$SCRIPTS/setup.sh" --commands --stats 2>&1)"; rc=$?
+  is "report fixes: --commands with --stats is refused" "2" "$rc"
+  contains "report fixes: and says to pick one" "Pick one report" "$out"
+  out="$(bash "$SCRIPTS/setup.sh" --commands --turns 2>&1)"; rc=$?
+  is "report fixes: --commands with --turns is refused" "2" "$rc"
+  out="$(cd "$WORK/hm" && HOME="$WORK/hm" bash "$SCRIPTS/setup.sh" --commands 2>&1)"
+  contains "report fixes: outside a project it says what to pass" "--project=NAME or --project=all" "$out"
+  printf 'COMMAND_MEMORY=off\n' > "$WORK/pc/.claude/claude-timestamp.conf"
+  out="$(cd "$WORK/pc" && env -u CLAUDE_TIMESTAMP_CONFIG HOME="$WORK/hm" bash "$SCRIPTS/setup.sh" --commands 2>&1)"
+  contains "report fixes: a project's own COMMAND_MEMORY=off is shown" "COMMAND_MEMORY is off" "$out"
+  contains "report fixes: --doctor says whether the memory file can be written" "runs recorded, writable" \
+    "$(bash "$SCRIPTS/setup.sh" --doctor 2>&1)"
+  fresh
+  for i in 1 2 3; do
+    printf '%s\tcols\tbash tests/a-very-long-script-name-for-alignment.sh\t240000\tok\n' "$(date +%s)" >> "$CLAUDE_TIMESTAMP_COMMANDS"
+    printf '%s\tcols\tmake\t240000\tok\n' "$(date +%s)" >> "$CLAUDE_TIMESTAMP_COMMANDS"
+  done
+  is "report fixes: columns line up under a long key" "1" \
+    "$(bash "$SCRIPTS/setup.sh" --commands --project=cols | awk '/4m00s/ { print index($0, "4m00s") }' | sort -u | wc -l | tr -d ' ')"
+else
+  for rf_label in "named all" "only own" "stderr" "note" "project all" "stats refused" "pick one" \
+                  "turns refused" "outside project" "project config" "doctor" "columns"; do
+    skip "report fixes: $rf_label" "jq is not installed"
+  done
 fi
 
 echo
