@@ -7011,12 +7011,20 @@ body line")"
   is "key: thousands of words, two kept" "git add f1" "$(ck "$ck_long")"
   ck_t1="$(date +%s)"
   is_near "key: and quickly" 0 "$(( ck_t1 - ck_t0 ))" 1
+  # A flag left where the program should be is no key at all.
+  is "key: sudo with a flag has no key" "" "$(ck 'sudo -u postgres psql')"
+  is "key: time with a flag has no key" "" "$(ck 'time -p make')"
+  # Subshells and groups are keyed on the command inside them.
+  is "key: a subshell keys on its command" "npm test" "$(ck '(cd sub && npm test)')"
+  is "key: a group keys on its command" "npm test" "$(ck '{ cd sub && npm test; }')"
+  is "key: braces inside quotes are left alone" "awk file" "$(ck "awk '{print \$1}' file")"
   is "key: at most 60 characters" "60" "$(ck "$(printf 'x%.0s' $(seq 1 200))" | tr -d '\r\n' | wc -c | tr -d ' ')"
 else
   for ck_label in "and segment" "script path" "run ids" "quotes" "abs path" "sudo" "url" \
                   "heredoc" "pipe" "two args" "test file" "assignment" "empty" "non-string" \
                   "tabs" "non-ascii" "user@host" "scp" "ssh clone" "scoped" "node id" "echo" \
-                  "printf" "token" "long" "long fast" "60 chars"; do
+                  "printf" "token" "long" "long fast" "sudo flag" "time flag" "subshell" "group" \
+                  "quoted braces" "60 chars"; do
     skip "key: $ck_label" "jq is not installed"
   done
 fi

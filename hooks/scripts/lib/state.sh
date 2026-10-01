@@ -25,7 +25,9 @@
 #
 # A string rather than a file so post-tool-use.sh can prepend it to the one jq
 # call it already makes. Written without regex builtins, which a jq built
-# without oniguruma lacks; 34 and 39 are the double and single quote.
+# without oniguruma lacks; 34 and 39 are the double and single quote, and
+# 40, 41, 123 and 125 the parentheses and braces of a subshell or a group,
+# blanked outside quotes so the command inside them is what gets keyed.
 #
 #   first line only (heredocs) -> quoted text blanked -> last segment of
 #   && || ; -> first segment of | -> leading VAR=x, env, time, sudo, nice,
@@ -43,6 +45,7 @@ CT_JQ_CMDKEY='def ct_cmdkey:
     [foreach explode[] as $c ({q: null, e: null};
       if .q != null then (if $c == .q then .q = null else . end) | .e = null
       elif $c == 34 or $c == 39 then .q = $c | .e = 32
+      elif $c == 40 or $c == 41 or $c == 123 or $c == 125 then .e = 32
       else .e = $c end;
       .e // empty)] | implode;
   def splitall($seps): reduce $seps[] as $s ([.]; (map(split($s)) | add) // []);
@@ -66,7 +69,7 @@ CT_JQ_CMDKEY='def ct_cmdkey:
     | ((split("|") | .[0]) // "") | words | .[0:40] | strip
     | if length == 0 then ""
       else (.[0] | split("/") | last) as $prog
-        | if ($prog | plain | not) then ""
+        | if ($prog | plain | not) or ($prog | startswith("-")) then ""
           elif $prog == "echo" or $prog == "printf" then $prog
           else ([$prog] + (.[1:3] | take)) | join(" ") | .[0:60] end
       end
