@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.0.32](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.31...v0.0.32) (2026-10-01)
+
+
+### Features
+
+* a turn-by-turn timeline of the session, and a note after compaction ([#88](https://github.com/AraneaDev/claude-timestamp/issues/88)) ([a466ce7](https://github.com/AraneaDev/claude-timestamp/commit/a466ce755088f0063be4c4abf964ab3315facafc))
+
+
+### Fixes
+
+* ignore release configuration changes ([#86](https://github.com/AraneaDev/claude-timestamp/issues/86)) ([10e5d91](https://github.com/AraneaDev/claude-timestamp/commit/10e5d917bc9ddbfeddf62d908d6386157f7db044))
+
 ## [0.0.31](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.30...v0.0.31) (2026-09-16)
 
 
