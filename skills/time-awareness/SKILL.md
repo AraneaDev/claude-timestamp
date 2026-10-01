@@ -41,6 +41,20 @@ arrives after a compaction. The summary you are working from has no clock;
 this line is the measured timeline. Use it, or `--turns`, when the user asks
 what happened when, rather than reconstructing times from the summary.
 
+## Before a slow command or a wait
+
+**`Usually slow in this project: bash tests/run.sh ~4m02s (12 runs).`**
+arrives at session start, and **`That Bash call took 6m10s (usually 4m02s).`**
+when a call was slow. Both come from measured runs in this project.
+
+- A command that usually takes a minute or more: run it with
+  `run_in_background` and keep working.
+- Waiting on something with a known duration, such as CI or a long build: set
+  the `Monitor` or `ScheduleWakeup` delay from the usual figure, one check
+  near it, rather than polling every minute.
+- A run far over its usual figure is a reason to look (a hang, more input
+  than expected), not a reason to wait longer.
+
 ## Time in general
 
 - During a long turn, get the current time from `date`. The last stamp in the
@@ -99,7 +113,15 @@ bash "$setup" --stats --project=NAME
 ```
 
 Sessions carry a project name only when the user turned on `PROJECTS`;
-without it `--stats` shows no per-project breakdown. Tool timings are kept per
-tool name, not per command, and only with `TOOL_TIMING` on. "How long did
-`npm test` take" therefore has an answer only in the slow-call reminders
-already in this conversation.
+without it `--stats` shows no per-project breakdown. Tool timings in
+`--stats` are kept per tool name. Per command, ask the duration memory, which
+answers for this project:
+
+```bash
+setup="$(git rev-parse --show-toplevel 2>/dev/null || true)/hooks/scripts/setup.sh"
+if [ ! -f "$setup" ] && [ -n "${CLAUDE_SKILL_DIR:-}" ]; then
+  setup="${CLAUDE_SKILL_DIR}/../../hooks/scripts/setup.sh"
+fi
+bash "$setup" --commands
+bash "$setup" --commands --json
+```

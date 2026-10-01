@@ -8,7 +8,7 @@
 [![Release](https://img.shields.io/github/v/release/AraneaDev/claude-timestamp)](https://github.com/AraneaDev/claude-timestamp/releases)
 [![Tool page](https://img.shields.io/badge/tool%20page-aranea--development.nl-0b7285)](https://aranea-development.nl/en/tools/claude-timestamp)
 [![CI](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml/badge.svg)](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-1411%20passing-2b8a3e)](tests/run.sh)
+[![Tests](https://img.shields.io/badge/tests-1413%20passing-2b8a3e)](tests/run.sh)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-364fc7)](#platform-notes)
 [![Conventional Commits](https://img.shields.io/badge/commits-conventional-fe5196?logo=conventionalcommits&logoColor=white)](https://www.conventionalcommits.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
@@ -92,7 +92,8 @@ has a setting of its own.
 | A session starts | `claude-timestamp reports turn length, slow tool calls and resumed sessions in system reminders; the claude-timestamp:time-awareness skill explains them and can query session history.` | `INJECT_CONTEXT` |
 | Every prompt | `Message sent at local time 10:37:21 CEST, after a 3h break` | `INJECT_CONTEXT`, `CONTEXT_FORMAT` |
 | The first tool result after a turn passes 15 minutes, and every 15 after | `Turn running 15m02s (prompt sent 10:37:21); now 10:52:23 CEST.` | `HEARTBEAT_AFTER` |
-| One tool call takes a minute or more | `That Bash call took 2m14s.` | `SLOW_TOOL_AFTER` |
+| One tool call takes a minute or more | `That Bash call took 2m14s.` or, for a command with a few earlier runs here, `That Bash call took 6m10s (usually 4m02s).` | `SLOW_TOOL_AFTER` |
+| A session starts in a project where some commands usually take a minute or more | `Usually slow in this project: bash tests/run.sh ~4m02s (12 runs).` | `COMMAND_MEMORY`, `SLOW_TOOL_AFTER` |
 | A session starts an hour or more after the last one in this project, or a conversation is resumed an hour or more after its last activity | `Previous session in this project ended 14h ago (Thu 20:12:05).` or `Resuming this conversation; last activity 14h ago (Thu 20:12:05).` | `RESUME_NOTE` |
 | A conversation is compacted | `Conversation compacted. Session started 09:12:05 (3h04m ago), 41 turns so far, 1h02m of it waiting. Longest turns: 10:37:21 (22m04s).` | `RESUME_NOTE` |
 
@@ -572,6 +573,19 @@ bash "$CLAUDE_PLUGIN_ROOT/hooks/scripts/setup.sh" --turns
 bash "$CLAUDE_PLUGIN_ROOT/hooks/scripts/setup.sh" --session --json
 ```
 
+`--commands` shows what the duration memory knows: how long each Bash command
+usually takes in this project, from its last 20 runs. Commands are stored by
+a short key, the program and at most two plain arguments (`npm test`,
+`bash tests/run.sh`), never the full command line, never a path outside the
+project, never quoted text. The file is
+`~/.claude/claude-timestamp-commands.tsv`; `COMMAND_MEMORY=off` stops
+recording, and deleting the file forgets everything.
+
+```bash
+bash "$CLAUDE_PLUGIN_ROOT/hooks/scripts/setup.sh" --commands
+bash "$CLAUDE_PLUGIN_ROOT/hooks/scripts/setup.sh" --commands --project=all
+```
+
 <p align="center">
   <img src="assets/session-report.webp" alt="The live report for the session in progress" width="660">
 </p>
@@ -656,7 +670,7 @@ no database.
 ## Development
 
 ```bash
-bash tests/run.sh                                    # 1411 assertions, no framework
+bash tests/run.sh                                    # 1413 assertions, no framework
 shellcheck -S style -e SC1091 hooks/scripts/**/*.sh  # clean
 bash tools/check-docs.sh                             # README against the code
 ```
