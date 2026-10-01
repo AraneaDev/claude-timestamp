@@ -105,8 +105,9 @@ Flags
                               call rather than per message; off, 0, 0 and off
                               together bring back the free path.
   --inject-context=true|false Tell Claude the time each prompt was sent. false
-                              also silences the heartbeat, slow tool,
-                              resumption and time-awareness pointer notes.
+                              also silences the heartbeat, slow tool, slow
+                              commands, resumption and time-awareness pointer
+                              notes.
   --heartbeat-after=SECONDS   Tell Claude how long a turn has run, every this
                               many seconds (0 disables).
   --slow-tool-after=SECONDS   Tell Claude when one tool call took this long
@@ -1291,7 +1292,8 @@ HISTORY_LIMIT=$CT_HISTORY_LIMIT
 PROJECTS=$CT_PROJECTS
 
 # Tell Claude the local time each prompt was sent. false also silences the
-# heartbeat, slow tool, resumption and time-awareness pointer notes.
+# heartbeat, slow tool, slow commands, resumption and time-awareness pointer
+# notes.
 INJECT_CONTEXT=$CT_INJECT_CONTEXT
 
 # Tell Claude how long the open turn has run, every this many seconds. 0 disables.

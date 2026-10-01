@@ -6826,13 +6826,14 @@ if command -v jq >/dev/null 2>&1; then
   fresh
   contains "pointer: follows the resumption note" "ago (" "$(ss_ctx "$(ss_run)")"
   contains "pointer: in that order" ". claude-timestamp reports" "$(ss_ctx "$(ss_run)")"
+  contains "pointer: mentions usually slow commands" "usually slow commands" "$(ss_ctx "$(ss_run)")"
   # With every note off there is nothing to report, so the pointer keeps only
   # the part that is still true.
   fresh 'HEARTBEAT_AFTER=0' 'SLOW_TOOL_AFTER=0' 'RESUME_NOTE=off'
   is "pointer: with every note off it only offers session history" \
     "The claude-timestamp:time-awareness skill can query session history." "$(ss_ctx "$(ss_run)")"
 else
-  for ptr_label in "names skill" "inject off" "after resume" "order" "all notes off"; do
+  for ptr_label in "names skill" "inject off" "after resume" "order" "slow commands" "all notes off"; do
     skip "pointer: $ptr_label" "jq is not installed"
   done
 fi

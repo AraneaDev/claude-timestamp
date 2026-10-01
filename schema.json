@@ -218,7 +218,7 @@
         "true",
         "false"
       ],
-      "describes": "tell Claude the local time each prompt was sent; false also silences the heartbeat, slow tool, resumption and time-awareness pointer notes"
+      "describes": "tell Claude the local time each prompt was sent; false also silences the heartbeat, slow tool, slow commands, resumption and time-awareness pointer notes"
     },
     "HEARTBEAT_AFTER": {
       "default": "900",

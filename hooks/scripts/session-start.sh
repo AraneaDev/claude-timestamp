@@ -251,7 +251,7 @@ if [ "$CT_INJECT_CONTEXT" != "false" ]; then
      && [ "$CT_RESUME_NOTE" != "on" ]; then
     context="The claude-timestamp:time-awareness skill can query session history."
   else
-    context="${context:+$context }claude-timestamp reports turn length, slow tool calls and resumed sessions in system reminders; the claude-timestamp:time-awareness skill explains them and can query session history."
+    context="${context:+$context }claude-timestamp reports turn length, slow tool calls, usually slow commands and resumed sessions in system reminders; the claude-timestamp:time-awareness skill explains them and can query session history."
   fi
 fi
 
