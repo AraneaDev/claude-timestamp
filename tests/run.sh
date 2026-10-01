@@ -7248,6 +7248,24 @@ else
 fi
 
 echo
+echo "session json: slowest tools"
+
+if command -v jq >/dev/null 2>&1; then
+  fresh 'TOOL_TIMING=on'
+  printf '{"session_id":"sj"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  printf '{"session_id":"sj","tool_name":"Bash","hook_event_name":"PostToolUse","duration_ms":2000}' \
+    | bash "$SCRIPTS/post-tool-use.sh" >/dev/null
+  is "session json: slowest tools are data" '[{"tool":"Bash","secs":2,"calls":1}]' \
+    "$(env CLAUDE_CODE_SESSION_ID=sj bash "$SCRIPTS/setup.sh" --session --json | jq -c '.slowest_tools')"
+  fresh
+  printf '{"session_id":"sj"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  is "session json: and null without tool timing" "null" \
+    "$(env CLAUDE_CODE_SESSION_ID=sj bash "$SCRIPTS/setup.sh" --session --json | jq -c '.slowest_tools')"
+else
+  for sj_label in "data" "null"; do skip "session json: $sj_label" "jq is not installed"; done
+fi
+
+echo
 echo "----"
 printf '%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

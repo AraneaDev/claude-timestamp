@@ -1069,7 +1069,10 @@ ct_project_name() {
 # line `head` needed was already delivered. Under a caller's errexit/pipefail
 # that nonzero exit would abort it, for the same reason ct_tool_digest needs
 # the same guard.
-ct_slowest_tools() {
+# The slowest tools as rows, worst first: total seconds, tool, calls,
+# tab-separated. ct_slowest_tools formats these for a person; the JSON report
+# reads them as they are.
+ct_slowest_tools_tsv() {
   local log="${1:-}" n="${2:-3}"
   [ -s "$log" ] || return 0
   case "$n" in ''|*[!0-9]*) n=3 ;; esac
@@ -1081,7 +1084,11 @@ ct_slowest_tools() {
     $1 == "" || $2 !~ /^[0-9]+(\.[0-9]+)?$/ { next }
     { sum[$1] += $2; n[$1]++ }
     END { for (t in sum) printf "%.3f\t%s\t%d\n", sum[t], t, n[t] }' "$log" \
-    | sort -rn | head -n "$n" \
+    | sort -rn | head -n "$n" || true
+}
+
+ct_slowest_tools() {
+  ct_slowest_tools_tsv "$@" \
     | awk -F'\t' '{
         calls = ($3 == 1) ? "1 call" : $3 " calls"
         printf "%s%s %.1fs (%s)", (NR > 1 ? ", " : ""), $2, $1, calls

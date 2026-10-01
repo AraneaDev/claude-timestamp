@@ -858,7 +858,7 @@ _ct_turns_json() {
 }
 
 _ct_session_json() {
-  local base="$1" now="$2" timing="$3" turns current="null" start secs slowest=""
+  local base="$1" now="$2" timing="$3" turns current="null" start secs slowest
   command -v jq >/dev/null 2>&1 || { echo "--json needs jq." >&2; return 2; }
   turns="$(_ct_turns_json "$base" "$now")" || turns='[]'
   if [ ! -e "${base}.closed" ]; then
@@ -869,17 +869,22 @@ _ct_session_json() {
       current="{\"start\":$start,\"secs\":$secs}"
     fi
   fi
-  [ "$timing" = "on" ] && slowest="$(ct_slowest_tools "${base}.tools" 5)"
+  slowest="null"
+  if [ "$timing" = "on" ]; then
+    slowest="$(ct_slowest_tools_tsv "${base}.tools" 5 | jq -R -s -c '
+      [split("\n")[] | select(length > 0) | split("\t")
+       | {tool: .[1], secs: (((.[0] | tonumber) * 10 + 0.5 | floor) / 10), calls: (.[2] | tonumber)}]')" || slowest="[]"
+  fi
   jq -n --argjson start "$_CT_START" --arg start_local "$(ct_format_epoch "$_CT_START" '%Y-%m-%dT%H:%M:%S%z' 2>/dev/null)" \
      --argjson now "$now" --argjson turn_count "$_CT_TURNS" --argjson waiting "$_CT_WAIT" \
      --argjson away "$_CT_IDLE" --argjson current "$current" --arg timing "$timing" \
-     --arg slowest "$slowest" --argjson turns "$turns" '
+     --argjson slowest "$slowest" --argjson turns "$turns" '
     {started: (if $start > 0 then $start else null end),
      started_local: (if $start > 0 then $start_local else null end),
      elapsed: (if $start > 0 then ([$now - $start, 0] | max) else 0 end),
      turn_count: $turn_count, waiting: $waiting, away: $away,
      current_turn: $current, tool_timing: ($timing == "on"),
-     slowest_tools: (if $slowest == "" then null else $slowest end),
+     slowest_tools: $slowest,
      turns: $turns}'
 }
 
