@@ -7274,6 +7274,31 @@ else
 fi
 
 echo
+echo "command memory: plumbing"
+
+printf '1\tq\tok-key\t1000\tok\nx\tq\tbad-epoch\t1000\tok\n1\tq\tbad-outcome\t1000\tmaybe\n' > "$WORK/rows.tsv"
+is "plumbing: stats read only rows pruning would keep" "ok-key" "$(ct_command_stats "$WORK/rows.tsv" q | cut -f1 | tr '\n' ' ' | sed 's/ $//')"
+printf '1\t-\tnpm test\t5000\tok\n1\t-\tnpm test\t5000\tok\n1\t-\tnpm test\t5000\tok\n' > "$WORK/noproj.tsv"
+is "plumbing: no project has no usual figure" "" "$(ct_command_usual "$WORK/noproj.tsv" - 'npm test')"
+
+if command -v jq >/dev/null 2>&1; then
+  pl_lines() { if [ -r "$CLAUDE_TIMESTAMP_COMMANDS" ]; then wc -l < "$CLAUDE_TIMESTAMP_COMMANDS" | tr -d ' '; else echo 0; fi; }
+  mkdir -p "$WORK/proj-p"
+  fresh
+  printf '{"session_id":"pl","cwd":"%s"}' "$WORK/proj-p" | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  printf '{"session_id":"pl","tool_name":"Bash","hook_event_name":"PostToolUse","tool_input":{"command":"npm test"}}' \
+    | bash "$SCRIPTS/post-tool-use.sh" >/dev/null
+  is "plumbing: a call without a duration is not recorded" "0" "$(pl_lines)"
+  fresh
+  printf '{"session_id":"pl"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  printf '{"session_id":"pl","tool_name":"Bash","hook_event_name":"PostToolUse","duration_ms":4000,"tool_input":{"command":"npm test"}}' \
+    | bash "$SCRIPTS/post-tool-use.sh" >/dev/null
+  is "plumbing: a call outside any project is not recorded" "0" "$(pl_lines)"
+else
+  for pl_label in "no duration" "no project"; do skip "plumbing: $pl_label" "jq is not installed"; done
+fi
+
+echo
 echo "----"
 printf '%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

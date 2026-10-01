@@ -909,8 +909,16 @@ ct_history_path() {
 # directory name, a short key for the command (never the full command line),
 # its duration and whether it failed. Like the history, it outlives sessions,
 # so it lives beside the config.
+#
+# The _var form assigns _CT_COMMANDS_PATH rather than printing, so the tool
+# hook pays no subshell for it on every recorded call.
+ct_commands_path_var() {
+  _CT_COMMANDS_PATH="${CLAUDE_TIMESTAMP_COMMANDS:-${HOME}/.claude/claude-timestamp-commands.tsv}"
+}
+
 ct_commands_path() {
-  printf '%s' "${CLAUDE_TIMESTAMP_COMMANDS:-${HOME}/.claude/claude-timestamp-commands.tsv}"
+  ct_commands_path_var
+  printf '%s' "$_CT_COMMANDS_PATH"
 }
 
 # A working directory reduced to a bare project name, for the history's

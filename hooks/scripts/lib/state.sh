@@ -910,7 +910,8 @@ ct_command_stats() {
   [ -n "$project" ] || return 0
   [ "$project" = "all" ] && col=4
   awk -F '\t' -v want="$project" '
-    NF == 5 && $4 ~ /^[0-9]+$/ && (want == "all" || $2 == want) {
+    NF == 5 && $1 ~ /^[0-9]+$/ && $4 ~ /^[0-9]+$/ && ($5 == "ok" || $5 == "fail") \
+      && (want == "all" || $2 == want) {
       id = (want == "all") ? $2 "\t" $3 : $3
       c = ++n[id]; v[id, c] = $4; bad[id, c] = ($5 == "fail"); last[id] = $4
     }
@@ -960,6 +961,8 @@ ct_slow_commands_note() {
 ct_command_usual() {
   local file="${1:-}" project="${2:-}" want="${3:-}" key runs med
   [ -n "$want" ] || return 0
+  # Outside any project there is nothing to compare with.
+  case "$project" in ''|-) return 0 ;; esac
   while IFS=$'\t' read -r key runs med _; do
     if [ "$key" = "$want" ] && [ "$runs" -ge 3 ]; then
       printf '%s' "$(( med / 1000 ))"

@@ -76,7 +76,8 @@ if state_file="$(ct_state_file "$session_id")"; then
   ct_stage_flag "$session_id" "subagents" "$CT_SUBAGENTS"
 
   # Duration memory needs to know the project, and the tool hook has no cwd.
-  # Resolved once per prompt; ct_project_name forks nothing.
+  # Resolved once per prompt, at the cost of one subshell; ct_project_name
+  # itself runs no external command.
   cmdmem="off"
   if [ "$CT_ENABLED" = "on" ] && [ "$CT_COMMAND_MEMORY" = "on" ]; then
     cmdmem="on"
