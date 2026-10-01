@@ -116,6 +116,7 @@ fresh() {
   rm -rf "$(ct_state_dir)"
   ct_state_ready
   rm -f "$CLAUDE_TIMESTAMP_HISTORY"
+  rm -f "$CLAUDE_TIMESTAMP_COMMANDS"
   if [ "$#" -gt 0 ]; then
     printf '%s\n' "$@" > "$CLAUDE_TIMESTAMP_CONFIG"
   else
@@ -152,6 +153,7 @@ ln -s "$WORK/cap/modes" "$WORK/cap/link" 2>/dev/null
 mkdir -p "$TMPDIR"
 export CLAUDE_TIMESTAMP_CONFIG="$WORK/config.conf"
 export CLAUDE_TIMESTAMP_HISTORY="$WORK/history.tsv"
+export CLAUDE_TIMESTAMP_COMMANDS="$WORK/commands.tsv"
 export CLAUDE_TIMESTAMP_FACTS="$WORK/facts.json"
 export CLAUDE_TIMESTAMP_DRAWN="$WORK/drawn"
 
@@ -1652,7 +1654,7 @@ is "a rejected format cannot smuggle a second setting into the file" "on" "$CT_E
 # to be wrong, so flag twenty-one is covered the day it is added.
 fresh 'ENABLED=on'
 flag_table="$(sed -n '/^CT_FLAG_TABLE="$/,/^"$/p' "$SCRIPTS/setup.sh" | sed '1d;$d')"
-is "every setting has a flag in the table" "24" \
+is "every setting has a flag in the table" "25" \
   "$(printf '%s\n' "$flag_table" | grep -c '^[a-z]')"
 # shellcheck disable=SC2034  # t_rest is read to consume the rest of the row
 while read -r t_flag t_rest; do
@@ -6949,6 +6951,23 @@ else
     skip "turn reports: $tr_label" "jq is not installed"
   done
 fi
+
+echo
+echo "command memory: setting"
+
+fresh
+is "command memory: on by default" "on" "$CT_COMMAND_MEMORY"
+fresh 'COMMAND_MEMORY=off'
+is "command memory: reads off" "off" "$CT_COMMAND_MEMORY"
+fresh 'COMMAND_MEMORY=maybe'
+is "command memory: an invalid value falls back" "on" "$CT_COMMAND_MEMORY"
+contains "command memory: and is reported" "COMMAND_MEMORY=maybe is not valid, using on" "$CT_CONFIG_PROBLEMS"
+fresh
+bash "$SCRIPTS/setup.sh" --command-memory=off >/dev/null
+ct_load_config
+is "command memory: --command-memory is written" "off" "$CT_COMMAND_MEMORY"
+is "command memory: the file lives beside the history" "$WORK/commands.tsv" "$(ct_commands_path)"
+contains "command memory: --show lists it" "Command memory  off" "$(bash "$SCRIPTS/setup.sh" --show)"
 
 echo
 echo "----"

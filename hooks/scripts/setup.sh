@@ -93,10 +93,10 @@ Flags
                               history row. Off by default. Never a path.
   --tool-timing=on|off        Record what each tool call cost and report the
                               slowest in the session summary. Off by default.
-                              It, --heartbeat-after and --slow-tool-after cost
-                              a few milliseconds per tool call rather than per
-                              message; 0, 0 and off together bring back the
-                              free path.
+                              It, --heartbeat-after, --slow-tool-after and
+                              --command-memory cost a few milliseconds per tool
+                              call rather than per message; off, 0, 0 and off
+                              together bring back the free path.
   --inject-context=true|false Tell Claude the time each prompt was sent. false
                               also silences the heartbeat, slow tool,
                               resumption and time-awareness pointer notes.
@@ -106,6 +106,8 @@ Flags
                               (0 disables).
   --resume-note=on|off        Tell Claude, when a session starts, how long ago
                               this conversation or project was last active.
+  --command-memory=on|off     Remember how long each Bash command takes in each
+                              project, and tell Claude which are usually slow.
   --enabled=on|off            Master switch. off silences every hook without
                               uninstalling the plugin.
   --project                   Write to this project instead of your account,
@@ -172,6 +174,7 @@ inject-context  INJECT_CONTEXT  CT_INJECT_CONTEXT   ct_is_bool              -   
 heartbeat-after HEARTBEAT_AFTER CT_HEARTBEAT_AFTER  ct_is_seconds           -        ignore
 slow-tool-after SLOW_TOOL_AFTER CT_SLOW_TOOL_AFTER  ct_is_seconds           -        ignore
 resume-note     RESUME_NOTE     CT_RESUME_NOTE      ct_is_onoff             -        ignore
+command-memory  COMMAND_MEMORY  CT_COMMAND_MEMORY   ct_is_onoff             -        ignore
 "
 
 # --- validation -------------------------------------------------------------
@@ -1023,6 +1026,7 @@ doctor() {
   echo "  heartbeat       $([ "$CT_HEARTBEAT_AFTER" -gt 0 ] 2>/dev/null && echo "every ${CT_HEARTBEAT_AFTER}s" || echo "off")"
   echo "  slow tool note  $([ "$CT_SLOW_TOOL_AFTER" -gt 0 ] 2>/dev/null && echo "after ${CT_SLOW_TOOL_AFTER}s" || echo "off")"
   echo "  resume note     $CT_RESUME_NOTE"
+  echo "  command memory  $CT_COMMAND_MEMORY, $( [ -r "$(ct_commands_path)" ] && wc -l < "$(ct_commands_path)" | tr -d ' ' || echo 0) runs recorded"
   echo
 
   echo "State"
@@ -1165,9 +1169,10 @@ SUMMARY=$CT_SUMMARY
 SUBAGENTS=$CT_SUBAGENTS
 
 # Record what each tool call cost and name the slowest in the session summary.
-# This, HEARTBEAT_AFTER and SLOW_TOOL_AFTER cost a few milliseconds per tool
-# call rather than per message; HEARTBEAT_AFTER=0, SLOW_TOOL_AFTER=0 and
-# TOOL_TIMING=off together bring back the free path.
+# This, HEARTBEAT_AFTER, SLOW_TOOL_AFTER and COMMAND_MEMORY cost a few
+# milliseconds per tool call rather than per message; HEARTBEAT_AFTER=0,
+# SLOW_TOOL_AFTER=0, COMMAND_MEMORY=off and TOOL_TIMING=off together bring
+# back the free path.
 TOOL_TIMING=$CT_TOOL_TIMING
 
 # Record each finished session, and how many to keep. Timings only: no message
@@ -1190,6 +1195,11 @@ SLOW_TOOL_AFTER=$CT_SLOW_TOOL_AFTER
 # Tell Claude, when a session starts, how long ago this conversation or
 # project was last active. Read from Claude Code's own transcripts.
 RESUME_NOTE=$CT_RESUME_NOTE
+
+# Remember how long each Bash command takes in each project: a short key
+# such as "npm test", never the full command line. Tells Claude at session
+# start which commands are usually slow here.
+COMMAND_MEMORY=$CT_COMMAND_MEMORY
 CONF
   echo "Wrote $(ct_tilde "$file")"
 }
@@ -1396,6 +1406,7 @@ show_config() {
   echo "  Heartbeat       $CT_HEARTBEAT_AFTER s"
   echo "  Slow tool note  $CT_SLOW_TOOL_AFTER s"
   echo "  Resume note     $CT_RESUME_NOTE"
+  echo "  Command memory  $CT_COMMAND_MEMORY"
   echo
   echo -n "  Preview         "; preview
 }

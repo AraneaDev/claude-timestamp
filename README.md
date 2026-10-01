@@ -8,7 +8,7 @@
 [![Release](https://img.shields.io/github/v/release/AraneaDev/claude-timestamp)](https://github.com/AraneaDev/claude-timestamp/releases)
 [![Tool page](https://img.shields.io/badge/tool%20page-aranea--development.nl-0b7285)](https://aranea-development.nl/en/tools/claude-timestamp)
 [![CI](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml/badge.svg)](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-1341%20passing-2b8a3e)](tests/run.sh)
+[![Tests](https://img.shields.io/badge/tests-1349%20passing-2b8a3e)](tests/run.sh)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-364fc7)](#platform-notes)
 [![Conventional Commits](https://img.shields.io/badge/commits-conventional-fe5196?logo=conventionalcommits&logoColor=white)](https://www.conventionalcommits.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
@@ -466,6 +466,7 @@ cannot run anything.
 | `HEARTBEAT_AFTER` | `900` | Tell Claude how long the open turn has run, every this many seconds. `0` disables, and `INJECT_CONTEXT=false` silences it too |
 | `SLOW_TOOL_AFTER` | `60` | Tell Claude when one tool call took at least this many seconds. `0` disables, and `INJECT_CONTEXT=false` silences it too |
 | `RESUME_NOTE` | `on` | Tell Claude, when a session starts, how long ago this conversation or project was last active. `INJECT_CONTEXT=false` silences it too |
+| `COMMAND_MEMORY` | `on` | Remember how long each Bash command takes in each project, by a short key such as `npm test`, and tell Claude at session start which are usually slow. `INJECT_CONTEXT=false` silences the note, not the recording |
 | `SLOW_AFTER` | `60` | Colour the duration past this many seconds, `0` disables |
 | `SLOW_COLOR` | `yellow` | Colour used for a slow turn |
 | `IDLE_AFTER` | `3600` | Mark a gap this long between messages, `0` disables |
@@ -496,13 +497,14 @@ Clock formats render as `14:03:22` for `24h`, `14:03` for `short`, `2:03 PM`
 for `12h`, and `2026-08-19T14:03:22` for `iso`. Any value containing a `%` is
 treated as a strftime string, so the escape hatch needs no separate setting.
 
-Three settings cost something per tool call rather than once per message:
-`TOOL_TIMING`, `HEARTBEAT_AFTER` and `SLOW_TOOL_AFTER`. While any of them is
+Four settings cost something per tool call rather than once per message:
+`TOOL_TIMING`, `HEARTBEAT_AFTER`, `SLOW_TOOL_AFTER` and `COMMAND_MEMORY`. While any of them is
 on, a hook reads every tool call's payload to decide whether to record it or
 tell Claude something. On the machine this was measured on, that came to a few
 milliseconds per tool call (roughly 3 to 5 ms above the idle path). The two
-notes are on by default and `TOOL_TIMING` is off. Setting `HEARTBEAT_AFTER=0`,
-`SLOW_TOOL_AFTER=0` and `TOOL_TIMING=off` together brings back the free path,
+notes and `COMMAND_MEMORY` are on by default and `TOOL_TIMING` is off. Setting
+`HEARTBEAT_AFTER=0`, `SLOW_TOOL_AFTER=0`, `COMMAND_MEMORY=off` and
+`TOOL_TIMING=off` together brings back the free path,
 where the hook exits before it reads the payload. Claude Code reports how long
 each call took, so the plugin no longer times them itself, but the hook that
 records the number still runs on every call.
@@ -654,7 +656,7 @@ no database.
 ## Development
 
 ```bash
-bash tests/run.sh                                    # 1341 assertions, no framework
+bash tests/run.sh                                    # 1349 assertions, no framework
 shellcheck -S style -e SC1091 hooks/scripts/**/*.sh  # clean
 bash tools/check-docs.sh                             # README against the code
 ```
