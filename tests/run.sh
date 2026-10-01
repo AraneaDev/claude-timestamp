@@ -7205,6 +7205,49 @@ else
 fi
 
 echo
+echo "turn timeline: fixes"
+
+# The tool timing in force during a turn decides its tool fields, not the
+# setting the next prompt stages before it reconciles that turn.
+fresh
+tf_base="$(ct_state_file tf)"
+tf_now="$(date +%s)"
+ct_turn_open tf "$(( tf_now - 100 ))"
+printf 'Bash 80.000 ok\n' > "$tf_base.turntools"
+ct_turn_close tf "$tf_now" interrupted on
+is "timeline fixes: a close carries the timing that was in force" "1	80	Bash:80" "$(cut -f5-7 "$tf_base.turnlog")"
+ct_turn_open tf "$(( tf_now - 10 ))"
+ct_stage_flag tf tooltiming on
+: > "$tf_base.turntools"
+ct_turn_close tf "$tf_now" interrupted off
+is "timeline fixes: off means not measured, whatever is staged now" "-	-	-" "$(sed -n 2p "$tf_base.turnlog" | cut -f5-7)"
+ct_turn_open tf "$(( tf_now - 10 ))"
+ct_turn_close tf "$tf_now" error
+is "timeline fixes: an error close is recorded as error" "error" "$(sed -n 3p "$tf_base.turnlog" | cut -f9)"
+
+if command -v jq >/dev/null 2>&1; then
+  fresh 'TOOL_TIMING=on'
+  tfh_log="$(ct_state_file tfh).turnlog"
+  printf '{"session_id":"tfh"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  printf '{"session_id":"tfh","tool_name":"Bash","hook_event_name":"PostToolUse","duration_ms":2000}' \
+    | bash "$SCRIPTS/post-tool-use.sh" >/dev/null
+  printf 'TOOL_TIMING=off\n' > "$CLAUDE_TIMESTAMP_CONFIG"
+  printf '{"session_id":"tfh"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  is "timeline fixes: a reconciled turn keeps the timing it ran under" "1" "$(cut -f5 "$tfh_log")"
+  printf '{"session_id":"tfh","hook_event_name":"StopFailure"}' | bash "$SCRIPTS/stop.sh"
+  is "timeline fixes: StopFailure closes as error" "error" "$(sed -n 2p "$tfh_log" | cut -f9)"
+  is "timeline fixes: --turns --json lists an error turn" "error" \
+    "$(env CLAUDE_CODE_SESSION_ID=tfh bash "$SCRIPTS/setup.sh" --turns --json | jq -r '.turns[1].how')"
+  printf '7\t1\t\t\t-\t-\t-\t0\tstop\n' >> "$tfh_log"
+  is "timeline fixes: a row with empty numeric fields is skipped" "2" \
+    "$(env CLAUDE_CODE_SESSION_ID=tfh bash "$SCRIPTS/setup.sh" --turns --json | jq '.turns | length')"
+else
+  for tf_label in "reconciled timing" "stopfailure" "json error" "empty fields"; do
+    skip "timeline fixes: $tf_label" "jq is not installed"
+  done
+fi
+
+echo
 echo "----"
 printf '%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

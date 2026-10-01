@@ -809,14 +809,26 @@ session_report() {
 # end in local ISO 8601, and the open turn last. Lines that are not whole are
 # skipped; a torn append must not become a turn.
 _ct_turn_rows() {
-  local base="$1" now="$2" n start end secs tools tsecs slow hb how iso='%Y-%m-%dT%H:%M:%S%z'
+  local base="$1" now="$2" want_iso="${3:-1}" n start end secs tools tsecs slow hb how f whole
+  local iso='%Y-%m-%dT%H:%M:%S%z' start_iso="-" end_iso="-"
   if [ -r "${base}.turnlog" ]; then
     while IFS=$'\t' read -r n start end secs tools tsecs slow hb how; do
-      case "$n$start$end$secs$hb" in ''|*[!0-9]*) continue ;; esac
-      case "$how" in stop|interrupted) ;; *) continue ;; esac
+      # Each number checked on its own: a joined check passes a line with an
+      # empty field as long as the others are digits.
+      whole=1
+      for f in "$n" "$start" "$end" "$secs" "$hb"; do
+        case "$f" in ''|*[!0-9]*) whole=0 ;; esac
+      done
+      [ "$whole" = "1" ] || continue
+      case "$how" in stop|interrupted|error) ;; *) continue ;; esac
+      # Only JSON prints the ISO times; the table would pay two `date`
+      # processes per row for nothing.
+      if [ "$want_iso" = "1" ]; then
+        start_iso="$(ct_format_epoch "$start" "$iso")"
+        end_iso="$(ct_format_epoch "$end" "$iso")"
+      fi
       printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$n" "$start" "$end" "$secs" \
-        "$tools" "$tsecs" "$slow" "$hb" "$how" \
-        "$(ct_format_epoch "$start" "$iso")" "$(ct_format_epoch "$end" "$iso")"
+        "$tools" "$tsecs" "$slow" "$hb" "$how" "$start_iso" "$end_iso"
     done < "${base}.turnlog"
   fi
   if [ ! -e "${base}.closed" ]; then
@@ -902,7 +914,7 @@ turns_report() {
     fi
     printf '  %4s  %-10s %-12s %-6s %-16s %s\n' "$n" "$(ct_format_epoch "$start" "$_CT_R_FMT")" \
       "$took" "$tools" "$slowest" "$how"
-  done < <(_ct_turn_rows "$_CT_R_BASE" "$now")
+  done < <(_ct_turn_rows "$_CT_R_BASE" "$now" 0)
   return 0
 }
 

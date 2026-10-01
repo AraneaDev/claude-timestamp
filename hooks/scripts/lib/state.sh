@@ -480,12 +480,15 @@ ct_turn_tool_summary() {
 # Whether tool timing was on comes from the flag the prompt hook staged, so
 # "no calls" (0) and "not measured" (-) stay distinguishable.
 ct_append_turn() {
-  local base="${1:-}" started="${2:-0}" ended="${3:-0}" how="${4:-stop}" n hb timing="" tools
+  local base="${1:-}" started="${2:-0}" ended="${3:-0}" how="${4:-stop}" timing="${5:-}" n hb tools
   [ -n "$base" ] || return 0
-  case "$how" in stop|interrupted) ;; *) how="stop" ;; esac
+  case "$how" in stop|interrupted|error) ;; *) how="stop" ;; esac
   n="$(ct_read_counter "${base}.turns")"
   hb="$(ct_read_counter "${base}.hb")"
-  if [ -r "${base}.tooltiming" ]; then
+  # The caller may know the tool timing that was in force during the turn,
+  # which is not always what is staged now: the prompt hook re-stages it
+  # before it reconciles the turn it interrupted.
+  if [ -z "$timing" ] && [ -r "${base}.tooltiming" ]; then
     IFS= read -r timing < "${base}.tooltiming" 2>/dev/null || :
   fi
   tools=$'-\t-\t-'
@@ -514,7 +517,7 @@ ct_append_turn() {
 # while a prompt reconciling a turn that was interrupted only knows when its
 # last message was drawn.
 ct_close_turn() {
-  local state_file="${1:-}" ended="${2:-0}" how="${3:-stop}" started
+  local state_file="${1:-}" ended="${2:-0}" how="${3:-stop}" timing="${4:-}" started
   [ -n "$state_file" ] || return 0
   [ -r "$state_file" ] || return 0
   [ -e "${state_file}.closed" ] && return 0
@@ -540,7 +543,7 @@ ct_close_turn() {
     ended="$started"
   fi
   printf '%s' "$ended" > "${state_file}.closed"
-  ct_append_turn "$state_file" "$started" "$ended" "$how"
+  ct_append_turn "$state_file" "$started" "$ended" "$how" "$timing"
   return 0
 }
 
@@ -590,10 +593,10 @@ ct_turn_open() {
 # layout. Idempotent: a hook can cause the model to run again, so a turn seeing
 # two closes is a case to survive rather than one to assume away.
 ct_turn_close() {
-  local sid="${1:-}" ended="${2:-0}" how="${3:-stop}" base
+  local sid="${1:-}" ended="${2:-0}" how="${3:-stop}" timing="${4:-}" base
   ct_state_file_var "$sid" || return 0
   base="$_CT_STATE_FILE"
-  ct_close_turn "$base" "$ended" "$how"
+  ct_close_turn "$base" "$ended" "$how" "$timing"
   return 0
 }
 

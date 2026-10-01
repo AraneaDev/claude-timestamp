@@ -44,9 +44,13 @@ ct_load_config "$cwd"
 [ "$CT_ENABLED" = "on" ] || exit 0
 
 # Codex binds its Interrupt event to this script too; that turn did not end
-# on its own, and the timeline says so.
+# on its own, and the timeline says so. A turn that ended in an API error
+# (StopFailure) did not finish either, and says that instead.
 how="stop"
-[ "$event" = "Interrupt" ] && how="interrupted"
+case "$event" in
+  Interrupt)   how="interrupted" ;;
+  StopFailure) how="error" ;;
+esac
 ct_turn_close "$session_id" "$(date +%s)" "$how"
 
 exit 0
