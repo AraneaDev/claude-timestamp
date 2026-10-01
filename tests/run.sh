@@ -7068,6 +7068,53 @@ is "prune: the newest are kept" "k101" "$(head -n 1 "$pr_file" | cut -f3)"
 asserts "prune: a missing file is fine" ct_prune_commands "$WORK/absent.tsv" "$pr_now"
 
 echo
+echo "command memory: session start"
+
+fresh
+sc_file="$CLAUDE_TIMESTAMP_COMMANDS"
+sc_row() { printf '%s\t%s\t%s\t%s\tok\n' "$(date +%s)" "$1" "$2" "$3" >> "$sc_file"; }
+for i in 1 2 3; do
+  sc_row sc-proj 'bash tests/run.sh' 240000
+  sc_row sc-proj 'cargo build' 400000
+  sc_row sc-proj 'npm test' 90000
+  sc_row sc-proj 'pytest' 70000
+  sc_row sc-proj 'git push' 6000
+  sc_row other 'make' 900000
+done
+sc_row sc-proj 'gh run watch' 460000
+sc_row sc-proj 'gh run watch' 460000
+is "stats: median per key, slowest first" "gh run watch	2	460000	460000	0" "$(ct_command_stats "$sc_file" sc-proj | head -n 1)"
+is "stats: an even count takes the middle two" "x	4	2500	10000	0" \
+  "$(printf '1\tq\tx\t1000\tok\n1\tq\tx\t2000\tok\n1\tq\tx\t3000\tok\n1\tq\tx\t10000\tok\n' > "$WORK/even.tsv"; ct_command_stats "$WORK/even.tsv" q)"
+is "stats: all projects carry the project first" "other	make" "$(ct_command_stats "$sc_file" all | head -n 1 | cut -f1-2)"
+is "note: three at most, at least three runs, over the threshold, this project only" \
+  "Usually slow in this project: cargo build ~6m40s (3 runs), bash tests/run.sh ~4m00s (3 runs), npm test ~1m30s (3 runs)." \
+  "$(ct_slow_commands_note "$sc_file" sc-proj 60)"
+is "note: a zero threshold says nothing" "" "$(ct_slow_commands_note "$sc_file" sc-proj 0)"
+is "note: no project says nothing" "" "$(ct_slow_commands_note "$sc_file" - 60)"
+
+if command -v jq >/dev/null 2>&1; then
+  mkdir -p "$WORK/sc-proj"
+  sc_run() {
+    printf '{"session_id":"sc","source":"startup","cwd":"%s","transcript_path":"%s/self.jsonl"}' "$WORK/sc-proj" "$WORK" \
+      | bash "$SCRIPTS/session-start.sh" | jq -r '.hookSpecificOutput.additionalContext // ""'
+  }
+  sc_keep="$(cat "$sc_file")"
+  fresh; printf '%s\n' "$sc_keep" > "$sc_file"
+  contains "session start: names the slow commands" "Usually slow in this project: cargo build" "$(sc_run)"
+  fresh 'COMMAND_MEMORY=off'; printf '%s\n' "$sc_keep" > "$sc_file"
+  lacks "session start: COMMAND_MEMORY=off says nothing" "Usually slow" "$(sc_run)"
+  fresh 'SLOW_TOOL_AFTER=0'; printf '%s\n' "$sc_keep" > "$sc_file"
+  lacks "session start: SLOW_TOOL_AFTER=0 says nothing" "Usually slow" "$(sc_run)"
+  fresh 'INJECT_CONTEXT=false'; printf '%s\n' "$sc_keep" > "$sc_file"
+  lacks "session start: INJECT_CONTEXT=false says nothing" "Usually slow" "$(sc_run)"
+else
+  for sc_label in "names" "memory off" "threshold off" "inject off"; do
+    skip "session start: $sc_label" "jq is not installed"
+  done
+fi
+
+echo
 echo "----"
 printf '%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

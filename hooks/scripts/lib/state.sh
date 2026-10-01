@@ -878,3 +878,55 @@ ct_prune_commands() {
   fi
   return 0
 }
+
+# Per command in one project: key, runs, median ms, last ms and failures,
+# tab-separated, slowest median first. "all" lists every project, with the
+# project as an extra first column. The median of an even count is the mean of
+# the middle two, rounded down. Lines that are not whole are skipped.
+ct_command_stats() {
+  local file="${1:-}" project="${2:-}" col=3
+  [ -r "$file" ] || return 0
+  [ -n "$project" ] || return 0
+  [ "$project" = "all" ] && col=4
+  awk -F '\t' -v want="$project" '
+    NF == 5 && $4 ~ /^[0-9]+$/ && (want == "all" || $2 == want) {
+      id = (want == "all") ? $2 "\t" $3 : $3
+      c = ++n[id]; v[id, c] = $4; last[id] = $4
+      if ($5 == "fail") f[id]++
+    }
+    END {
+      for (id in n) {
+        m = n[id]
+        for (i = 1; i <= m; i++) a[i] = v[id, i] + 0
+        for (i = 2; i <= m; i++) { x = a[i]; j = i - 1; while (j >= 1 && a[j] > x) { a[j + 1] = a[j]; j-- } a[j + 1] = x }
+        med = (m % 2) ? a[(m + 1) / 2] : int((a[m / 2] + a[m / 2 + 1]) / 2)
+        printf "%s\t%d\t%d\t%d\t%d\n", id, m, med, last[id], f[id] + 0
+      }
+    }' "$file" | sort -t "$(printf '\t')" -k"$col","$col"nr
+  return 0
+}
+
+# The sentence telling the model which commands are usually slow in this
+# project, or nothing: keys with at least three runs and a median of at least
+# the slow-tool threshold, slowest first, at most three.
+#   $1 the memory file   $2 project   $3 threshold in seconds
+ct_slow_commands_note() {
+  local file="${1:-}" project="${2:-}" after="${3:-}" key runs med list="" count=0
+  case "$after" in ''|*[!0-9]*) return 0 ;; esac
+  after=$((10#$after))
+  [ "$after" -gt 0 ] || return 0
+  if [ -z "$project" ] || [ "$project" = "-" ]; then
+    return 0
+  fi
+  while IFS=$'\t' read -r key runs med _; do
+    [ "$runs" -ge 3 ] || continue
+    [ $(( med / 1000 )) -ge "$after" ] || continue
+    list="${list:+$list, }$key ~$(ct_format_duration $(( med / 1000 ))) ($runs runs)"
+    count=$(( count + 1 ))
+    [ "$count" -ge 3 ] && break
+  done < <(ct_command_stats "$file" "$project")
+  if [ -n "$list" ]; then
+    printf 'Usually slow in this project: %s.' "$list"
+  fi
+  return 0
+}

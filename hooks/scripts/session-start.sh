@@ -238,6 +238,12 @@ if [ "$CT_INJECT_CONTEXT" != "false" ]; then
       context="$(ct_resume_note "$origin" "$transcript" "$(date +%s)")"
     fi
   fi
+  if [ "$CT_COMMAND_MEMORY" = "on" ]; then
+    slow_cmds="$(ct_slow_commands_note "$(ct_commands_path)" "$(ct_project_name "$cwd")" "$CT_SLOW_TOOL_AFTER")"
+    if [ -n "$slow_cmds" ]; then
+      context="${context:+$context }$slow_cmds"
+    fi
+  fi
   # With every note switched off there is nothing for the skill to explain,
   # so the pointer says only what is still true. The values were validated as
   # whole numbers on load, and `-eq` reads them as decimal, so "00" is 0 too.
