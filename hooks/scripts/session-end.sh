@@ -43,7 +43,7 @@ state_file="$(ct_state_file "$session_id")" || { ct_clear_state "$session_id"; e
 # the same reconciliation the next prompt would have done, at the one other
 # place a turn can be abandoned, so the last turn of a session is not silently
 # dropped from its own summary.
-ct_turn_close "$session_id" "$(ct_read_counter "${state_file}.last")"
+ct_turn_close "$session_id" "$(ct_read_counter "${state_file}.last")" interrupted
 
 ct_session_totals "$session_id"
 

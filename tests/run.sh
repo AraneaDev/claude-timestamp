@@ -5603,7 +5603,7 @@ ct_turn_close "../../etc/passwd" "$tc_now"
 is "turn close: a traversal id closes the flattened file" "30" \
   "$(ct_read_counter "$tc_base.wait")"
 is "turn close: and writes only siblings of that name" \
-  "etcpasswd etcpasswd.closed etcpasswd.wait" \
+  "etcpasswd etcpasswd.closed etcpasswd.turnlog etcpasswd.wait" \
   "$(ls -1A "$(ct_state_dir)" | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')"
 is "turn close: and nothing at all outside the state directory" \
   "$tc_before" "$(ls -1A "$TMPDIR")"
@@ -6685,6 +6685,61 @@ else
 fi
 
 echo
+echo "agent notes: compaction"
+
+fresh 'TZ=UTC'
+cn_base="$(ct_state_file cn)"
+printf '1000' > "$cn_base.start"
+printf '3' > "$cn_base.turns"
+printf '600' > "$cn_base.wait"
+printf '1\t3000\t3360\t360\t-\t-\t-\t0\tstop\n2\t6000\t7320\t1320\t-\t-\t-\t1\tstop\n3\t9000\t9299\t299\t-\t-\t-\t0\tstop\n' > "$cn_base.turnlog"
+is "compaction: the timeline before it, longest turns first" \
+  "Conversation compacted. Session started 00:16:40 (3h03m ago), 3 turns so far, 10m00s of it waiting. Longest turns: 01:40:00 (22m00s), 00:50:00 (6m00s)." \
+  "$(ct_compact_note cn 12000 24h)"
+printf '1' > "$cn_base.turns"
+printf '1\t3000\t3360\t360\t-\t-\t-\t0\tstop\n' > "$cn_base.turnlog"
+is "compaction: one turn, one longest turn" \
+  "Conversation compacted. Session started 00:16:40 (3h03m ago), 1 turn so far, 10m00s of it waiting. Longest turn: 00:50:00 (6m00s)." \
+  "$(ct_compact_note cn 12000 24h)"
+: > "$cn_base.turnlog"
+lacks "compaction: no turn of five minutes, no longest clause" "Longest" "$(ct_compact_note cn 12000 24h)"
+rm -f "$cn_base.start"
+is "compaction: a session with no recorded start says nothing" "" "$(ct_compact_note cn 12000 24h)"
+is "compaction: an unknown session says nothing" "" "$(ct_compact_note never 12000 24h)"
+# Compaction usually lands in the middle of a long turn, which is then the
+# longest of all; leaving it out would make the note's claim false.
+printf '1000' > "$cn_base.start"
+printf '3' > "$cn_base.turns"
+printf '1\t3000\t3360\t360\t-\t-\t-\t0\tstop\n' > "$cn_base.turnlog"
+printf '10000' > "$cn_base"
+rm -f "$cn_base.closed"
+contains "compaction: the turn in progress counts, and says so" \
+  "Longest turns: 02:46:40 (33m20s, still running), 00:50:00 (6m00s)." "$(ct_compact_note cn 12000 24h)"
+
+if command -v jq >/dev/null 2>&1; then
+  cn_run() {
+    printf '{"session_id":"cnh","source":"%s","transcript_path":"%s/self.jsonl"}' "$1" "$WORK" \
+      | bash "$SCRIPTS/session-start.sh" | jq -r '.hookSpecificOutput.additionalContext // ""'
+  }
+  fresh
+  printf '{"session_id":"cnh"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  contains "compaction hook: compact tells Claude" "Conversation compacted. Session started" "$(cn_run compact)"
+  lacks "compaction hook: startup does not" "Conversation compacted" "$(cn_run startup)"
+  fresh 'RESUME_NOTE=off'
+  printf '{"session_id":"cnh"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  lacks "compaction hook: RESUME_NOTE=off says nothing" "Conversation compacted" "$(cn_run compact)"
+  fresh 'INJECT_CONTEXT=false'
+  printf '{"session_id":"cnh"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  is "compaction hook: INJECT_CONTEXT=false says nothing" "" "$(cn_run compact)"
+  fresh
+  lacks "compaction hook: no state, no note" "Conversation compacted" "$(cn_run compact)"
+else
+  for cn_label in "compact" "startup" "resume off" "inject off" "no state"; do
+    skip "compaction hook: $cn_label" "jq is not installed"
+  done
+fi
+
+echo
 echo "session report"
 
 if command -v jq >/dev/null 2>&1; then
@@ -6753,7 +6808,7 @@ asserts "skill: SKILL.md ships" test -r "$ta_skill"
 is "skill: named after its directory" "time-awareness" "$(sed -n 's/^name: //p' "$ta_skill" 2>/dev/null)"
 is "skill: hidden from the slash menu" "false" "$(sed -n 's/^user-invocable: //p' "$ta_skill" 2>/dev/null)"
 asserts "skill: the script it runs is where it says" test -r "$ROOT/skills/time-awareness/../../hooks/scripts/setup.sh"
-for ta_quote in "Turn running" "That Bash call took" "Previous session in this project ended" "Resuming this conversation"; do
+for ta_quote in "Turn running" "That Bash call took" "Previous session in this project ended" "Resuming this conversation" "Conversation compacted"; do
   contains "skill: explains '$ta_quote'" "$ta_quote" "$(cat "$ta_skill" 2>/dev/null)"
 done
 lacks "skill: no em dashes" "—" "$(cat "$ta_skill" 2>/dev/null)"
@@ -6776,6 +6831,122 @@ if command -v jq >/dev/null 2>&1; then
 else
   for ptr_label in "names skill" "inject off" "after resume" "order" "all notes off"; do
     skip "pointer: $ptr_label" "jq is not installed"
+  done
+fi
+
+echo
+echo "turn timeline"
+
+# Written by ct_close_turn, the one place a turn is known to have ended, so
+# these call it directly; the hook paths are covered below.
+fresh
+tl_base="$(ct_state_file tl)"
+tl_now="$(date +%s)"
+ct_turn_open tl "$(( tl_now - 90 ))"
+ct_turn_close tl "$tl_now" stop
+is "timeline: a closed turn writes one line" "1" "$(wc -l < "$tl_base.turnlog" | tr -d ' ')"
+is "timeline: number, start, end, length" "1	$(( tl_now - 90 ))	$tl_now	90" "$(cut -f1-4 "$tl_base.turnlog")"
+is "timeline: without tool timing the tool fields are dashes" "-	-	-" "$(cut -f5-7 "$tl_base.turnlog")"
+is "timeline: no heartbeat told, closed by Stop" "0	stop" "$(cut -f8-9 "$tl_base.turnlog")"
+ct_turn_close tl "$(( tl_now + 60 ))" stop
+is "timeline: a second close writes nothing" "1" "$(wc -l < "$tl_base.turnlog" | tr -d ' ')"
+
+ct_turn_open tl "$(( tl_now - 100 ))"
+ct_stage_flag tl tooltiming on
+printf 'Bash 80.000 ok\nRead 1.400 ok\n' > "$tl_base.turntools"
+printf '2' > "$tl_base.hb"
+ct_turn_close tl "$tl_now" interrupted
+is "timeline: tool count, tool seconds and the dominant tool" "2	81	Bash:80" "$(sed -n 2p "$tl_base.turnlog" | cut -f5-7)"
+is "timeline: heartbeats told and an interrupted close" "2	interrupted" "$(sed -n 2p "$tl_base.turnlog" | cut -f8-9)"
+
+ct_turn_open tl "$(( tl_now - 10 ))"
+: > "$tl_base.turntools"
+ct_turn_close tl "$tl_now" whatever
+is "timeline: timing on with no calls counts zero" "0	0	-" "$(sed -n 3p "$tl_base.turnlog" | cut -f5-7)"
+is "timeline: an unknown close reason is recorded as stop" "stop" "$(sed -n 3p "$tl_base.turnlog" | cut -f9)"
+
+is "tool summary: no dominant tool below half the turn" "2	20	-" \
+  "$(printf 'Bash 10.000 ok\nRead 10.000 ok\n' > "$WORK/ts.log"; ct_turn_tool_summary "$WORK/ts.log" 100)"
+is "tool summary: a missing log is dashes" "-	-	-" "$(ct_turn_tool_summary "$WORK/absent.log" 100)"
+
+if command -v jq >/dev/null 2>&1; then
+  fresh
+  printf '{"session_id":"tlh"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  printf '{"session_id":"tlh","hook_event_name":"Stop"}' | bash "$SCRIPTS/stop.sh"
+  is "timeline hooks: Stop closes as stop" "stop" "$(cut -f9 "$(ct_state_file tlh).turnlog")"
+  printf '{"session_id":"tlh"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  printf '{"session_id":"tlh"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  is "timeline hooks: a turn the next prompt reconciles is interrupted" "interrupted" \
+    "$(sed -n 2p "$(ct_state_file tlh).turnlog" | cut -f9)"
+  printf '{"session_id":"tlh","hook_event_name":"Interrupt"}' | bash "$SCRIPTS/stop.sh"
+  is "timeline hooks: Codex's Interrupt closes as interrupted" "interrupted" \
+    "$(sed -n 3p "$(ct_state_file tlh).turnlog" | cut -f9)"
+  printf '{"session_id":"tlh"}' | bash "$SCRIPTS/session-end.sh" >/dev/null
+  refutes "timeline hooks: session end removes the timeline" test -e "$(ct_state_file tlh).turnlog"
+else
+  for tl_label in "stop" "reconciled" "codex interrupt" "session end"; do
+    skip "timeline hooks: $tl_label" "jq is not installed"
+  done
+fi
+
+echo
+echo "turn timeline: reports"
+
+if command -v jq >/dev/null 2>&1; then
+  tr_run() { env CLAUDE_CODE_SESSION_ID=tr bash "$SCRIPTS/setup.sh" "$@" 2>&1; }
+  fresh 'TZ=UTC'
+  printf '{"session_id":"tr"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  printf '{"session_id":"tr","hook_event_name":"Stop"}' | bash "$SCRIPTS/stop.sh"
+  printf '{"session_id":"tr"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  out="$(tr_run --turns)"
+  contains "turns: a header" "claude-timestamp turns" "$out"
+  contains "turns: the closed turn, closed by Stop" "stop" "$out"
+  is "turns: the open turn last" "open" "$(printf '%s\n' "$out" | tail -n 1 | awk '{print $NF}')"
+  js="$(tr_run --turns --json)"
+  is "turns json: two turns" "2" "$(printf '%s' "$js" | jq '.turns | length')"
+  is "turns json: the open turn has no end" "null" "$(printf '%s' "$js" | jq '.turns[1].end')"
+  is "turns json: unmeasured tools are null" "null" "$(printf '%s' "$js" | jq '.turns[0].tools')"
+  is "turns json: local start carries the zone offset" "+0000" "$(printf '%s' "$js" | jq -r '.turns[0].start_local[-5:]')"
+  sj="$(tr_run --session --json)"
+  is "session json: turn count" "2" "$(printf '%s' "$sj" | jq '.turn_count')"
+  is "session json: carries the turns" "2" "$(printf '%s' "$sj" | jq '.turns | length')"
+  contains "session json: waiting agrees with the plain report" \
+    "waiting         $(ct_format_duration "$(printf '%s' "$sj" | jq '.waiting')")" "$(tr_run --session)"
+
+  # A half-written last line is an append cut short; it is skipped, not parsed.
+  printf '3\t17\n4\t1\t2\t1\t-\t-\t-\t0\tsto\n' >> "$(ct_state_file tr).turnlog"
+  is "turns json: a torn line is skipped" "2" "$(tr_run --turns --json | jq '.turns | length')"
+
+  # Run from a directory whose config pins another zone: the session's staged zone wins.
+  printf 'TZ=Asia/Tokyo\n' > "$CLAUDE_TIMESTAMP_CONFIG"
+  is "turns json: the session's staged zone wins" "+0000" "$(tr_run --turns --json | jq -r '.turns[0].start_local[-5:]')"
+
+  # --json on a session with no record yet still prints JSON.
+  is "turns json: an unrecorded session is an empty list" "0" \
+    "$(env CLAUDE_CODE_SESSION_ID=never-seen bash "$SCRIPTS/setup.sh" --turns --json 2>/dev/null | jq '.turns | length')"
+  is "session json: an unrecorded session has no turns" "0" \
+    "$(env CLAUDE_CODE_SESSION_ID=never-seen bash "$SCRIPTS/setup.sh" --session --json 2>/dev/null | jq '.turn_count')"
+
+  # A clock that moved backwards leaves the open turn starting in the future.
+  printf '%s' "$(( $(date +%s) + 100 ))" > "$(ct_state_file tr)"
+  rm -f "$(ct_state_file tr).closed"
+  tr_run --turns >/dev/null; rc=$?
+  is "turns: a turn starting in the future does not abort the report" "0" "$rc"
+  is "turns json: and its length is not negative" "0" "$(tr_run --turns --json | jq '.turns[-1].secs')"
+  is "session json: nor is the open turn's" "0" "$(tr_run --session --json | jq '.current_turn.secs')"
+
+  out="$(tr_run --stats --json)"; rc=$?
+  is "json: refused with --stats" "2" "$rc"
+  out="$(tr_run --turns --tool-timing=on)"; rc=$?
+  is "turns: refuses a setting flag" "2" "$rc"
+  out="$(CLAUDE_CODE_SESSION_ID='' bash "$SCRIPTS/setup.sh" --turns 2>&1)"; rc=$?
+  is "turns: without a session id it exits 2" "2" "$rc"
+else
+  for tr_label in "header" "closed" "open" "two turns" "open end" "tools null" "offset" \
+                  "turn count" "turns" "waiting" "torn line" "staged zone" "unrecorded turns" \
+                  "unrecorded session" "future no abort" "future secs" "future current" "stats json" \
+                  "refuses setting" "no id"; do
+    skip "turn reports: $tr_label" "jq is not installed"
   done
 fi
 

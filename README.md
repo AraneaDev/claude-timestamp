@@ -8,7 +8,7 @@
 [![Release](https://img.shields.io/github/v/release/AraneaDev/claude-timestamp)](https://github.com/AraneaDev/claude-timestamp/releases)
 [![Tool page](https://img.shields.io/badge/tool%20page-aranea--development.nl-0b7285)](https://aranea-development.nl/en/tools/claude-timestamp)
 [![CI](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml/badge.svg)](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-1294%20passing-2b8a3e)](tests/run.sh)
+[![Tests](https://img.shields.io/badge/tests-1341%20passing-2b8a3e)](tests/run.sh)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-364fc7)](#platform-notes)
 [![Conventional Commits](https://img.shields.io/badge/commits-conventional-fe5196?logo=conventionalcommits&logoColor=white)](https://www.conventionalcommits.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
@@ -94,6 +94,7 @@ has a setting of its own.
 | The first tool result after a turn passes 15 minutes, and every 15 after | `Turn running 15m02s (prompt sent 10:37:21); now 10:52:23 CEST.` | `HEARTBEAT_AFTER` |
 | One tool call takes a minute or more | `That Bash call took 2m14s.` | `SLOW_TOOL_AFTER` |
 | A session starts an hour or more after the last one in this project, or a conversation is resumed an hour or more after its last activity | `Previous session in this project ended 14h ago (Thu 20:12:05).` or `Resuming this conversation; last activity 14h ago (Thu 20:12:05).` | `RESUME_NOTE` |
+| A conversation is compacted | `Conversation compacted. Session started 09:12:05 (3h04m ago), 41 turns so far, 1h02m of it waiting. Longest turns: 10:37:21 (22m04s).` | `RESUME_NOTE` |
 
 The notes state facts and give no instructions. The advice lives in one place,
 a skill the plugin ships, `time-awareness`, which Claude loads when a note
@@ -559,6 +560,16 @@ Claude Code:
 bash "$CLAUDE_PLUGIN_ROOT/hooks/scripts/setup.sh" --session
 ```
 
+`--turns` lists the session one turn at a time: when each started, how long it
+took, and, with `TOOL_TIMING` on, which tool took most of it. Add `--json` to
+`--session` or `--turns` for the same data in a form a script, or Claude, can
+read.
+
+```bash
+bash "$CLAUDE_PLUGIN_ROOT/hooks/scripts/setup.sh" --turns
+bash "$CLAUDE_PLUGIN_ROOT/hooks/scripts/setup.sh" --session --json
+```
+
 <p align="center">
   <img src="assets/session-report.webp" alt="The live report for the session in progress" width="660">
 </p>
@@ -643,7 +654,7 @@ no database.
 ## Development
 
 ```bash
-bash tests/run.sh                                    # 1294 assertions, no framework
+bash tests/run.sh                                    # 1341 assertions, no framework
 shellcheck -S style -e SC1091 hooks/scripts/**/*.sh  # clean
 bash tools/check-docs.sh                             # README against the code
 ```

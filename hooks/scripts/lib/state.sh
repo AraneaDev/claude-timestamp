@@ -376,6 +376,60 @@ ct_read_counter() {
   case "$value" in ''|*[!0-9]*) printf '0' ;; *) printf '%s' "$value" ;; esac
 }
 
+# One turn's tool calls, summarised for the timeline: how many, how many
+# seconds in total, and the tool that took at least half the turn, as
+# "Tool:secs". Three tab-separated fields; "-" for each when there is no log,
+# which is what a turn looks like with tool timing off.
+#   $1 the turn's tool log   $2 the turn's length in seconds
+#
+# The at-least-half rule is ct_dominant_tool's, for the same reason: naming a
+# tool that was not the reason is worse than naming none.
+ct_turn_tool_summary() {
+  local log="${1:-}" total="${2:-0}"
+  case "$total" in ''|*[!0-9]*) total=0 ;; esac
+  if [ ! -r "$log" ]; then
+    printf -- '-\t-\t-'
+    return 0
+  fi
+  awk -v total="$total" '
+    NF == 3 && $2 ~ /^[0-9]+\.[0-9][0-9][0-9]$/ { n++; s += $2; sum[$1] += $2 }
+    END {
+      best = ""; top = 0
+      for (t in sum) if (sum[t] > top) { top = sum[t]; best = t }
+      if (top > total) top = total
+      slow = "-"
+      if (best != "" && total > 0 && top * 2 >= total) slow = sprintf("%s:%d", best, int(top + 0.5))
+      printf "%d\t%d\t%s", n, int(s + 0.5), slow
+    }' "$log"
+  return 0
+}
+
+# Append a closed turn to the session's timeline, <state>.turnlog. Called from
+# ct_close_turn only, after .closed is written, so a turn is recorded once.
+#   $1 state file   $2 start   $3 end   $4 stop|interrupted
+#
+# Read before the next ct_turn_open, which is the only thing that clears .hb;
+# the per-turn tool log is cleared by the prompt hook after the close, too.
+# Whether tool timing was on comes from the flag the prompt hook staged, so
+# "no calls" (0) and "not measured" (-) stay distinguishable.
+ct_append_turn() {
+  local base="${1:-}" started="${2:-0}" ended="${3:-0}" how="${4:-stop}" n hb timing="" tools
+  [ -n "$base" ] || return 0
+  case "$how" in stop|interrupted) ;; *) how="stop" ;; esac
+  n="$(ct_read_counter "${base}.turns")"
+  hb="$(ct_read_counter "${base}.hb")"
+  if [ -r "${base}.tooltiming" ]; then
+    IFS= read -r timing < "${base}.tooltiming" 2>/dev/null || :
+  fi
+  tools=$'-\t-\t-'
+  if [ "$timing" = "on" ]; then
+    tools="$(ct_turn_tool_summary "${base}.turntools" "$(( ended - started ))")" || tools=$'-\t-\t-'
+  fi
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$n" "$started" "$ended" "$(( ended - started ))" \
+    "$tools" "$hb" "$how" >> "${base}.turnlog" 2>/dev/null || :
+  return 0
+}
+
 # Close the turn a prompt opened, adding what it cost to the running total of
 # time spent waiting.
 #
@@ -393,7 +447,7 @@ ct_read_counter() {
 # while a prompt reconciling a turn that was interrupted only knows when its
 # last message was drawn.
 ct_close_turn() {
-  local state_file="${1:-}" ended="${2:-0}" started
+  local state_file="${1:-}" ended="${2:-0}" how="${3:-stop}" started
   [ -n "$state_file" ] || return 0
   [ -r "$state_file" ] || return 0
   [ -e "${state_file}.closed" ] && return 0
@@ -419,6 +473,7 @@ ct_close_turn() {
     ended="$started"
   fi
   printf '%s' "$ended" > "${state_file}.closed"
+  ct_append_turn "$state_file" "$started" "$ended" "$how"
   return 0
 }
 
@@ -468,10 +523,10 @@ ct_turn_open() {
 # layout. Idempotent: a hook can cause the model to run again, so a turn seeing
 # two closes is a case to survive rather than one to assume away.
 ct_turn_close() {
-  local sid="${1:-}" ended="${2:-0}" base
+  local sid="${1:-}" ended="${2:-0}" how="${3:-stop}" base
   ct_state_file_var "$sid" || return 0
   base="$_CT_STATE_FILE"
-  ct_close_turn "$base" "$ended"
+  ct_close_turn "$base" "$ended" "$how"
   return 0
 }
 
@@ -661,6 +716,54 @@ ct_session_totals() {
   [ "$elapsed" -lt 0 ] && elapsed=0
   [ "$_CT_WAIT" -gt "$elapsed" ] && _CT_WAIT="$elapsed"
   [ "$(( _CT_WAIT + _CT_IDLE ))" -gt "$elapsed" ] && _CT_IDLE=$(( elapsed - _CT_WAIT ))
+  return 0
+}
+
+# The sentence telling the model what the session looked like before a
+# compaction, or nothing.
+#   $1 session id   $2 now (epoch)   $3 clock format
+#
+# A compaction replaces the conversation with a summary, and a summary has no
+# clock. The timeline is still measured, so the model is handed the measured
+# version: when the session began, how many turns, how much of it the user
+# spent waiting, and the turns of five minutes or more, longest first, at most
+# two. A session with no recorded start (pruned, or never prompted) gets no
+# sentence rather than one about 1970.
+ct_compact_note() {
+  local sid="${1:-}" now="${2:-}" fmt="${3:-24h}" base ago start secs open open_start longest="" count=0 noun="turns"
+  case "$now" in ''|*[!0-9]*) return 0 ;; esac
+  ct_state_file_var "$sid" || return 0
+  base="$_CT_STATE_FILE"
+  ct_session_totals "$sid"
+  [ "$_CT_START" -gt 0 ] || return 0
+  ago=$(( now - _CT_START ))
+  [ "$ago" -lt 0 ] && ago=0
+  # The turn in progress is a candidate too: compaction usually lands in the
+  # middle of a long turn, and that turn is then the longest of all.
+  open_start=0
+  if [ -r "$base" ] && [ ! -e "${base}.closed" ]; then
+    open_start="$(ct_read_counter "$base")"
+  fi
+  while IFS=$'\t' read -r start secs open; do
+    longest="${longest:+$longest, }$(ct_format_epoch "$start" "$fmt") ($(ct_format_duration "$secs")${open:+, still running})"
+    count=$(( count + 1 ))
+  done < <({
+             if [ -r "${base}.turnlog" ]; then
+               awk -F '\t' 'NF == 9 && $2 ~ /^[0-9]+$/ && $4 ~ /^[0-9]+$/ && $4 >= 300 { print $2 "\t" $4 "\t" }' "${base}.turnlog"
+             fi
+             if [ "$open_start" -gt 0 ] && [ $(( now - open_start )) -ge 300 ]; then
+               printf '%s\t%s\topen\n' "$open_start" "$(( now - open_start ))"
+             fi
+           } | sort -t "$(printf '\t')" -k2,2nr | head -n 2)
+  [ "$_CT_TURNS" -eq 1 ] && noun="turn"
+  printf 'Conversation compacted. Session started %s (%s ago), %s %s so far, %s of it waiting.' \
+    "$(ct_format_epoch "$_CT_START" "$fmt")" "$(ct_format_duration "$ago")" \
+    "$_CT_TURNS" "$noun" "$(ct_format_duration "$_CT_WAIT")"
+  if [ "$count" -eq 1 ]; then
+    printf ' Longest turn: %s.' "$longest"
+  elif [ "$count" -gt 1 ]; then
+    printf ' Longest turns: %s.' "$longest"
+  fi
   return 0
 }
 
