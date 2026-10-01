@@ -6992,11 +6992,28 @@ body line")"
   is "key: a non-string has no key" "" "$(jq -rn "$CT_JQ_CMDKEY"' null | ct_cmdkey')"
   is "key: tabs are spaces" "make test" "$(ck "$(printf 'make\ttest')")"
   is "key: a non-ASCII program has no key" "" "$(ck 'bühne start')"
+  # Hosts and remote paths are outside the project; a scoped package is not.
+  is "key: user@host is never stored" "ssh" "$(ck 'ssh deploy@prod.internal.corp')"
+  is "key: an scp target is never stored" "scp backup.sql" "$(ck 'scp backup.sql root@prod.example.com:/var/backups/')"
+  is "key: an ssh clone URL is never stored" "git clone" "$(ck 'git clone git@github.com:org/private-repo')"
+  is "key: a scoped package is kept" "npm install @scope/pkg" "$(ck 'npm install @scope/pkg')"
+  is "key: a test node id is kept" "pytest spec/a.py::test_b" "$(ck 'pytest spec/a.py::test_b')"
+  # echo and printf carry data, often a token piped into a CLI.
+  is "key: echo keeps no arguments" "echo" "$(ck 'echo ghp_abcdef1234567890 | gh auth login --with-token')"
+  is "key: printf keeps no arguments" "printf" "$(ck 'printf secretvalue | docker login --password-stdin')"
+  is "key: a long token-shaped argument ends it" "vault login" "$(ck 'vault login hvs.CAESIJ8abc123')"
+  # A command of thousands of words is keyed without walking all of them.
+  ck_long="git add$(printf ' f%d' $(seq 1 3000))"
+  ck_t0="$(date +%s)"
+  is "key: thousands of words, two kept" "git add f1" "$(ck "$ck_long")"
+  ck_t1="$(date +%s)"
+  is_near "key: and quickly" 0 "$(( ck_t1 - ck_t0 ))" 1
   is "key: at most 60 characters" "60" "$(ck "$(printf 'x%.0s' $(seq 1 200))" | tr -d '\n' | wc -c | tr -d ' ')"
 else
   for ck_label in "and segment" "script path" "run ids" "quotes" "abs path" "sudo" "url" \
                   "heredoc" "pipe" "two args" "test file" "assignment" "empty" "non-string" \
-                  "tabs" "non-ascii" "60 chars"; do
+                  "tabs" "non-ascii" "user@host" "scp" "ssh clone" "scoped" "node id" "echo" \
+                  "printf" "token" "long" "long fast" "60 chars"; do
     skip "key: $ck_label" "jq is not installed"
   done
 fi
