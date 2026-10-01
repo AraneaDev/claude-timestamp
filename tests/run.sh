@@ -6974,7 +6974,10 @@ echo
 echo "command memory: key"
 
 if command -v jq >/dev/null 2>&1; then
-  ck() { jq -rn --arg c "$1" "$CT_JQ_CMDKEY"' $c | ct_cmdkey'; }
+  # Through stdin, the way a hook payload arrives: Git Bash rewrites an
+  # argument that looks like a POSIX path (/usr/bin/x) into a Windows one
+  # before jq.exe sees it, which a real payload never goes through.
+  ck() { printf '%s' "$1" | jq -Rrs "$CT_JQ_CMDKEY"' . | ct_cmdkey'; }
   is "key: last && segment, env prefix and -- dropped" "npm test" "$(ck 'cd x && FOO=1 npm test -- src/a.test.ts')"
   is "key: a relative script path is kept" "bash tests/run.sh" "$(ck 'bash tests/run.sh')"
   is "key: run ids and flags end it" "gh run watch" "$(ck 'gh run watch 12345 --exit-status')"
@@ -7008,7 +7011,7 @@ body line")"
   is "key: thousands of words, two kept" "git add f1" "$(ck "$ck_long")"
   ck_t1="$(date +%s)"
   is_near "key: and quickly" 0 "$(( ck_t1 - ck_t0 ))" 1
-  is "key: at most 60 characters" "60" "$(ck "$(printf 'x%.0s' $(seq 1 200))" | tr -d '\n' | wc -c | tr -d ' ')"
+  is "key: at most 60 characters" "60" "$(ck "$(printf 'x%.0s' $(seq 1 200))" | tr -d '\r\n' | wc -c | tr -d ' ')"
 else
   for ck_label in "and segment" "script path" "run ids" "quotes" "abs path" "sudo" "url" \
                   "heredoc" "pipe" "two args" "test file" "assignment" "empty" "non-string" \
