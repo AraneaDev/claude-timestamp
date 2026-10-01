@@ -7103,6 +7103,9 @@ sc_row sc-proj 'gh run watch' 460000
 is "stats: median per key, slowest first" "gh run watch	2	460000	460000	0" "$(ct_command_stats "$sc_file" sc-proj | head -n 1)"
 is "stats: an even count takes the middle two" "x	4	2500	10000	0" \
   "$(printf '1\tq\tx\t1000\tok\n1\tq\tx\t2000\tok\n1\tq\tx\t3000\tok\n1\tq\tx\t10000\tok\n' > "$WORK/even.tsv"; ct_command_stats "$WORK/even.tsv" q)"
+# Only the last 20 runs count, also before session end prunes the rest.
+is "stats: only the last twenty runs count" "w	20	50	0	0" \
+  "$(awk 'BEGIN { for (i = 1; i <= 10; i++) printf "1\tq\tw\t0\tok\n"; for (i = 1; i <= 10; i++) printf "1\tq\tw\t100\tok\n"; printf "1\tq\tw\t0\tok\n" }' > "$WORK/window.tsv"; ct_command_stats "$WORK/window.tsv" q)"
 is "stats: all projects carry the project first" "other	make" "$(ct_command_stats "$sc_file" all | head -n 1 | cut -f1-2)"
 is "note: three at most, at least three runs, over the threshold, this project only" \
   "Usually slow in this project: cargo build ~6m40s (3 runs), bash tests/run.sh ~4m00s (3 runs), npm test ~1m30s (3 runs)." \

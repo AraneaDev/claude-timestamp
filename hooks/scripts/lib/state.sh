@@ -894,8 +894,8 @@ ct_prune_commands() {
   return 0
 }
 
-# Per command in one project: key, runs, median ms, last ms and failures,
-# tab-separated, slowest median first. "all" lists every project, with the
+# Per command in one project, over its last 20 runs: key, runs, median ms,
+# last ms and failures, tab-separated, slowest median first. "all" lists every project, with the
 # project as an extra first column. The median of an even count is the mean of
 # the middle two, rounded down. Lines that are not whole are skipped.
 ct_command_stats() {
@@ -906,16 +906,18 @@ ct_command_stats() {
   awk -F '\t' -v want="$project" '
     NF == 5 && $4 ~ /^[0-9]+$/ && (want == "all" || $2 == want) {
       id = (want == "all") ? $2 "\t" $3 : $3
-      c = ++n[id]; v[id, c] = $4; last[id] = $4
-      if ($5 == "fail") f[id]++
+      c = ++n[id]; v[id, c] = $4; bad[id, c] = ($5 == "fail"); last[id] = $4
     }
     END {
       for (id in n) {
-        m = n[id]
-        for (i = 1; i <= m; i++) a[i] = v[id, i] + 0
+        # The last 20 runs only, the window pruning keeps, so the figures do
+        # not depend on whether a session end has pruned the file yet.
+        first = (n[id] > 20) ? n[id] - 19 : 1
+        m = 0; fails = 0
+        for (i = first; i <= n[id]; i++) { a[++m] = v[id, i] + 0; fails += bad[id, i] }
         for (i = 2; i <= m; i++) { x = a[i]; j = i - 1; while (j >= 1 && a[j] > x) { a[j + 1] = a[j]; j-- } a[j + 1] = x }
         med = (m % 2) ? a[(m + 1) / 2] : int((a[m / 2] + a[m / 2 + 1]) / 2)
-        printf "%s\t%d\t%d\t%d\t%d\n", id, m, med, last[id], f[id] + 0
+        printf "%s\t%d\t%d\t%d\t%d\n", id, m, med, last[id], fails
       }
     }' "$file" | sort -t "$(printf '\t')" -k"$col","$col"nr
   return 0
