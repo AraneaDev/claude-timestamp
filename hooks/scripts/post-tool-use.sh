@@ -157,8 +157,20 @@ if [ -n "$agent_id" ]; then
   ct_read_flag_var "$session_id" "subagents"; subagent_notes="$_CT_FLAG"
 fi
 if [ -z "$agent_id" ] || [ "$subagent_notes" = "on" ]; then
-  ct_read_flag_var "$session_id" "slowtool"
-  ct_slow_tool_note_var "$tool_name" "$ms" "$outcome" "$_CT_FLAG" || :
+  ct_read_flag_var "$session_id" "slowtool"; st_after="$_CT_FLAG"
+  ct_slow_tool_note_var "$tool_name" "$ms" "$outcome" "$st_after" || :
+  # Already slow, so worth one read of the memory: the usual figure for this
+  # command, from the runs before this one (it is recorded further down).
+  if [ -n "$_CT_NOTE" ] && [ -n "$cmd_key" ]; then
+    ct_read_flag_var "$session_id" "cmdmem"
+    if [ "$_CT_FLAG" = "on" ]; then
+      ct_read_flag_var "$session_id" "project"
+      usual="$(ct_command_usual "$(ct_commands_path)" "$_CT_FLAG" "$cmd_key")" || usual=""
+      if [ -n "$usual" ]; then
+        ct_slow_tool_note_var "$tool_name" "$ms" "$outcome" "$st_after" "$usual" || :
+      fi
+    fi
+  fi
   note="$_CT_NOTE"
 fi
 if [ -z "$agent_id" ]; then

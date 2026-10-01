@@ -7115,6 +7115,38 @@ else
 fi
 
 echo
+echo "command memory: usually"
+
+is "usually: the note carries the usual duration" "That Bash call took 6m10s (usually 4m00s)." \
+  "$(ct_slow_tool_note Bash 370000 ok 60 240)"
+is "usually: a failure too" "That Bash call failed after 1m10s (usually 4m00s)." \
+  "$(ct_slow_tool_note Bash 70000 fail 60 240)"
+is "usually: without it the note is unchanged" "That Bash call took 6m10s." "$(ct_slow_tool_note Bash 370000 ok 60)"
+
+if command -v jq >/dev/null 2>&1; then
+  mkdir -p "$WORK/proj-u"
+  us_prompt() { printf '{"session_id":"us","cwd":"%s"}' "$WORK/proj-u" | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null; }
+  us_call() {
+    jq -cn --argjson ms "$1" --arg c "$2" '{session_id: "us", tool_name: "Bash", hook_event_name: "PostToolUse", duration_ms: $ms, tool_input: {command: $c}}' \
+      | bash "$SCRIPTS/post-tool-use.sh" | jq -r '.hookSpecificOutput.additionalContext // ""'
+  }
+  us_row() { printf '%s\tproj-u\tnpm test\t%s\tok\n' "$(date +%s)" "$1" >> "$CLAUDE_TIMESTAMP_COMMANDS"; }
+
+  fresh; us_row 100000; us_row 200000; us_row 300000; us_prompt
+  is "usually: the median of earlier runs, not this one" "That Bash call took 15m00s (usually 3m20s)." \
+    "$(us_call 900000 'npm test')"
+  is "usually: and this run is then remembered" "4" "$(wc -l < "$CLAUDE_TIMESTAMP_COMMANDS" | tr -d ' ')"
+  fresh; us_row 100000; us_row 200000; us_prompt
+  is "usually: fewer than three earlier runs, no figure" "That Bash call took 15m00s." "$(us_call 900000 'npm test')"
+  fresh 'COMMAND_MEMORY=off'; us_row 100000; us_row 200000; us_row 300000; us_prompt
+  is "usually: COMMAND_MEMORY=off, no figure" "That Bash call took 15m00s." "$(us_call 900000 'npm test')"
+else
+  for us_label in "median" "remembered" "too few" "memory off"; do
+    skip "usually: $us_label" "jq is not installed"
+  done
+fi
+
+echo
 echo "----"
 printf '%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

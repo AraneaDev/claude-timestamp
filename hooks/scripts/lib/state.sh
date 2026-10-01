@@ -595,7 +595,7 @@ ct_turn_close() {
 # printing it, so post-tool-use.sh pays no subshell to learn that a fast call
 # has nothing to say. ct_slow_tool_note prints the same sentence.
 ct_slow_tool_note_var() {
-  local tool="${1:-}" ms="${2:-}" outcome="${3:-ok}" after="${4:-}" took
+  local tool="${1:-}" ms="${2:-}" outcome="${3:-ok}" after="${4:-}" usual="${5:-}" tail="" took
   _CT_NOTE=""
   case "$ms"    in ''|*[!0-9]*) return 0 ;; esac
   case "$after" in ''|*[!0-9]*) return 0 ;; esac
@@ -609,10 +609,14 @@ ct_slow_tool_note_var() {
   [ $((ms / 1000)) -ge "$after" ] || return 0
   took="$(ct_format_duration $((ms / 1000)))" || took=""
   [ -n "$tool" ] || tool="tool"
+  case "$usual" in
+    ''|*[!0-9]*) ;;
+    *) tail=" (usually $(ct_format_duration "$((10#$usual))"))" ;;
+  esac
   if [ "$outcome" = "fail" ]; then
-    printf -v _CT_NOTE 'That %s call failed after %s.' "$tool" "$took"
+    printf -v _CT_NOTE 'That %s call failed after %s%s.' "$tool" "$took" "$tail"
   else
-    printf -v _CT_NOTE 'That %s call took %s.' "$tool" "$took"
+    printf -v _CT_NOTE 'That %s call took %s%s.' "$tool" "$took" "$tail"
   fi
   return 0
 }
@@ -928,5 +932,20 @@ ct_slow_commands_note() {
   if [ -n "$list" ]; then
     printf 'Usually slow in this project: %s.' "$list"
   fi
+  return 0
+}
+
+# The usual duration of one command in one project, in whole seconds, when it
+# has at least three recorded runs; otherwise nothing. Read only for a call
+# that is already slow, so its cost never lands on the common path.
+ct_command_usual() {
+  local file="${1:-}" project="${2:-}" want="${3:-}" key runs med
+  [ -n "$want" ] || return 0
+  while IFS=$'\t' read -r key runs med _; do
+    if [ "$key" = "$want" ] && [ "$runs" -ge 3 ]; then
+      printf '%s' "$(( med / 1000 ))"
+      return 0
+    fi
+  done < <(ct_command_stats "$file" "$project")
   return 0
 }
