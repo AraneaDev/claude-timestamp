@@ -61,9 +61,13 @@ claude-timestamp setup
                               Claude Code.
   setup.sh --turns            One line per turn of this session, from inside
                               Claude Code.
+  setup.sh --commands         How long each Bash command usually takes in this
+                              project. --project=NAME for another, or
+                              --project=all for every project.
 
 Flags
-  --json                      With --session or --turns: print JSON instead.
+  --json                      With --session, --turns or --commands: print
+                              JSON instead.
   --tz=ZONE                   IANA timezone (Europe/Amsterdam), or "local".
   --display=FORMAT            24h | short | 12h | iso | any strftime string.
   --context=FORMAT            Same values; used for the model-facing time.
@@ -899,6 +903,55 @@ turns_report() {
     printf '  %4s  %-10s %-12s %-6s %-16s %s\n' "$n" "$(ct_format_epoch "$start" "$_CT_R_FMT")" \
       "$took" "$tools" "$slowest" "$how"
   done < <(_ct_turn_rows "$_CT_R_BASE" "$now")
+  return 0
+}
+
+# What the duration memory knows: per command, how many runs, the median, the
+# last and the failures, for this directory's project unless --project names
+# another or "all".
+commands_report() {
+  local file project rows key runs med last failed proj
+  ct_load_config
+  file="$(ct_commands_path)"
+  project="${CT_STATS_PROJECT:-$(ct_project_name "$PWD")}"
+  rows="$(ct_command_stats "$file" "$project")"
+  if [ "$CT_JSON" = "1" ]; then
+    command -v jq >/dev/null 2>&1 || { echo "--json needs jq." >&2; return 2; }
+    printf '%s\n' "$rows" | jq -R -s --arg project "$project" '
+      {project: $project,
+       commands: [split("\n")[] | select(length > 0) | split("\t")
+         | if $project == "all"
+           then {project: .[0], key: .[1], runs: (.[2] | tonumber), median_ms: (.[3] | tonumber), last_ms: (.[4] | tonumber), failed: (.[5] | tonumber)}
+           else {key: .[0], runs: (.[1] | tonumber), median_ms: (.[2] | tonumber), last_ms: (.[3] | tonumber), failed: (.[4] | tonumber)} end]}'
+    return $?
+  fi
+  if [ "$project" = "all" ]; then
+    echo "claude-timestamp commands, all projects"
+  else
+    echo "claude-timestamp commands in $project"
+  fi
+  echo
+  if [ "$CT_COMMAND_MEMORY" != "on" ]; then
+    echo "  COMMAND_MEMORY is off; turn it on with /timestamps to start recording."
+    [ -n "$rows" ] && echo
+  fi
+  if [ -z "$rows" ]; then
+    echo "  Nothing recorded yet."
+    return 0
+  fi
+  if [ "$project" = "all" ]; then
+    printf '  %-20s %-30s %5s %9s %9s %7s\n' "project" "command" "runs" "median" "last" "failed"
+    while IFS=$'\t' read -r proj key runs med last failed; do
+      printf '  %-20s %-30s %5s %9s %9s %7s\n' "$proj" "$key" "$runs" \
+        "$(ct_format_duration $(( med / 1000 )))" "$(ct_format_duration $(( last / 1000 )))" "$failed"
+    done <<< "$rows"
+  else
+    printf '  %-30s %5s %9s %9s %7s\n' "command" "runs" "median" "last" "failed"
+    while IFS=$'\t' read -r key runs med last failed; do
+      printf '  %-30s %5s %9s %9s %7s\n' "$key" "$runs" \
+        "$(ct_format_duration $(( med / 1000 )))" "$(ct_format_duration $(( last / 1000 )))" "$failed"
+    done <<< "$rows"
+  fi
   return 0
 }
 
@@ -1764,7 +1817,7 @@ main() {
   # --since=* and --project=* both also set unconditionally, and set the
   # same way whether or not a setting flag came with them.
   local saw_stats_bare=0 saw_since_flag=0 since_flag_value="" saw_session=0
-  local saw_project_filter=0 saw_turns=0
+  local saw_project_filter=0 saw_turns=0 saw_commands=0
 
   while [ $# -gt 0 ]; do
     arg="$1"
@@ -1776,6 +1829,7 @@ main() {
       --stats)     action="stats";  interactive=0; saw_stats_bare=1 ;;
       --session)   action="session"; interactive=0; saw_session=1 ;;
       --turns)     action="turns"; interactive=0; saw_turns=1 ;;
+      --commands)  action="commands"; interactive=0; saw_commands=1 ;;
       --json)      CT_JSON=1 ;;
       --since=*)
         action="stats"; interactive=0
@@ -1881,6 +1935,16 @@ main() {
   # to write silently picked the --stats action over the write, discarding
   # the write with no error -- and no project is plausibly named "on" or
   # "off", so that value is almost always a typo for --projects=.
+  # --project=NAME sets the stats action as it is parsed; with --commands it
+  # filters the command report instead, and --since has nothing to filter.
+  if [ "$saw_commands" = "1" ]; then
+    action="commands"
+    if [ "$saw_since_flag" = "1" ]; then
+      echo "--since filters --stats; --commands keeps the last 20 runs of each command." >&2
+      exit 2
+    fi
+  fi
+
   if [ "$saw_project_filter" = "1" ]; then
     case "$CT_STATS_PROJECT" in
       on|off)
@@ -1902,6 +1966,11 @@ main() {
     if [ "$saw_session" = "1" ]; then
       echo "--session reports on the running session; it does not write a setting." >&2
       echo "Drop --session to write settings, or drop the setting flags to see the report." >&2
+      exit 2
+    fi
+    if [ "$saw_commands" = "1" ]; then
+      echo "--commands reports what is recorded; it does not write a setting." >&2
+      echo "Drop --commands to write settings, or drop the setting flags to see the report." >&2
       exit 2
     fi
     if [ "$saw_turns" = "1" ]; then
@@ -1929,8 +1998,8 @@ main() {
 
   if [ "$CT_JSON" = "1" ]; then
     case "$action" in
-      session|turns) ;;
-      *) echo "--json goes with --session or --turns." >&2; exit 2 ;;
+      session|turns|commands) ;;
+      *) echo "--json goes with --session, --turns or --commands." >&2; exit 2 ;;
     esac
   fi
 
@@ -1939,6 +2008,7 @@ main() {
   if [ "$action" = "stats" ]; then stats; exit $?; fi
   if [ "$action" = "session" ]; then session_report; exit $?; fi
   if [ "$action" = "turns" ]; then turns_report; exit $?; fi
+  if [ "$action" = "commands" ]; then commands_report; exit $?; fi
   if [ "$interactive" = "1" ]; then wizard; exit 0; fi
 
   # Non-interactive: start from what is already configured so each flag is a

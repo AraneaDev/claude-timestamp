@@ -7147,6 +7147,41 @@ else
 fi
 
 echo
+echo "command memory: report"
+
+if command -v jq >/dev/null 2>&1; then
+  fresh
+  mkdir -p "$WORK/cr-proj"
+  for i in 1 2 3; do
+    printf '%s\tcr-proj\tbash tests/run.sh\t240000\tok\n' "$(date +%s)" >> "$CLAUDE_TIMESTAMP_COMMANDS"
+    printf '%s\tother\tmake\t5000\tfail\n' "$(date +%s)" >> "$CLAUDE_TIMESTAMP_COMMANDS"
+  done
+  out="$(cd "$WORK/cr-proj" && bash "$SCRIPTS/setup.sh" --commands 2>&1)"
+  contains "report: this project's commands" "bash tests/run.sh" "$out"
+  contains "report: with the median" "4m00s" "$out"
+  lacks "report: not another project's" "make" "$out"
+  contains "report: --project picks another" "make" "$(bash "$SCRIPTS/setup.sh" --commands --project=other 2>&1)"
+  out="$(bash "$SCRIPTS/setup.sh" --commands --project=all 2>&1)"
+  contains "report: all projects" "cr-proj" "$out"
+  contains "report: all projects, both" "other" "$out"
+  js="$(cd "$WORK/cr-proj" && bash "$SCRIPTS/setup.sh" --commands --json)"
+  is "report json: one command" "1" "$(printf '%s' "$js" | jq '.commands | length')"
+  is "report json: median in ms" "240000" "$(printf '%s' "$js" | jq '.commands[0].median_ms')"
+  is "report json: failures counted" "3" "$(bash "$SCRIPTS/setup.sh" --commands --project=other --json | jq '.commands[0].failed')"
+  out="$(bash "$SCRIPTS/setup.sh" --commands --tool-timing=on 2>&1)"; rc=$?
+  is "report: refuses a setting flag" "2" "$rc"
+  out="$(bash "$SCRIPTS/setup.sh" --commands --since=7d 2>&1)"; rc=$?
+  is "report: refuses --since" "2" "$rc"
+  fresh 'COMMAND_MEMORY=off'
+  contains "report: says when memory is off" "COMMAND_MEMORY is off" "$(bash "$SCRIPTS/setup.sh" --commands 2>&1)"
+else
+  for cr_label in "this project" "median" "not other" "project flag" "all" "all both" \
+                  "json one" "json median" "json failed" "refuses setting" "refuses since" "off"; do
+    skip "report: $cr_label" "jq is not installed"
+  done
+fi
+
+echo
 echo "----"
 printf '%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
