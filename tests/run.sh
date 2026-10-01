@@ -5603,7 +5603,7 @@ ct_turn_close "../../etc/passwd" "$tc_now"
 is "turn close: a traversal id closes the flattened file" "30" \
   "$(ct_read_counter "$tc_base.wait")"
 is "turn close: and writes only siblings of that name" \
-  "etcpasswd etcpasswd.closed etcpasswd.wait" \
+  "etcpasswd etcpasswd.closed etcpasswd.turnlog etcpasswd.wait" \
   "$(ls -1A "$(ct_state_dir)" | LC_ALL=C sort | tr '\n' ' ' | sed 's/ $//')"
 is "turn close: and nothing at all outside the state directory" \
   "$tc_before" "$(ls -1A "$TMPDIR")"
@@ -6776,6 +6776,61 @@ if command -v jq >/dev/null 2>&1; then
 else
   for ptr_label in "names skill" "inject off" "after resume" "order" "all notes off"; do
     skip "pointer: $ptr_label" "jq is not installed"
+  done
+fi
+
+echo
+echo "turn timeline"
+
+# Written by ct_close_turn, the one place a turn is known to have ended, so
+# these call it directly; the hook paths are covered below.
+fresh
+tl_base="$(ct_state_file tl)"
+tl_now="$(date +%s)"
+ct_turn_open tl "$(( tl_now - 90 ))"
+ct_turn_close tl "$tl_now" stop
+is "timeline: a closed turn writes one line" "1" "$(wc -l < "$tl_base.turnlog" | tr -d ' ')"
+is "timeline: number, start, end, length" "1	$(( tl_now - 90 ))	$tl_now	90" "$(cut -f1-4 "$tl_base.turnlog")"
+is "timeline: without tool timing the tool fields are dashes" "-	-	-" "$(cut -f5-7 "$tl_base.turnlog")"
+is "timeline: no heartbeat told, closed by Stop" "0	stop" "$(cut -f8-9 "$tl_base.turnlog")"
+ct_turn_close tl "$(( tl_now + 60 ))" stop
+is "timeline: a second close writes nothing" "1" "$(wc -l < "$tl_base.turnlog" | tr -d ' ')"
+
+ct_turn_open tl "$(( tl_now - 100 ))"
+ct_stage_flag tl tooltiming on
+printf 'Bash 80.000 ok\nRead 1.400 ok\n' > "$tl_base.turntools"
+printf '2' > "$tl_base.hb"
+ct_turn_close tl "$tl_now" interrupted
+is "timeline: tool count, tool seconds and the dominant tool" "2	81	Bash:80" "$(sed -n 2p "$tl_base.turnlog" | cut -f5-7)"
+is "timeline: heartbeats told and an interrupted close" "2	interrupted" "$(sed -n 2p "$tl_base.turnlog" | cut -f8-9)"
+
+ct_turn_open tl "$(( tl_now - 10 ))"
+: > "$tl_base.turntools"
+ct_turn_close tl "$tl_now" whatever
+is "timeline: timing on with no calls counts zero" "0	0	-" "$(sed -n 3p "$tl_base.turnlog" | cut -f5-7)"
+is "timeline: an unknown close reason is recorded as stop" "stop" "$(sed -n 3p "$tl_base.turnlog" | cut -f9)"
+
+is "tool summary: no dominant tool below half the turn" "2	20	-" \
+  "$(printf 'Bash 10.000 ok\nRead 10.000 ok\n' > "$WORK/ts.log"; ct_turn_tool_summary "$WORK/ts.log" 100)"
+is "tool summary: a missing log is dashes" "-	-	-" "$(ct_turn_tool_summary "$WORK/absent.log" 100)"
+
+if command -v jq >/dev/null 2>&1; then
+  fresh
+  printf '{"session_id":"tlh"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  printf '{"session_id":"tlh","hook_event_name":"Stop"}' | bash "$SCRIPTS/stop.sh"
+  is "timeline hooks: Stop closes as stop" "stop" "$(cut -f9 "$(ct_state_file tlh).turnlog")"
+  printf '{"session_id":"tlh"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  printf '{"session_id":"tlh"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  is "timeline hooks: a turn the next prompt reconciles is interrupted" "interrupted" \
+    "$(sed -n 2p "$(ct_state_file tlh).turnlog" | cut -f9)"
+  printf '{"session_id":"tlh","hook_event_name":"Interrupt"}' | bash "$SCRIPTS/stop.sh"
+  is "timeline hooks: Codex's Interrupt closes as interrupted" "interrupted" \
+    "$(sed -n 3p "$(ct_state_file tlh).turnlog" | cut -f9)"
+  printf '{"session_id":"tlh"}' | bash "$SCRIPTS/session-end.sh" >/dev/null
+  refutes "timeline hooks: session end removes the timeline" test -e "$(ct_state_file tlh).turnlog"
+else
+  for tl_label in "stop" "reconciled" "codex interrupt" "session end"; do
+    skip "timeline hooks: $tl_label" "jq is not installed"
   done
 fi
 

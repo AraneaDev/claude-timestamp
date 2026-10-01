@@ -98,7 +98,7 @@ if state_file="$(ct_state_file "$session_id")"; then
   # is what an interrupt looks like from here. It contributes the part of
   # itself that was observed: up to the last message drawn on screen. This has
   # to happen before the new turn is opened, or the evidence is gone.
-  ct_turn_close "$session_id" "$(ct_read_counter "${state_file}.last")"
+  ct_turn_close "$session_id" "$(ct_read_counter "${state_file}.last")" interrupted
   ct_record_away "$session_id" "$now"
   ct_turn_open "$session_id" "$now"
 

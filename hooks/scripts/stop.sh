@@ -28,8 +28,8 @@ source "$CT_LIB/state.sh"
 input="$(cat)"
 # The payload carries the directory the conversation is about, which is what
 # decides whether a project has its own settings.
-IFS=$'\x1f' read -r session_id cwd agent_id <<< "$(printf '%s' "$input" \
-  | jq -r '[(.session_id // ""), (.cwd // ""), (.agent_id // "")] | join("\u001f")')"
+IFS=$'\x1f' read -r session_id cwd agent_id event <<< "$(printf '%s' "$input" \
+  | jq -r '[(.session_id // ""), (.cwd // ""), (.agent_id // ""), (.hook_event_name // "")] | join("\u001f")')"
 
 # Defensive, not a fix for anything reproduced: Stop and SubagentStop come
 # from one dispatcher that hooks.json binds separately by event name, so a
@@ -43,6 +43,10 @@ ct_load_config "$cwd"
 # The master switch. Everything below writes state, and off means none of it.
 [ "$CT_ENABLED" = "on" ] || exit 0
 
-ct_turn_close "$session_id" "$(date +%s)"
+# Codex binds its Interrupt event to this script too; that turn did not end
+# on its own, and the timeline says so.
+how="stop"
+[ "$event" = "Interrupt" ] && how="interrupted"
+ct_turn_close "$session_id" "$(date +%s)" "$how"
 
 exit 0
