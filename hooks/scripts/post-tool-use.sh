@@ -48,9 +48,11 @@ command -v jq >/dev/null 2>&1 || exit 0
 # message-display.sh apply. jq reads the payload from stdin itself: holding it
 # in a variable first cost a `cat` and a subshell on every tool call, for a
 # value nothing else here reads.
-IFS=$'\x1f' read -r session_id tool_name event ms tool_use_id agent_id outcome <<< "$(jq -r \
-  '[(.session_id // "-"), (.tool_name // ""), (.hook_event_name // ""), (.duration_ms // "" | tostring), (.tool_use_id // ""), (.agent_id // ""),
-    (if .hook_event_name == "PostToolUseFailure" or .error != null or .success == false or .status == "error" or .status == "failed" or (.tool_response | if type == "object" then .error != null else false end) then "fail" else "ok" end)] | join("\u001f")')"
+IFS=$'\x1f' read -r session_id tool_name event ms tool_use_id agent_id outcome cmd_key background <<< "$(jq -r \
+  "$CT_JQ_CMDKEY"'[(.session_id // "-"), (.tool_name // ""), (.hook_event_name // ""), (.duration_ms // "" | tostring), (.tool_use_id // ""), (.agent_id // ""),
+    (if .hook_event_name == "PostToolUseFailure" or .error != null or .success == false or .status == "error" or .status == "failed" or (.tool_response | if type == "object" then .error != null else false end) then "fail" else "ok" end),
+    (if .tool_name == "Bash" then (.tool_input.command // "" | ct_cmdkey) else "" end),
+    (.tool_input.run_in_background // false | tostring)] | join("\u001f")')"
 
 # The prompt hook resolved the settings against the payload's cwd and left
 # them here, so this hook honours the same project config the marker does
@@ -155,8 +157,20 @@ if [ -n "$agent_id" ]; then
   ct_read_flag_var "$session_id" "subagents"; subagent_notes="$_CT_FLAG"
 fi
 if [ -z "$agent_id" ] || [ "$subagent_notes" = "on" ]; then
-  ct_read_flag_var "$session_id" "slowtool"
-  ct_slow_tool_note_var "$tool_name" "$ms" "$outcome" "$_CT_FLAG" || :
+  ct_read_flag_var "$session_id" "slowtool"; st_after="$_CT_FLAG"
+  ct_slow_tool_note_var "$tool_name" "$ms" "$outcome" "$st_after" || :
+  # Already slow, so worth one read of the memory: the usual figure for this
+  # command, from the runs before this one (it is recorded further down).
+  if [ -n "$_CT_NOTE" ] && [ -n "$cmd_key" ]; then
+    ct_read_flag_var "$session_id" "cmdmem"
+    if [ "$_CT_FLAG" = "on" ]; then
+      ct_read_flag_var "$session_id" "project"
+      usual="$(ct_command_usual "$(ct_commands_path)" "$_CT_FLAG" "$cmd_key")" || usual=""
+      if [ -n "$usual" ]; then
+        ct_slow_tool_note_var "$tool_name" "$ms" "$outcome" "$st_after" "$usual" || :
+      fi
+    fi
+  fi
   note="$_CT_NOTE"
 fi
 if [ -z "$agent_id" ]; then
@@ -164,19 +178,29 @@ if [ -z "$agent_id" ]; then
   case "$hb_every" in
     ''|0|*[!0-9]*) ;;
     *)
-      # The clock from the printf builtin where bash has one (4.2 and newer),
-      # sparing the `date` process; bash 3.2, which macOS still ships, has
-      # no %(...)T and keeps paying for it.
-      if [ "${BASH_VERSINFO[0]}" -gt 4 ] \
-         || { [ "${BASH_VERSINFO[0]}" -eq 4 ] && [ "${BASH_VERSINFO[1]}" -ge 2 ]; }; then
-        printf -v now '%(%s)T' -1
-      else
-        now="$(date +%s)"
-      fi
+      ct_epoch_var
+      # shellcheck disable=SC2153  # _CT_NOW is assigned by ct_epoch_var (lib/state.sh)
+      now="$_CT_NOW"
       ct_heartbeat_note_var "$session_id" "$now" "$hb_every" || :
       [ -n "$_CT_NOTE" ] && note="${note:+$note }$_CT_NOTE"
       ;;
   esac
+fi
+
+# Duration memory: one line per Bash call, recorded after the note above so a
+# "usually" figure never includes the call it is compared with. A background
+# call's duration is how long it took to start, so it is not recorded. The
+# append is a single short write, the same concurrency argument as the tool
+# log's.
+if [ "$tool_name" = "Bash" ] && [ -n "$cmd_key" ] && [ -n "$ms" ] && [ "$background" != "true" ]; then
+  ct_read_flag_var "$session_id" "cmdmem"
+  if [ "$_CT_FLAG" = "on" ]; then
+    ct_read_flag_var "$session_id" "project"; cm_project="${_CT_FLAG:--}"
+    ct_epoch_var
+    # shellcheck disable=SC2153  # _CT_NOW is assigned by ct_epoch_var (lib/state.sh)
+    printf '%s\t%s\t%s\t%s\t%s\n' "$_CT_NOW" "$cm_project" "$cmd_key" "$ms" "$outcome" \
+      >> "$(ct_commands_path)" 2>/dev/null || :
+  fi
 fi
 
 if [ -n "$note" ]; then

@@ -72,15 +72,25 @@ if state_file="$(ct_state_file "$session_id")"; then
   ct_stage_flag "$session_id" "tz"        "$CT_TZ"
   ct_stage_flag "$session_id" "subagents" "$CT_SUBAGENTS"
 
+  # Duration memory needs to know the project, and the tool hook has no cwd.
+  # Resolved once per prompt; ct_project_name forks nothing.
+  cmdmem="off"
+  if [ "$CT_ENABLED" = "on" ] && [ "$CT_COMMAND_MEMORY" = "on" ]; then
+    cmdmem="on"
+  fi
+  ct_stage_flag "$session_id" "cmdmem"  "$cmdmem"
+  ct_stage_flag "$session_id" "project" "$(ct_project_name "$cwd")"
+
   # A sentinel whose mere existence answers "does any session on this machine
   # need the tool hook", so that hook can decide it has nothing to do with a
   # glob rather than a jq fork. It is named for what it first meant, tool
-  # timing; it now also stands for either note. Cleared when the answer is no
+  # timing; it now also stands for either note, and for duration memory. Cleared when the answer is no
   # -- a project that once pinned it on would otherwise keep every later
   # session paying for it, and so would a session that has since been
   # switched off.
   if [ "$CT_ENABLED" = "on" ] \
-     && { [ "$CT_TOOL_TIMING" = "on" ] || [ "$notes_hb" -gt 0 ] || [ "$notes_st" -gt 0 ]; }; then
+     && { [ "$CT_TOOL_TIMING" = "on" ] || [ "$notes_hb" -gt 0 ] || [ "$notes_st" -gt 0 ] \
+          || [ "$cmdmem" = "on" ]; }; then
     ct_stage_flag "$session_id" "timing-on" "1"
   else
     ct_clear_flag "$session_id" "timing-on"

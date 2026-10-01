@@ -61,9 +61,13 @@ claude-timestamp setup
                               Claude Code.
   setup.sh --turns            One line per turn of this session, from inside
                               Claude Code.
+  setup.sh --commands         How long each Bash command usually takes in this
+                              project. --project=NAME for another, or
+                              --project=all for every project.
 
 Flags
-  --json                      With --session or --turns: print JSON instead.
+  --json                      With --session, --turns or --commands: print
+                              JSON instead.
   --tz=ZONE                   IANA timezone (Europe/Amsterdam), or "local".
   --display=FORMAT            24h | short | 12h | iso | any strftime string.
   --context=FORMAT            Same values; used for the model-facing time.
@@ -93,10 +97,10 @@ Flags
                               history row. Off by default. Never a path.
   --tool-timing=on|off        Record what each tool call cost and report the
                               slowest in the session summary. Off by default.
-                              It, --heartbeat-after and --slow-tool-after cost
-                              a few milliseconds per tool call rather than per
-                              message; 0, 0 and off together bring back the
-                              free path.
+                              It, --heartbeat-after, --slow-tool-after and
+                              --command-memory cost a few milliseconds per tool
+                              call rather than per message; off, 0, 0 and off
+                              together bring back the free path.
   --inject-context=true|false Tell Claude the time each prompt was sent. false
                               also silences the heartbeat, slow tool,
                               resumption and time-awareness pointer notes.
@@ -106,6 +110,8 @@ Flags
                               (0 disables).
   --resume-note=on|off        Tell Claude, when a session starts, how long ago
                               this conversation or project was last active.
+  --command-memory=on|off     Remember how long each Bash command takes in each
+                              project, and tell Claude which are usually slow.
   --enabled=on|off            Master switch. off silences every hook without
                               uninstalling the plugin.
   --project                   Write to this project instead of your account,
@@ -172,6 +178,7 @@ inject-context  INJECT_CONTEXT  CT_INJECT_CONTEXT   ct_is_bool              -   
 heartbeat-after HEARTBEAT_AFTER CT_HEARTBEAT_AFTER  ct_is_seconds           -        ignore
 slow-tool-after SLOW_TOOL_AFTER CT_SLOW_TOOL_AFTER  ct_is_seconds           -        ignore
 resume-note     RESUME_NOTE     CT_RESUME_NOTE      ct_is_onoff             -        ignore
+command-memory  COMMAND_MEMORY  CT_COMMAND_MEMORY   ct_is_onoff             -        ignore
 "
 
 # --- validation -------------------------------------------------------------
@@ -899,6 +906,55 @@ turns_report() {
   return 0
 }
 
+# What the duration memory knows: per command, how many runs, the median, the
+# last and the failures, for this directory's project unless --project names
+# another or "all".
+commands_report() {
+  local file project rows key runs med last failed proj
+  ct_load_config
+  file="$(ct_commands_path)"
+  project="${CT_STATS_PROJECT:-$(ct_project_name "$PWD")}"
+  rows="$(ct_command_stats "$file" "$project")"
+  if [ "$CT_JSON" = "1" ]; then
+    command -v jq >/dev/null 2>&1 || { echo "--json needs jq." >&2; return 2; }
+    printf '%s\n' "$rows" | jq -R -s --arg project "$project" '
+      {project: $project,
+       commands: [split("\n")[] | select(length > 0) | split("\t")
+         | if $project == "all"
+           then {project: .[0], key: .[1], runs: (.[2] | tonumber), median_ms: (.[3] | tonumber), last_ms: (.[4] | tonumber), failed: (.[5] | tonumber)}
+           else {key: .[0], runs: (.[1] | tonumber), median_ms: (.[2] | tonumber), last_ms: (.[3] | tonumber), failed: (.[4] | tonumber)} end]}'
+    return $?
+  fi
+  if [ "$project" = "all" ]; then
+    echo "claude-timestamp commands, all projects"
+  else
+    echo "claude-timestamp commands in $project"
+  fi
+  echo
+  if [ "$CT_COMMAND_MEMORY" != "on" ]; then
+    echo "  COMMAND_MEMORY is off; turn it on with /timestamps to start recording."
+    [ -n "$rows" ] && echo
+  fi
+  if [ -z "$rows" ]; then
+    echo "  Nothing recorded yet."
+    return 0
+  fi
+  if [ "$project" = "all" ]; then
+    printf '  %-20s %-30s %5s %9s %9s %7s\n' "project" "command" "runs" "median" "last" "failed"
+    while IFS=$'\t' read -r proj key runs med last failed; do
+      printf '  %-20s %-30s %5s %9s %9s %7s\n' "$proj" "$key" "$runs" \
+        "$(ct_format_duration $(( med / 1000 )))" "$(ct_format_duration $(( last / 1000 )))" "$failed"
+    done <<< "$rows"
+  else
+    printf '  %-30s %5s %9s %9s %7s\n' "command" "runs" "median" "last" "failed"
+    while IFS=$'\t' read -r key runs med last failed; do
+      printf '  %-30s %5s %9s %9s %7s\n' "$key" "$runs" \
+        "$(ct_format_duration $(( med / 1000 )))" "$(ct_format_duration $(( last / 1000 )))" "$failed"
+    done <<< "$rows"
+  fi
+  return 0
+}
+
 # A single place to answer "why is it not doing what I configured". Everything
 # here is something that has actually gone wrong: a missing jq, a config that
 # does not parse, or a pinned zone the platform cannot resolve.
@@ -1023,6 +1079,7 @@ doctor() {
   echo "  heartbeat       $([ "$CT_HEARTBEAT_AFTER" -gt 0 ] 2>/dev/null && echo "every ${CT_HEARTBEAT_AFTER}s" || echo "off")"
   echo "  slow tool note  $([ "$CT_SLOW_TOOL_AFTER" -gt 0 ] 2>/dev/null && echo "after ${CT_SLOW_TOOL_AFTER}s" || echo "off")"
   echo "  resume note     $CT_RESUME_NOTE"
+  echo "  command memory  $CT_COMMAND_MEMORY, $( [ -r "$(ct_commands_path)" ] && wc -l < "$(ct_commands_path)" | tr -d ' ' || echo 0) runs recorded"
   echo
 
   echo "State"
@@ -1165,9 +1222,10 @@ SUMMARY=$CT_SUMMARY
 SUBAGENTS=$CT_SUBAGENTS
 
 # Record what each tool call cost and name the slowest in the session summary.
-# This, HEARTBEAT_AFTER and SLOW_TOOL_AFTER cost a few milliseconds per tool
-# call rather than per message; HEARTBEAT_AFTER=0, SLOW_TOOL_AFTER=0 and
-# TOOL_TIMING=off together bring back the free path.
+# This, HEARTBEAT_AFTER, SLOW_TOOL_AFTER and COMMAND_MEMORY cost a few
+# milliseconds per tool call rather than per message; HEARTBEAT_AFTER=0,
+# SLOW_TOOL_AFTER=0, COMMAND_MEMORY=off and TOOL_TIMING=off together bring
+# back the free path.
 TOOL_TIMING=$CT_TOOL_TIMING
 
 # Record each finished session, and how many to keep. Timings only: no message
@@ -1190,6 +1248,11 @@ SLOW_TOOL_AFTER=$CT_SLOW_TOOL_AFTER
 # Tell Claude, when a session starts, how long ago this conversation or
 # project was last active. Read from Claude Code's own transcripts.
 RESUME_NOTE=$CT_RESUME_NOTE
+
+# Remember how long each Bash command takes in each project: a short key
+# such as "npm test", never the full command line. Tells Claude at session
+# start which commands are usually slow here.
+COMMAND_MEMORY=$CT_COMMAND_MEMORY
 CONF
   echo "Wrote $(ct_tilde "$file")"
 }
@@ -1396,6 +1459,7 @@ show_config() {
   echo "  Heartbeat       $CT_HEARTBEAT_AFTER s"
   echo "  Slow tool note  $CT_SLOW_TOOL_AFTER s"
   echo "  Resume note     $CT_RESUME_NOTE"
+  echo "  Command memory  $CT_COMMAND_MEMORY"
   echo
   echo -n "  Preview         "; preview
 }
@@ -1753,7 +1817,7 @@ main() {
   # --since=* and --project=* both also set unconditionally, and set the
   # same way whether or not a setting flag came with them.
   local saw_stats_bare=0 saw_since_flag=0 since_flag_value="" saw_session=0
-  local saw_project_filter=0 saw_turns=0
+  local saw_project_filter=0 saw_turns=0 saw_commands=0
 
   while [ $# -gt 0 ]; do
     arg="$1"
@@ -1765,6 +1829,7 @@ main() {
       --stats)     action="stats";  interactive=0; saw_stats_bare=1 ;;
       --session)   action="session"; interactive=0; saw_session=1 ;;
       --turns)     action="turns"; interactive=0; saw_turns=1 ;;
+      --commands)  action="commands"; interactive=0; saw_commands=1 ;;
       --json)      CT_JSON=1 ;;
       --since=*)
         action="stats"; interactive=0
@@ -1870,6 +1935,16 @@ main() {
   # to write silently picked the --stats action over the write, discarding
   # the write with no error -- and no project is plausibly named "on" or
   # "off", so that value is almost always a typo for --projects=.
+  # --project=NAME sets the stats action as it is parsed; with --commands it
+  # filters the command report instead, and --since has nothing to filter.
+  if [ "$saw_commands" = "1" ]; then
+    action="commands"
+    if [ "$saw_since_flag" = "1" ]; then
+      echo "--since filters --stats; --commands keeps the last 20 runs of each command." >&2
+      exit 2
+    fi
+  fi
+
   if [ "$saw_project_filter" = "1" ]; then
     case "$CT_STATS_PROJECT" in
       on|off)
@@ -1891,6 +1966,11 @@ main() {
     if [ "$saw_session" = "1" ]; then
       echo "--session reports on the running session; it does not write a setting." >&2
       echo "Drop --session to write settings, or drop the setting flags to see the report." >&2
+      exit 2
+    fi
+    if [ "$saw_commands" = "1" ]; then
+      echo "--commands reports what is recorded; it does not write a setting." >&2
+      echo "Drop --commands to write settings, or drop the setting flags to see the report." >&2
       exit 2
     fi
     if [ "$saw_turns" = "1" ]; then
@@ -1918,8 +1998,8 @@ main() {
 
   if [ "$CT_JSON" = "1" ]; then
     case "$action" in
-      session|turns) ;;
-      *) echo "--json goes with --session or --turns." >&2; exit 2 ;;
+      session|turns|commands) ;;
+      *) echo "--json goes with --session, --turns or --commands." >&2; exit 2 ;;
     esac
   fi
 
@@ -1928,6 +2008,7 @@ main() {
   if [ "$action" = "stats" ]; then stats; exit $?; fi
   if [ "$action" = "session" ]; then session_report; exit $?; fi
   if [ "$action" = "turns" ]; then turns_report; exit $?; fi
+  if [ "$action" = "commands" ]; then commands_report; exit $?; fi
   if [ "$interactive" = "1" ]; then wizard; exit 0; fi
 
   # Non-interactive: start from what is already configured so each flag is a

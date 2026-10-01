@@ -239,6 +239,12 @@
       "validator": "ct_is_onoff",
       "values": ["on", "off"],
       "describes": "tell Claude at session start how long ago this conversation or project was last active; INJECT_CONTEXT=false silences it"
+    },
+    "COMMAND_MEMORY": {
+      "default": "on",
+      "validator": "ct_is_onoff",
+      "values": ["on", "off"],
+      "describes": "remember how long each Bash command takes in each project, and tell Claude at session start which ones are usually slow"
     }
   },
   "preview_context": {

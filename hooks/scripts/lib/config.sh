@@ -167,6 +167,7 @@ _ct_read_config_file() {
       HEARTBEAT_AFTER) CT_HEARTBEAT_AFTER="$value" ;;
       SLOW_TOOL_AFTER) CT_SLOW_TOOL_AFTER="$value" ;;
       RESUME_NOTE)    CT_RESUME_NOTE="$value" ;;
+      COMMAND_MEMORY) CT_COMMAND_MEMORY="$value" ;;
     esac
   done < "$file"
 }
@@ -191,8 +192,9 @@ ct_load_config() {
   CT_DATE_ROLLOVER="on"
   CT_SUMMARY="on"
   CT_SUBAGENTS="on"
-  # Any of TOOL_TIMING, HEARTBEAT_AFTER and SLOW_TOOL_AFTER left on costs a few
-  # ms per tool call; all three off (off, 0, 0) is the free path. Timing is
+  # Any of TOOL_TIMING, HEARTBEAT_AFTER, SLOW_TOOL_AFTER and COMMAND_MEMORY left
+  # on costs a few ms per tool call; all four off (off, 0, 0, off) is the free
+  # path. Timing is
   # opt-in; the two notes are on by default.
   CT_TOOL_TIMING="off"
   CT_HISTORY="on"
@@ -202,6 +204,7 @@ ct_load_config() {
   CT_HEARTBEAT_AFTER="900"    # seconds; 0 disables. Tells the model, so INJECT_CONTEXT gates it too
   CT_SLOW_TOOL_AFTER="60"     # seconds; 0 disables. Tells the model, so INJECT_CONTEXT gates it too
   CT_RESUME_NOTE="on"         # tell the model how long ago this conversation or project was last active
+  CT_COMMAND_MEMORY="on"      # remember how long each Bash command takes, per project
 
   CT_CONFIG_PROBLEMS=""
   CT_PROJECT_CONFIG=""
@@ -331,6 +334,7 @@ ct_validate_config() {
   _ct_require HEARTBEAT_AFTER ct_is_seconds     900
   _ct_require SLOW_TOOL_AFTER ct_is_seconds     60
   _ct_require RESUME_NOTE    ct_is_onoff        on
+  _ct_require COMMAND_MEMORY ct_is_onoff        on
 }
 
 # Preset name -> strftime string. Anything containing a % is already a strftime
@@ -899,6 +903,14 @@ ct_humanize_gap() {
 # not.
 ct_history_path() {
   printf '%s' "${CLAUDE_TIMESTAMP_HISTORY:-${HOME}/.claude/claude-timestamp-history.tsv}"
+}
+
+# Where the duration memory lives: one line per Bash call, with the project's
+# directory name, a short key for the command (never the full command line),
+# its duration and whether it failed. Like the history, it outlives sessions,
+# so it lives beside the config.
+ct_commands_path() {
+  printf '%s' "${CLAUDE_TIMESTAMP_COMMANDS:-${HOME}/.claude/claude-timestamp-commands.tsv}"
 }
 
 # A working directory reduced to a bare project name, for the history's

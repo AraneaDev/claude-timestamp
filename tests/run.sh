@@ -116,6 +116,7 @@ fresh() {
   rm -rf "$(ct_state_dir)"
   ct_state_ready
   rm -f "$CLAUDE_TIMESTAMP_HISTORY"
+  rm -f "$CLAUDE_TIMESTAMP_COMMANDS"
   if [ "$#" -gt 0 ]; then
     printf '%s\n' "$@" > "$CLAUDE_TIMESTAMP_CONFIG"
   else
@@ -152,6 +153,7 @@ ln -s "$WORK/cap/modes" "$WORK/cap/link" 2>/dev/null
 mkdir -p "$TMPDIR"
 export CLAUDE_TIMESTAMP_CONFIG="$WORK/config.conf"
 export CLAUDE_TIMESTAMP_HISTORY="$WORK/history.tsv"
+export CLAUDE_TIMESTAMP_COMMANDS="$WORK/commands.tsv"
 export CLAUDE_TIMESTAMP_FACTS="$WORK/facts.json"
 export CLAUDE_TIMESTAMP_DRAWN="$WORK/drawn"
 
@@ -1652,7 +1654,7 @@ is "a rejected format cannot smuggle a second setting into the file" "on" "$CT_E
 # to be wrong, so flag twenty-one is covered the day it is added.
 fresh 'ENABLED=on'
 flag_table="$(sed -n '/^CT_FLAG_TABLE="$/,/^"$/p' "$SCRIPTS/setup.sh" | sed '1d;$d')"
-is "every setting has a flag in the table" "24" \
+is "every setting has a flag in the table" "25" \
   "$(printf '%s\n' "$flag_table" | grep -c '^[a-z]')"
 # shellcheck disable=SC2034  # t_rest is read to consume the rest of the row
 while read -r t_flag t_rest; do
@@ -6396,7 +6398,8 @@ refutes "format_epoch: refuses empty" ct_format_epoch "" 24h
 echo
 echo "agent notes: staging"
 
-fresh
+# Memory off, so what opens the gate here is the notes alone.
+fresh 'COMMAND_MEMORY=off'
 printf '{"session_id":"stage-a"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
 is "stage: heartbeat default is staged" "900" "$(ct_read_flag stage-a heartbeat)"
 is "stage: slow tool default is staged" "60" "$(ct_read_flag stage-a slowtool)"
@@ -6404,13 +6407,13 @@ is "stage: the context format is staged" "24h" "$(ct_read_flag stage-a ctxfmt)"
 is "stage: the subagents setting is staged" "on" "$(ct_read_flag stage-a subagents)"
 asserts "stage: notes alone open the tool gate" test -e "$(ct_state_file stage-a).timing-on"
 
-fresh 'INJECT_CONTEXT=false'
+fresh 'INJECT_CONTEXT=false' 'COMMAND_MEMORY=off'
 printf '{"session_id":"stage-b"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
 is "stage: INJECT_CONTEXT=false stages no heartbeat" "0" "$(ct_read_flag stage-b heartbeat)"
 is "stage: INJECT_CONTEXT=false stages no slow tool note" "0" "$(ct_read_flag stage-b slowtool)"
 refutes "stage: no timing and no notes keeps the gate shut" test -e "$(ct_state_file stage-b).timing-on"
 
-fresh 'HEARTBEAT_AFTER=0' 'SLOW_TOOL_AFTER=0'
+fresh 'HEARTBEAT_AFTER=0' 'SLOW_TOOL_AFTER=0' 'COMMAND_MEMORY=off'
 printf '{"session_id":"stage-c"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
 refutes "stage: both notes at 0 keep the gate shut" test -e "$(ct_state_file stage-c).timing-on"
 
@@ -6808,7 +6811,7 @@ asserts "skill: SKILL.md ships" test -r "$ta_skill"
 is "skill: named after its directory" "time-awareness" "$(sed -n 's/^name: //p' "$ta_skill" 2>/dev/null)"
 is "skill: hidden from the slash menu" "false" "$(sed -n 's/^user-invocable: //p' "$ta_skill" 2>/dev/null)"
 asserts "skill: the script it runs is where it says" test -r "$ROOT/skills/time-awareness/../../hooks/scripts/setup.sh"
-for ta_quote in "Turn running" "That Bash call took" "Previous session in this project ended" "Resuming this conversation" "Conversation compacted"; do
+for ta_quote in "Turn running" "That Bash call took" "Previous session in this project ended" "Resuming this conversation" "Conversation compacted" "Usually slow in this project" "(usually"; do
   contains "skill: explains '$ta_quote'" "$ta_quote" "$(cat "$ta_skill" 2>/dev/null)"
 done
 lacks "skill: no em dashes" "—" "$(cat "$ta_skill" 2>/dev/null)"
@@ -6947,6 +6950,257 @@ else
                   "unrecorded session" "future no abort" "future secs" "future current" "stats json" \
                   "refuses setting" "no id"; do
     skip "turn reports: $tr_label" "jq is not installed"
+  done
+fi
+
+echo
+echo "command memory: setting"
+
+fresh
+is "command memory: on by default" "on" "$CT_COMMAND_MEMORY"
+fresh 'COMMAND_MEMORY=off'
+is "command memory: reads off" "off" "$CT_COMMAND_MEMORY"
+fresh 'COMMAND_MEMORY=maybe'
+is "command memory: an invalid value falls back" "on" "$CT_COMMAND_MEMORY"
+contains "command memory: and is reported" "COMMAND_MEMORY=maybe is not valid, using on" "$CT_CONFIG_PROBLEMS"
+fresh
+bash "$SCRIPTS/setup.sh" --command-memory=off >/dev/null
+ct_load_config
+is "command memory: --command-memory is written" "off" "$CT_COMMAND_MEMORY"
+is "command memory: the file lives beside the history" "$WORK/commands.tsv" "$(ct_commands_path)"
+contains "command memory: --show lists it" "Command memory  off" "$(bash "$SCRIPTS/setup.sh" --show)"
+
+echo
+echo "command memory: key"
+
+if command -v jq >/dev/null 2>&1; then
+  # Through stdin, the way a hook payload arrives: Git Bash rewrites an
+  # argument that looks like a POSIX path (/usr/bin/x) into a Windows one
+  # before jq.exe sees it, which a real payload never goes through.
+  ck() { printf '%s' "$1" | jq -Rrs "$CT_JQ_CMDKEY"' . | ct_cmdkey'; }
+  is "key: last && segment, env prefix and -- dropped" "npm test" "$(ck 'cd x && FOO=1 npm test -- src/a.test.ts')"
+  is "key: a relative script path is kept" "bash tests/run.sh" "$(ck 'bash tests/run.sh')"
+  is "key: run ids and flags end it" "gh run watch" "$(ck 'gh run watch 12345 --exit-status')"
+  is "key: quoted text never splits or leaks" "git commit" "$(ck 'git commit -m "fix && stuff; more"')"
+  is "key: absolute paths reduced to the program" "python3" "$(ck '/usr/bin/python3 /home/u/x.py')"
+  is "key: sudo stripped" "apt-get install jq" "$(ck 'sudo apt-get install jq')"
+  is "key: URLs dropped" "curl" "$(ck 'curl https://example.com/api')"
+  is "key: a heredoc keys on its first line, redirection ends it" "cat" "$(ck "cat <<'EOF' > file
+body line")"
+  is "key: the first pipe segment names the command" "npm test" "$(ck 'cd x && npm test 2>&1 | tail -5')"
+  is "key: two arguments at most" "npm run build" "$(ck 'npm run build extra more')"
+  is "key: a test file path is kept" "pytest spec/unit/test_x.py" "$(ck 'pytest spec/unit/test_x.py -q')"
+  is "key: an assignment alone has no key" "" "$(ck 'FOO=1')"
+  is "key: an empty command has no key" "" "$(ck '')"
+  is "key: a non-string has no key" "" "$(jq -rn "$CT_JQ_CMDKEY"' null | ct_cmdkey')"
+  is "key: tabs are spaces" "make test" "$(ck "$(printf 'make\ttest')")"
+  is "key: a non-ASCII program has no key" "" "$(ck 'bühne start')"
+  # Hosts and remote paths are outside the project; a scoped package is not.
+  is "key: user@host is never stored" "ssh" "$(ck 'ssh deploy@prod.internal.corp')"
+  is "key: an scp target is never stored" "scp backup.sql" "$(ck 'scp backup.sql root@prod.example.com:/var/backups/')"
+  is "key: an ssh clone URL is never stored" "git clone" "$(ck 'git clone git@github.com:org/private-repo')"
+  is "key: a scoped package is kept" "npm install @scope/pkg" "$(ck 'npm install @scope/pkg')"
+  is "key: a test node id is kept" "pytest spec/a.py::test_b" "$(ck 'pytest spec/a.py::test_b')"
+  # echo and printf carry data, often a token piped into a CLI.
+  is "key: echo keeps no arguments" "echo" "$(ck 'echo ghp_abcdef1234567890 | gh auth login --with-token')"
+  is "key: printf keeps no arguments" "printf" "$(ck 'printf secretvalue | docker login --password-stdin')"
+  is "key: a long token-shaped argument ends it" "vault login" "$(ck 'vault login hvs.CAESIJ8abc123')"
+  # A command of thousands of words is keyed without walking all of them.
+  ck_long="git add$(printf ' f%d' $(seq 1 3000))"
+  ck_t0="$(date +%s)"
+  is "key: thousands of words, two kept" "git add f1" "$(ck "$ck_long")"
+  ck_t1="$(date +%s)"
+  is_near "key: and quickly" 0 "$(( ck_t1 - ck_t0 ))" 1
+  is "key: at most 60 characters" "60" "$(ck "$(printf 'x%.0s' $(seq 1 200))" | tr -d '\r\n' | wc -c | tr -d ' ')"
+else
+  for ck_label in "and segment" "script path" "run ids" "quotes" "abs path" "sudo" "url" \
+                  "heredoc" "pipe" "two args" "test file" "assignment" "empty" "non-string" \
+                  "tabs" "non-ascii" "user@host" "scp" "ssh clone" "scoped" "node id" "echo" \
+                  "printf" "token" "long" "long fast" "60 chars"; do
+    skip "key: $ck_label" "jq is not installed"
+  done
+fi
+
+echo
+echo "command memory: recording"
+
+if command -v jq >/dev/null 2>&1; then
+  mkdir -p "$WORK/proj-a"
+  cm_prompt() { printf '{"session_id":"cm","cwd":"%s"}' "$WORK/proj-a" | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null; }
+  cm_call() {  # $1 ms, $2 command, $3 event, $4 run_in_background, $5 tool
+    jq -cn --argjson ms "$1" --arg c "$2" --arg ev "${3:-PostToolUse}" --argjson bg "${4:-false}" --arg t "${5:-Bash}" \
+      '{session_id: "cm", tool_name: $t, hook_event_name: $ev, duration_ms: $ms, tool_input: {command: $c, run_in_background: $bg}}' \
+      | bash "$SCRIPTS/post-tool-use.sh" >/dev/null
+  }
+  cm_lines() { if [ -r "$CLAUDE_TIMESTAMP_COMMANDS" ]; then wc -l < "$CLAUDE_TIMESTAMP_COMMANDS" | tr -d ' '; else echo 0; fi; }
+
+  fresh
+  cm_prompt
+  cm_call 4000 'cd x && npm test'
+  is "recording: project, key, duration, outcome" "proj-a	npm test	4000	ok" "$(cut -f2-5 "$CLAUDE_TIMESTAMP_COMMANDS")"
+  cm_call 4000 'npm test' PostToolUse true
+  is "recording: a background call is not recorded" "1" "$(cm_lines)"
+  cm_call 9000 'npm test' PostToolUseFailure
+  is "recording: a failure is recorded as fail" "fail" "$(sed -n 2p "$CLAUDE_TIMESTAMP_COMMANDS" | cut -f5)"
+  cm_call 9000 'whatever' PostToolUse false Read
+  is "recording: other tools are not recorded" "2" "$(cm_lines)"
+  cm_call 9000 'FOO=1'
+  is "recording: a command without a key is not recorded" "2" "$(cm_lines)"
+
+  fresh 'COMMAND_MEMORY=off'
+  cm_prompt; cm_call 4000 'npm test'
+  is "recording: COMMAND_MEMORY=off records nothing" "0" "$(cm_lines)"
+  fresh 'ENABLED=off'
+  cm_prompt; cm_call 4000 'npm test'
+  is "recording: ENABLED=off records nothing" "0" "$(cm_lines)"
+  # Memory alone keeps the tool hook awake, with every note and timing off.
+  fresh 'HEARTBEAT_AFTER=0' 'SLOW_TOOL_AFTER=0'
+  cm_prompt; cm_call 4000 'npm test'
+  is "recording: memory alone opens the tool hook" "1" "$(cm_lines)"
+else
+  for cm_label in "row" "background" "failure" "other tools" "no key" "off" "enabled off" "memory alone"; do
+    skip "recording: $cm_label" "jq is not installed"
+  done
+fi
+
+echo
+echo "command memory: pruning"
+
+fresh
+pr_now=2000000000
+pr_file="$WORK/prune.tsv"
+awk -v now="$pr_now" 'BEGIN { for (i = 1; i <= 25; i++) printf "%d\tp\tnpm test\t%d\tok\n", now - 100 + i, i }' > "$pr_file"
+{
+  printf '%s\tp\tmake\t5\tok\n' "$(( pr_now - 8000000 ))"
+  printf '%s\tp\tbroken\n' "$pr_now"
+  printf '%s\tp\ttorn\t12' "$pr_now"
+} >> "$pr_file"
+ct_prune_commands "$pr_file" "$pr_now"
+is "prune: twenty runs per key are kept" "20" "$(grep -c 'npm test' "$pr_file")"
+is "prune: the oldest go first" "6" "$(head -n 1 "$pr_file" | cut -f4)"
+refutes "prune: runs older than 90 days go" grep -q 'make' "$pr_file"
+refutes "prune: a malformed line goes" grep -q 'broken' "$pr_file"
+refutes "prune: a torn line goes" grep -q 'torn' "$pr_file"
+awk -v now="$pr_now" 'BEGIN { for (i = 1; i <= 5100; i++) printf "%d\tp\tk%d\t1\tok\n", now, i }' > "$pr_file"
+ct_prune_commands "$pr_file" "$pr_now"
+is "prune: at most 5000 lines" "5000" "$(wc -l < "$pr_file" | tr -d ' ')"
+is "prune: the newest are kept" "k101" "$(head -n 1 "$pr_file" | cut -f3)"
+asserts "prune: a missing file is fine" ct_prune_commands "$WORK/absent.tsv" "$pr_now"
+
+echo
+echo "command memory: session start"
+
+fresh
+sc_file="$CLAUDE_TIMESTAMP_COMMANDS"
+sc_row() { printf '%s\t%s\t%s\t%s\tok\n' "$(date +%s)" "$1" "$2" "$3" >> "$sc_file"; }
+for i in 1 2 3; do
+  sc_row sc-proj 'bash tests/run.sh' 240000
+  sc_row sc-proj 'cargo build' 400000
+  sc_row sc-proj 'npm test' 90000
+  sc_row sc-proj 'pytest' 70000
+  sc_row sc-proj 'git push' 6000
+  sc_row other 'make' 900000
+done
+sc_row sc-proj 'gh run watch' 460000
+sc_row sc-proj 'gh run watch' 460000
+is "stats: median per key, slowest first" "gh run watch	2	460000	460000	0" "$(ct_command_stats "$sc_file" sc-proj | head -n 1)"
+is "stats: an even count takes the middle two" "x	4	2500	10000	0" \
+  "$(printf '1\tq\tx\t1000\tok\n1\tq\tx\t2000\tok\n1\tq\tx\t3000\tok\n1\tq\tx\t10000\tok\n' > "$WORK/even.tsv"; ct_command_stats "$WORK/even.tsv" q)"
+# Only the last 20 runs count, also before session end prunes the rest.
+is "stats: only the last twenty runs count" "w	20	50	0	0" \
+  "$(awk 'BEGIN { for (i = 1; i <= 10; i++) printf "1\tq\tw\t0\tok\n"; for (i = 1; i <= 10; i++) printf "1\tq\tw\t100\tok\n"; printf "1\tq\tw\t0\tok\n" }' > "$WORK/window.tsv"; ct_command_stats "$WORK/window.tsv" q)"
+is "stats: all projects carry the project first" "other	make" "$(ct_command_stats "$sc_file" all | head -n 1 | cut -f1-2)"
+is "note: three at most, at least three runs, over the threshold, this project only" \
+  "Usually slow in this project: cargo build ~6m40s (3 runs), bash tests/run.sh ~4m00s (3 runs), npm test ~1m30s (3 runs)." \
+  "$(ct_slow_commands_note "$sc_file" sc-proj 60)"
+is "note: a zero threshold says nothing" "" "$(ct_slow_commands_note "$sc_file" sc-proj 0)"
+is "note: no project says nothing" "" "$(ct_slow_commands_note "$sc_file" - 60)"
+
+if command -v jq >/dev/null 2>&1; then
+  mkdir -p "$WORK/sc-proj"
+  sc_run() {
+    printf '{"session_id":"sc","source":"startup","cwd":"%s","transcript_path":"%s/self.jsonl"}' "$WORK/sc-proj" "$WORK" \
+      | bash "$SCRIPTS/session-start.sh" | jq -r '.hookSpecificOutput.additionalContext // ""'
+  }
+  sc_keep="$(cat "$sc_file")"
+  fresh; printf '%s\n' "$sc_keep" > "$sc_file"
+  contains "session start: names the slow commands" "Usually slow in this project: cargo build" "$(sc_run)"
+  fresh 'COMMAND_MEMORY=off'; printf '%s\n' "$sc_keep" > "$sc_file"
+  lacks "session start: COMMAND_MEMORY=off says nothing" "Usually slow" "$(sc_run)"
+  fresh 'SLOW_TOOL_AFTER=0'; printf '%s\n' "$sc_keep" > "$sc_file"
+  lacks "session start: SLOW_TOOL_AFTER=0 says nothing" "Usually slow" "$(sc_run)"
+  fresh 'INJECT_CONTEXT=false'; printf '%s\n' "$sc_keep" > "$sc_file"
+  lacks "session start: INJECT_CONTEXT=false says nothing" "Usually slow" "$(sc_run)"
+else
+  for sc_label in "names" "memory off" "threshold off" "inject off"; do
+    skip "session start: $sc_label" "jq is not installed"
+  done
+fi
+
+echo
+echo "command memory: usually"
+
+is "usually: the note carries the usual duration" "That Bash call took 6m10s (usually 4m00s)." \
+  "$(ct_slow_tool_note Bash 370000 ok 60 240)"
+is "usually: a failure too" "That Bash call failed after 1m10s (usually 4m00s)." \
+  "$(ct_slow_tool_note Bash 70000 fail 60 240)"
+is "usually: without it the note is unchanged" "That Bash call took 6m10s." "$(ct_slow_tool_note Bash 370000 ok 60)"
+
+if command -v jq >/dev/null 2>&1; then
+  mkdir -p "$WORK/proj-u"
+  us_prompt() { printf '{"session_id":"us","cwd":"%s"}' "$WORK/proj-u" | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null; }
+  us_call() {
+    jq -cn --argjson ms "$1" --arg c "$2" '{session_id: "us", tool_name: "Bash", hook_event_name: "PostToolUse", duration_ms: $ms, tool_input: {command: $c}}' \
+      | bash "$SCRIPTS/post-tool-use.sh" | jq -r '.hookSpecificOutput.additionalContext // ""'
+  }
+  us_row() { printf '%s\tproj-u\tnpm test\t%s\tok\n' "$(date +%s)" "$1" >> "$CLAUDE_TIMESTAMP_COMMANDS"; }
+
+  fresh; us_row 100000; us_row 200000; us_row 300000; us_prompt
+  is "usually: the median of earlier runs, not this one" "That Bash call took 15m00s (usually 3m20s)." \
+    "$(us_call 900000 'npm test')"
+  is "usually: and this run is then remembered" "4" "$(wc -l < "$CLAUDE_TIMESTAMP_COMMANDS" | tr -d ' ')"
+  fresh; us_row 100000; us_row 200000; us_prompt
+  is "usually: fewer than three earlier runs, no figure" "That Bash call took 15m00s." "$(us_call 900000 'npm test')"
+  fresh 'COMMAND_MEMORY=off'; us_row 100000; us_row 200000; us_row 300000; us_prompt
+  is "usually: COMMAND_MEMORY=off, no figure" "That Bash call took 15m00s." "$(us_call 900000 'npm test')"
+else
+  for us_label in "median" "remembered" "too few" "memory off"; do
+    skip "usually: $us_label" "jq is not installed"
+  done
+fi
+
+echo
+echo "command memory: report"
+
+if command -v jq >/dev/null 2>&1; then
+  fresh
+  mkdir -p "$WORK/cr-proj"
+  for i in 1 2 3; do
+    printf '%s\tcr-proj\tbash tests/run.sh\t240000\tok\n' "$(date +%s)" >> "$CLAUDE_TIMESTAMP_COMMANDS"
+    printf '%s\tother\tmake\t5000\tfail\n' "$(date +%s)" >> "$CLAUDE_TIMESTAMP_COMMANDS"
+  done
+  out="$(cd "$WORK/cr-proj" && bash "$SCRIPTS/setup.sh" --commands 2>&1)"
+  contains "report: this project's commands" "bash tests/run.sh" "$out"
+  contains "report: with the median" "4m00s" "$out"
+  lacks "report: not another project's" "make" "$out"
+  contains "report: --project picks another" "make" "$(bash "$SCRIPTS/setup.sh" --commands --project=other 2>&1)"
+  out="$(bash "$SCRIPTS/setup.sh" --commands --project=all 2>&1)"
+  contains "report: all projects" "cr-proj" "$out"
+  contains "report: all projects, both" "other" "$out"
+  js="$(cd "$WORK/cr-proj" && bash "$SCRIPTS/setup.sh" --commands --json)"
+  is "report json: one command" "1" "$(printf '%s' "$js" | jq '.commands | length')"
+  is "report json: median in ms" "240000" "$(printf '%s' "$js" | jq '.commands[0].median_ms')"
+  is "report json: failures counted" "3" "$(bash "$SCRIPTS/setup.sh" --commands --project=other --json | jq '.commands[0].failed')"
+  out="$(bash "$SCRIPTS/setup.sh" --commands --tool-timing=on 2>&1)"; rc=$?
+  is "report: refuses a setting flag" "2" "$rc"
+  out="$(bash "$SCRIPTS/setup.sh" --commands --since=7d 2>&1)"; rc=$?
+  is "report: refuses --since" "2" "$rc"
+  fresh 'COMMAND_MEMORY=off'
+  contains "report: says when memory is off" "COMMAND_MEMORY is off" "$(bash "$SCRIPTS/setup.sh" --commands 2>&1)"
+else
+  for cr_label in "this project" "median" "not other" "project flag" "all" "all both" \
+                  "json one" "json median" "json failed" "refuses setting" "refuses since" "off"; do
+    skip "report: $cr_label" "jq is not installed"
   done
 fi
 

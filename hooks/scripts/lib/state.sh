@@ -17,6 +17,61 @@
 # is the day something fails at load time in a hook nobody is watching. Do not
 # "simplify" a consumer to source this file on its own.
 
+# The jq definition that reduces a Bash command to the key the duration memory
+# stores: the program and up to two plain arguments, e.g. "npm test" or
+# "bash tests/run.sh". Never the full command: quoted text, flags, absolute
+# paths, home-relative paths, URLs and numbers are never kept, and the first
+# argument that is one of those ends the key.
+#
+# A string rather than a file so post-tool-use.sh can prepend it to the one jq
+# call it already makes. Written without regex builtins, which a jq built
+# without oniguruma lacks; 34 and 39 are the double and single quote.
+#
+#   first line only (heredocs) -> quoted text blanked -> last segment of
+#   && || ; -> first segment of | -> leading VAR=x, env, time, sudo, nice,
+#   command stripped -> basename of the program -> at most two arguments made
+#   of [A-Za-z0-9._/@:+-], not starting with - / ~, without :// :/ or ..,
+#   not all digits, no @ except a leading one (a scoped package, never
+#   user@host), and not a 16+ character run of letters and digits without a /
+#   (the shape of a token) -> 60 characters. echo and printf keep no
+#   arguments: what they print is data, often a token piped into a CLI. Only
+#   the first 40 words are looked at, so a huge command costs no more than a
+#   short one.
+# shellcheck disable=SC2016,SC2034  # jq source, not shell; read by the hooks that source this file
+CT_JQ_CMDKEY='def ct_cmdkey:
+  def unquote:
+    [foreach explode[] as $c ({q: null, e: null};
+      if .q != null then (if $c == .q then .q = null else . end) | .e = null
+      elif $c == 34 or $c == 39 then .q = $c | .e = 32
+      else .e = $c end;
+      .e // empty)] | implode;
+  def splitall($seps): reduce $seps[] as $s ([.]; (map(split($s)) | add) // []);
+  def words: split(" ") | map(select(length > 0));
+  def plain: explode | length > 0 and all(.[];
+      (. >= 48 and . <= 57) or (. >= 65 and . <= 90) or (. >= 97 and . <= 122)
+      or . == 46 or . == 95 or . == 47 or . == 64 or . == 58 or . == 43 or . == 45);
+  def digits: explode | all(.[]; . >= 48 and . <= 57);
+  def letters: explode | any(.[]; (. >= 65 and . <= 90) or (. >= 97 and . <= 122));
+  def numbers: explode | any(.[]; . >= 48 and . <= 57);
+  def stops: startswith("-") or contains("://") or contains("..")
+      or startswith("/") or startswith("~") or digits or (plain | not)
+      or (contains("@") and (startswith("@") | not)) or contains(":/")
+      or (length >= 16 and (contains("/") | not) and letters and numbers);
+  def prefix: contains("=") or . == "env" or . == "time" or . == "sudo" or . == "nice" or . == "command";
+  def strip: if length > 0 and (.[0] | prefix) then .[1:] | strip else . end;
+  def take: if length == 0 or (.[0] | stops) then [] else [.[0]] + (.[1:] | take) end;
+  if type != "string" then "" else
+    ((split("\n") | .[0]) // "") | unquote | split("\t") | join(" ")
+    | [splitall(["&&", "||", ";"])[] | select(words | length > 0)] | (last // "")
+    | ((split("|") | .[0]) // "") | words | .[0:40] | strip
+    | if length == 0 then ""
+      else (.[0] | split("/") | last) as $prog
+        | if ($prog | plain | not) then ""
+          elif $prog == "echo" or $prog == "printf" then $prog
+          else ([$prog] + (.[1:3] | take)) | join(" ") | .[0:60] end
+      end
+  end;'
+
 # Where per-session state lives.
 #
 # Per-user, because ${TMPDIR:-/tmp} is shared ground on a multi-user machine
@@ -376,6 +431,18 @@ ct_read_counter() {
   case "$value" in ''|*[!0-9]*) printf '0' ;; *) printf '%s' "$value" ;; esac
 }
 
+# The current epoch into _CT_NOW, from the printf builtin where bash has one
+# (4.2 and newer), sparing a `date` process; bash 3.2, which macOS still
+# ships, has no %(...)T and pays for it.
+ct_epoch_var() {
+  if [ "${BASH_VERSINFO[0]}" -gt 4 ] \
+     || { [ "${BASH_VERSINFO[0]}" -eq 4 ] && [ "${BASH_VERSINFO[1]}" -ge 2 ]; }; then
+    printf -v _CT_NOW '%(%s)T' -1
+  else
+    _CT_NOW="$(date +%s)"
+  fi
+}
+
 # One turn's tool calls, summarised for the timeline: how many, how many
 # seconds in total, and the tool that took at least half the turn, as
 # "Tool:secs". Three tab-separated fields; "-" for each when there is no log,
@@ -539,7 +606,7 @@ ct_turn_close() {
 # printing it, so post-tool-use.sh pays no subshell to learn that a fast call
 # has nothing to say. ct_slow_tool_note prints the same sentence.
 ct_slow_tool_note_var() {
-  local tool="${1:-}" ms="${2:-}" outcome="${3:-ok}" after="${4:-}" took
+  local tool="${1:-}" ms="${2:-}" outcome="${3:-ok}" after="${4:-}" usual="${5:-}" tail="" took
   _CT_NOTE=""
   case "$ms"    in ''|*[!0-9]*) return 0 ;; esac
   case "$after" in ''|*[!0-9]*) return 0 ;; esac
@@ -553,10 +620,14 @@ ct_slow_tool_note_var() {
   [ $((ms / 1000)) -ge "$after" ] || return 0
   took="$(ct_format_duration $((ms / 1000)))" || took=""
   [ -n "$tool" ] || tool="tool"
+  case "$usual" in
+    ''|*[!0-9]*) ;;
+    *) tail=" (usually $(ct_format_duration "$((10#$usual))"))" ;;
+  esac
   if [ "$outcome" = "fail" ]; then
-    printf -v _CT_NOTE 'That %s call failed after %s.' "$tool" "$took"
+    printf -v _CT_NOTE 'That %s call failed after %s%s.' "$tool" "$took" "$tail"
   else
-    printf -v _CT_NOTE 'That %s call took %s.' "$tool" "$took"
+    printf -v _CT_NOTE 'That %s call took %s%s.' "$tool" "$took" "$tail"
   fi
   return 0
 }
@@ -791,5 +862,103 @@ ct_prune_state() {
   if [ -d "$legacy" ] && [ ! -L "$legacy" ]; then
     find "$legacy" -maxdepth 1 -type f -mtime +7 -delete 2>/dev/null
   fi
+  return 0
+}
+
+# Keep the duration memory small: the last 20 runs of each command in each
+# project, nothing older than 90 days, and 5,000 lines at most, newest kept.
+# Anything that is not a whole five-field line is dropped on the way.
+#   $1 the file   $2 now (epoch)
+#
+# Written to a temp file and moved into place, so a reader never sees half a
+# file. A line appended by another session between the read and the move is
+# lost; that costs one sample, never the file.
+ct_prune_commands() {
+  local file="${1:-}" now="${2:-}" tmp
+  [ -f "$file" ] || return 0
+  case "$now" in ''|*[!0-9]*) return 0 ;; esac
+  tmp="$file.$$"
+  if awk -F '\t' -v cutoff="$(( now - 7776000 ))" '
+      NF == 5 && $1 ~ /^[0-9]+$/ && $4 ~ /^[0-9]+$/ && ($5 == "ok" || $5 == "fail") && $1 + 0 >= cutoff {
+        line[++n] = $0; k[n] = $2 "\t" $3
+      }
+      END {
+        kept = 0
+        for (i = n; i >= 1; i--) if (++seen[k[i]] <= 20 && ++kept <= 5000) keep[i] = 1
+        for (i = 1; i <= n; i++) if (keep[i]) print line[i]
+      }' "$file" > "$tmp" 2>/dev/null; then
+    mv "$tmp" "$file" 2>/dev/null || rm -f "$tmp" 2>/dev/null
+  else
+    rm -f "$tmp" 2>/dev/null
+  fi
+  return 0
+}
+
+# Per command in one project, over its last 20 runs: key, runs, median ms,
+# last ms and failures, tab-separated, slowest median first. "all" lists every project, with the
+# project as an extra first column. The median of an even count is the mean of
+# the middle two, rounded down. Lines that are not whole are skipped.
+ct_command_stats() {
+  local file="${1:-}" project="${2:-}" col=3
+  [ -r "$file" ] || return 0
+  [ -n "$project" ] || return 0
+  [ "$project" = "all" ] && col=4
+  awk -F '\t' -v want="$project" '
+    NF == 5 && $4 ~ /^[0-9]+$/ && (want == "all" || $2 == want) {
+      id = (want == "all") ? $2 "\t" $3 : $3
+      c = ++n[id]; v[id, c] = $4; bad[id, c] = ($5 == "fail"); last[id] = $4
+    }
+    END {
+      for (id in n) {
+        # The last 20 runs only, the window pruning keeps, so the figures do
+        # not depend on whether a session end has pruned the file yet.
+        first = (n[id] > 20) ? n[id] - 19 : 1
+        m = 0; fails = 0
+        for (i = first; i <= n[id]; i++) { a[++m] = v[id, i] + 0; fails += bad[id, i] }
+        for (i = 2; i <= m; i++) { x = a[i]; j = i - 1; while (j >= 1 && a[j] > x) { a[j + 1] = a[j]; j-- } a[j + 1] = x }
+        med = (m % 2) ? a[(m + 1) / 2] : int((a[m / 2] + a[m / 2 + 1]) / 2)
+        printf "%s\t%d\t%d\t%d\t%d\n", id, m, med, last[id], fails
+      }
+    }' "$file" | sort -t "$(printf '\t')" -k"$col","$col"nr
+  return 0
+}
+
+# The sentence telling the model which commands are usually slow in this
+# project, or nothing: keys with at least three runs and a median of at least
+# the slow-tool threshold, slowest first, at most three.
+#   $1 the memory file   $2 project   $3 threshold in seconds
+ct_slow_commands_note() {
+  local file="${1:-}" project="${2:-}" after="${3:-}" key runs med list="" count=0
+  case "$after" in ''|*[!0-9]*) return 0 ;; esac
+  after=$((10#$after))
+  [ "$after" -gt 0 ] || return 0
+  if [ -z "$project" ] || [ "$project" = "-" ]; then
+    return 0
+  fi
+  while IFS=$'\t' read -r key runs med _; do
+    [ "$runs" -ge 3 ] || continue
+    [ $(( med / 1000 )) -ge "$after" ] || continue
+    list="${list:+$list, }$key ~$(ct_format_duration $(( med / 1000 ))) ($runs runs)"
+    count=$(( count + 1 ))
+    [ "$count" -ge 3 ] && break
+  done < <(ct_command_stats "$file" "$project")
+  if [ -n "$list" ]; then
+    printf 'Usually slow in this project: %s.' "$list"
+  fi
+  return 0
+}
+
+# The usual duration of one command in one project, in whole seconds, when it
+# has at least three recorded runs; otherwise nothing. Read only for a call
+# that is already slow, so its cost never lands on the common path.
+ct_command_usual() {
+  local file="${1:-}" project="${2:-}" want="${3:-}" key runs med
+  [ -n "$want" ] || return 0
+  while IFS=$'\t' read -r key runs med _; do
+    if [ "$key" = "$want" ] && [ "$runs" -ge 3 ]; then
+      printf '%s' "$(( med / 1000 ))"
+      return 0
+    fi
+  done < <(ct_command_stats "$file" "$project")
   return 0
 }
