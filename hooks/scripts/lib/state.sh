@@ -719,6 +719,44 @@ ct_session_totals() {
   return 0
 }
 
+# The sentence telling the model what the session looked like before a
+# compaction, or nothing.
+#   $1 session id   $2 now (epoch)   $3 clock format
+#
+# A compaction replaces the conversation with a summary, and a summary has no
+# clock. The timeline is still measured, so the model is handed the measured
+# version: when the session began, how many turns, how much of it the user
+# spent waiting, and the turns of five minutes or more, longest first, at most
+# two. A session with no recorded start (pruned, or never prompted) gets no
+# sentence rather than one about 1970.
+ct_compact_note() {
+  local sid="${1:-}" now="${2:-}" fmt="${3:-24h}" base ago start secs longest="" count=0 noun="turns"
+  case "$now" in ''|*[!0-9]*) return 0 ;; esac
+  ct_state_file_var "$sid" || return 0
+  base="$_CT_STATE_FILE"
+  ct_session_totals "$sid"
+  [ "$_CT_START" -gt 0 ] || return 0
+  ago=$(( now - _CT_START ))
+  [ "$ago" -lt 0 ] && ago=0
+  if [ -r "${base}.turnlog" ]; then
+    while IFS=$'\t' read -r start secs; do
+      longest="${longest:+$longest, }$(ct_format_epoch "$start" "$fmt") ($(ct_format_duration "$secs"))"
+      count=$(( count + 1 ))
+    done < <(awk -F '\t' 'NF == 9 && $2 ~ /^[0-9]+$/ && $4 ~ /^[0-9]+$/ && $4 >= 300 { print $2 "\t" $4 }' \
+               "${base}.turnlog" | sort -t "$(printf '\t')" -k2,2nr | head -n 2)
+  fi
+  [ "$_CT_TURNS" -eq 1 ] && noun="turn"
+  printf 'Conversation compacted. Session started %s (%s ago), %s %s so far, %s of it waiting.' \
+    "$(ct_format_epoch "$_CT_START" "$fmt")" "$(ct_format_duration "$ago")" \
+    "$_CT_TURNS" "$noun" "$(ct_format_duration "$_CT_WAIT")"
+  if [ "$count" -eq 1 ]; then
+    printf ' Longest turn: %s.' "$longest"
+  elif [ "$count" -gt 1 ]; then
+    printf ' Longest turns: %s.' "$longest"
+  fi
+  return 0
+}
+
 # Remove every state file belonging to one session. Called at session end, so
 # the state directory does not accumulate a file set per session forever.
 ct_clear_state() {

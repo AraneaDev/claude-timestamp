@@ -6685,6 +6685,52 @@ else
 fi
 
 echo
+echo "agent notes: compaction"
+
+fresh 'TZ=UTC'
+cn_base="$(ct_state_file cn)"
+printf '1000' > "$cn_base.start"
+printf '3' > "$cn_base.turns"
+printf '600' > "$cn_base.wait"
+printf '1\t3000\t3360\t360\t-\t-\t-\t0\tstop\n2\t6000\t7320\t1320\t-\t-\t-\t1\tstop\n3\t9000\t9299\t299\t-\t-\t-\t0\tstop\n' > "$cn_base.turnlog"
+is "compaction: the timeline before it, longest turns first" \
+  "Conversation compacted. Session started 00:16:40 (3h03m ago), 3 turns so far, 10m00s of it waiting. Longest turns: 01:40:00 (22m00s), 00:50:00 (6m00s)." \
+  "$(ct_compact_note cn 12000 24h)"
+printf '1' > "$cn_base.turns"
+printf '1\t3000\t3360\t360\t-\t-\t-\t0\tstop\n' > "$cn_base.turnlog"
+is "compaction: one turn, one longest turn" \
+  "Conversation compacted. Session started 00:16:40 (3h03m ago), 1 turn so far, 10m00s of it waiting. Longest turn: 00:50:00 (6m00s)." \
+  "$(ct_compact_note cn 12000 24h)"
+: > "$cn_base.turnlog"
+lacks "compaction: no turn of five minutes, no longest clause" "Longest" "$(ct_compact_note cn 12000 24h)"
+rm -f "$cn_base.start"
+is "compaction: a session with no recorded start says nothing" "" "$(ct_compact_note cn 12000 24h)"
+is "compaction: an unknown session says nothing" "" "$(ct_compact_note never 12000 24h)"
+
+if command -v jq >/dev/null 2>&1; then
+  cn_run() {
+    printf '{"session_id":"cnh","source":"%s","transcript_path":"%s/self.jsonl"}' "$1" "$WORK" \
+      | bash "$SCRIPTS/session-start.sh" | jq -r '.hookSpecificOutput.additionalContext // ""'
+  }
+  fresh
+  printf '{"session_id":"cnh"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  contains "compaction hook: compact tells Claude" "Conversation compacted. Session started" "$(cn_run compact)"
+  lacks "compaction hook: startup does not" "Conversation compacted" "$(cn_run startup)"
+  fresh 'RESUME_NOTE=off'
+  printf '{"session_id":"cnh"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  lacks "compaction hook: RESUME_NOTE=off says nothing" "Conversation compacted" "$(cn_run compact)"
+  fresh 'INJECT_CONTEXT=false'
+  printf '{"session_id":"cnh"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  is "compaction hook: INJECT_CONTEXT=false says nothing" "" "$(cn_run compact)"
+  fresh
+  lacks "compaction hook: no state, no note" "Conversation compacted" "$(cn_run compact)"
+else
+  for cn_label in "compact" "startup" "resume off" "inject off" "no state"; do
+    skip "compaction hook: $cn_label" "jq is not installed"
+  done
+fi
+
+echo
 echo "session report"
 
 if command -v jq >/dev/null 2>&1; then

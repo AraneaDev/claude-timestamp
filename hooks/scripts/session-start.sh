@@ -92,8 +92,8 @@ source "$CT_LIB/state.sh"
 # origin is the payload's source: how this session began (startup, resume, clear, compact, fork),
 # and transcript_path is where Claude Code keeps it: together, all the
 # resumption note needs.
-IFS=$'\x1f' read -r cwd origin transcript <<< "$(jq -r \
-  '[(.cwd // ""), (.source // ""), (.transcript_path // "")] | join("\u001f")' 2>/dev/null || true)"
+IFS=$'\x1f' read -r cwd origin transcript session_id <<< "$(jq -r \
+  '[(.cwd // ""), (.source // ""), (.transcript_path // ""), (.session_id // "")] | join("\u001f")' 2>/dev/null || true)"
 
 ct_prune_state
 
@@ -230,7 +230,13 @@ fi
 context=""
 if [ "$CT_INJECT_CONTEXT" != "false" ]; then
   if [ "$CT_RESUME_NOTE" = "on" ]; then
-    context="$(ct_resume_note "$origin" "$transcript" "$(date +%s)")"
+    # A compaction continues this very session, so what the model needs is
+    # the session's own timeline rather than a gap since the last one.
+    if [ "$origin" = "compact" ]; then
+      context="$(ct_compact_note "$session_id" "$(date +%s)" "$CT_CONTEXT_FORMAT")"
+    else
+      context="$(ct_resume_note "$origin" "$transcript" "$(date +%s)")"
+    fi
   fi
   # With every note switched off there is nothing for the skill to explain,
   # so the pointer says only what is still true. The values were validated as
