@@ -133,13 +133,13 @@ automated by [release-please](https://github.com/googleapis/release-please) via
 
 1. Write commits on `main` following the convention above.
 2. release-please keeps a **Release PR** open and up to date, bumping
-   the Claude, Codex and universal plugin manifests, `version.txt` and the
+   the Claude and Codex plugin manifests, `version.txt` and the
    release manifest, and writing `CHANGELOG.md`, all from those commits.
 3. CI runs on the Release PR by itself, because the workflow opens it with the
    `RELEASE_PLEASE_TOKEN` secret. Review it and merge.
 4. Merging that PR creates the `vX.Y.Z` tag and the GitHub Release, then the
    same workflow runs the tests, checks the docs, and asserts the tag matches
-   the version it just released. `tools/check-docs.sh` fails if the five files
+   the version it just released. `tools/check-docs.sh` fails if the four files
    that carry the version ever disagree.
 
 Tags are plain `vX.Y.Z`. Claude Code only looks for `{name}--v*` tags when it

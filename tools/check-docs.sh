@@ -717,21 +717,45 @@ else
 fi
 
 echo "version agreement"
-# Five files carry the version, and release-please updates all of them. If
+# Four files carry the version, and release-please updates all of them. If
 # they ever disagree, an install and a release would claim different things.
 plugin_version="$(jq -r .version .claude-plugin/plugin.json)"
 codex_plugin_version="$(jq -r .version .codex-plugin/plugin.json)"
-portable_plugin_version="$(jq -r .version plugin.json)"
 file_version="$(tr -d '[:space:]' < version.txt)"
 manifest_version="$(jq -r '."."' .release-please-manifest.json)"
 if [ "$plugin_version" = "$codex_plugin_version" ] &&
-   [ "$plugin_version" = "$portable_plugin_version" ] &&
    [ "$plugin_version" = "$file_version" ] &&
    [ "$plugin_version" = "$manifest_version" ]; then
   note "all plugin manifests, version.txt and the release manifest agree at $plugin_version"
 else
-  note "disagreement: claude=$plugin_version codex=$codex_plugin_version portable=$portable_plugin_version version.txt=$file_version manifest=$manifest_version"
+  note "disagreement: claude=$plugin_version codex=$codex_plugin_version version.txt=$file_version manifest=$manifest_version"
   status=1
+fi
+
+echo "codex plugin layout"
+# Codex reads a root plugin.json as an Agent Plugins manifest, and in that
+# format it loads none of the plugin's hooks: the notes, the timeline and the
+# history all go silent in Codex while the install itself succeeds. Found by a
+# live run of Codex CLI 0.154. The Codex manifest lives in .codex-plugin/ only,
+# and the marketplace at .agents/plugins/ must name it and point at this root.
+cx_bad=""
+[ -e plugin.json ] && cx_bad="$cx_bad a root plugin.json turns off the plugin's hooks in Codex;"
+if [ -r .agents/plugins/marketplace.json ]; then
+  cx_name="$(jq -r .name .codex-plugin/plugin.json)"
+  cx_entry="$(jq -r --arg n "$cx_name" '[.plugins[]? | select(.name == $n) | .source.path] | first // ""' .agents/plugins/marketplace.json)"
+  case "$cx_entry" in
+    ./|.) ;;
+    "") cx_bad="$cx_bad the marketplace does not list $cx_name;" ;;
+    *) cx_bad="$cx_bad the marketplace points $cx_name at $cx_entry, not this root;" ;;
+  esac
+else
+  cx_bad="$cx_bad no .agents/plugins/marketplace.json;"
+fi
+if [ -n "$cx_bad" ]; then
+  note "$cx_bad"
+  status=1
+else
+  note "the Codex manifest is the only one Codex reads, and the marketplace lists it"
 fi
 
 echo "test count badge"

@@ -1,0 +1,13 @@
+{
+  "name": "aranea",
+  "plugins": [
+    {
+      "name": "claude-timestamp",
+      "source": {
+        "source": "local",
+        "path": "./"
+      },
+      "category": "productivity"
+    }
+  ]
+}

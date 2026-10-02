@@ -185,7 +185,7 @@ jobs:
 
       - name: Validate JSON
         run: |
-          for f in .claude-plugin/plugin.json .codex-plugin/plugin.json plugin.json hooks/hooks.json hooks/codex-hooks.json; do
+          for f in .claude-plugin/plugin.json .codex-plugin/plugin.json .agents/plugins/marketplace.json hooks/hooks.json hooks/codex-hooks.json; do
             jq -e . "$f" > /dev/null && echo "$f ok"
           done
 
