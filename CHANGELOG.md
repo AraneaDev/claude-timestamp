@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.35](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.34...v0.0.35) (2026-10-02)
+
+
+### Fixes
+
+* find the previous session in this project from Codex's dated transcripts ([#94](https://github.com/AraneaDev/claude-timestamp/issues/94)) ([817500b](https://github.com/AraneaDev/claude-timestamp/commit/817500b3f0fa6ce11a67f6f3fe672819491733d2))
+
 ## [0.0.34](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.33...v0.0.34) (2026-10-02)
 
 
