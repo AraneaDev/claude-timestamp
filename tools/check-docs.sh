@@ -44,22 +44,75 @@ $id
   fi
 }
 
+# The Markdown that is published: the README, CONTRIBUTING and the docs pages.
+doc_files="README.md CONTRIBUTING.md"
+for f in docs/*.md; do
+  [ -f "$f" ] && doc_files="$doc_files $f"
+done
+
+# A path relative to a directory, with ./ and ../ resolved, without realpath
+# (BSD has no -m). Only the textual form matters; the caller tests existence.
+_cd_resolve() {
+  local out="" part parts
+  IFS=/ read -r -a parts <<< "$1/$2"
+  for part in ${parts[@]+"${parts[@]}"}; do
+    case "$part" in
+      ''|.) ;;
+      ..) case "$out" in */*) out="${out%/*}" ;; *) out="" ;; esac ;;
+      *) out="${out:+$out/}$part" ;;
+    esac
+  done
+  printf '%s' "$out"
+}
+
+# A fenced block closes only on the character it opened with, repeated at
+# least as many times and nothing else on the line, the way GitHub reads it,
+# so a ``` line inside a ````block is content, not a close.
+# shellcheck disable=SC2016  # awk source, its $0 is awk's, not the shell's
+_cd_fence_awk='
+  {
+    l = $0; sub(/^ {0,3}/, "", l)
+    if (fence) {
+      n = 0; while (substr(l, n + 1, 1) == fch) n++
+      if (n >= flen && substr(l, n + 1) ~ /^[ \t]*$/) fence = 0
+      next
+    }
+    c = substr(l, 1, 1)
+    if (c == "`" || c == "~") {
+      n = 0; while (substr(l, n + 1, 1) == c) n++
+      if (n >= 3) { fence = 1; fch = c; flen = n; next }
+    }
+  }'
+
+# The anchors GitHub generates for a file's headings, one per line.
+_cd_slugs() {
+  awk "$_cd_fence_awk"'
+    /^#{1,6} / {
+      h = $0
+      sub(/^#+ +/, "", h); sub(/ +#*$/, "", h)
+      h = tolower(h)
+      gsub(/[^a-z0-9 _-]/, "", h)
+      gsub(/ /, "-", h)
+      if (seen[h]++) print h "-" (seen[h] - 1); else print h
+    }' "$1"
+}
+
 echo "settings documented"
 # Keys the loader actually understands, taken from its own case statement.
 code_keys="$(sed -n 's/^      \([A-Z_]*\)).*CT_.*=.*$/\1/p' hooks/scripts/lib/config.sh | sort -u)"
-# Keys the README's settings table lists.
+# Keys the settings table in docs/configuration.md lists.
 # shellcheck disable=SC2016  # the backticks are markdown, not a subshell
-doc_keys="$(sed -n 's/^| `\([A-Z_]*\)` |.*/\1/p' README.md | sort -u)"
+doc_keys="$(sed -n 's/^| `\([A-Z_]*\)` |.*/\1/p' docs/configuration.md 2>/dev/null | sort -u)"
 
 missing="$(comm -23 <(printf '%s\n' "$code_keys") <(printf '%s\n' "$doc_keys"))"
 extra="$(comm -13 <(printf '%s\n' "$code_keys") <(printf '%s\n' "$doc_keys"))"
 
 if [ -n "$missing" ]; then
-  note "NOT in the README: $(printf '%s' "$missing" | tr '\n' ' ')"
+  note "NOT in docs/configuration.md: $(printf '%s' "$missing" | tr '\n' ' ')"
   status=1
 fi
 if [ -n "$extra" ]; then
-  note "in the README but not read by the loader: $(printf '%s' "$extra" | tr '\n' ' ')"
+  note "in docs/configuration.md but not read by the loader: $(printf '%s' "$extra" | tr '\n' ' ')"
   status=1
 fi
 [ "$status" -eq 0 ] && note "all $(printf '%s\n' "$code_keys" | wc -l | tr -d ' ') settings are documented"
@@ -495,7 +548,7 @@ done < <(
   { grep -rhoE "$cp_re" \
          --include='*.sh' --include='*.md' --include='*.yml' --include='*.py' \
          --exclude-dir='.venv' --exclude-dir='__pycache__' \
-         hooks tools tests commands .github .claude-plugin README.md CONTRIBUTING.md 2>/dev/null
+         hooks tools tests commands docs .github .claude-plugin README.md CONTRIBUTING.md 2>/dev/null
     # Git hook scripts carry no extension, and --include excludes an
     # extensionless file even when it is named explicitly on the command line,
     # not only during -r traversal. Without this second call the check cannot
@@ -601,7 +654,7 @@ echo "fenced code blocks carry a language"
 # linter a contributor happens to run. Cheap to keep consistent, annoying to
 # fix in bulk later. `text` is the right answer for terminal output.
 fence_bad=""
-for f in README.md CONTRIBUTING.md; do
+for f in $doc_files; do
   # A fence may be indented up to three spaces, may carry trailing whitespace,
   # and may use more than three backticks. Matching only a bare ``` at column 1
   # lets all three through untagged.
@@ -629,7 +682,7 @@ fi
 
 echo "prose style"
 ps_detail=""
-for f in README.md CONTRIBUTING.md; do
+for f in $doc_files; do
   n="$(grep -c '—' "$f" || true)"
   [ "$n" = "0" ] || ps_detail="$ps_detail $f has $n em dash(es);"
   n="$(grep -icE '\b(we|our)\b' "$f" || true)"
@@ -638,7 +691,7 @@ done
 if [ -n "$ps_detail" ]; then
   gate prose-style 0 "house style:$ps_detail"
 else
-  gate prose-style 1 "README and CONTRIBUTING carry no em dashes and no we/our"
+  gate prose-style 1 "README, CONTRIBUTING and docs/ carry no em dashes and no we/our"
 fi
 
 echo "assertion count"
@@ -649,7 +702,7 @@ echo "assertion count"
 tail_line="$(bash tests/run.sh 2>/dev/null | sed -n 's/^\([0-9]*\) passed, \([0-9]*\) failed.*/\1 \2/p' | tail -1)"
 actual="${tail_line%% *}"
 failed="${tail_line##* }"
-claimed="$(sed -n 's/.*# \([0-9]*\) assertions.*/\1/p' README.md | head -1)"
+claimed="$(sed -n 's/.*# \([0-9]*\) assertions.*/\1/p' CONTRIBUTING.md | head -1)"
 if [ -z "$tail_line" ]; then
   note "could not read a count out of the test run"
   status=1
@@ -657,10 +710,10 @@ elif [ "$failed" != "0" ]; then
   note "the suite is failing: $failed assertion(s). Fix the suite before reading anything into the count."
   status=1
 elif [ "$actual" != "$claimed" ]; then
-  note "README says $claimed assertions, the suite reports $actual"
+  note "CONTRIBUTING says $claimed assertions, the suite reports $actual"
   status=1
 else
-  note "README and the suite agree on $actual assertions"
+  note "CONTRIBUTING and the suite agree on $actual assertions"
 fi
 
 echo "version agreement"
@@ -698,16 +751,78 @@ else
 fi
 
 echo "linked images"
-while read -r img; do
-  if [ -f "$img" ]; then
-    note "$img"
-  else
-    note "MISSING $img"
-    status=1
-  fi
-done < <( { grep -o '](assets/[^)]*)' README.md | tr -d '](' | sed 's/)$//'
-            grep -o 'src="assets/[^"]*"' README.md | sed 's/src="//;s/"$//'
-          } | sort -u )
+# Relative to the file that links them: a page in docs/ reaches assets/ as
+# ../assets/, and a path that is right for the README is wrong there.
+for f in $doc_files; do
+  base="${f%/*}"; [ "$base" = "$f" ] && base="."
+  while read -r img; do
+    [ -n "$img" ] || continue
+    path="$(_cd_resolve "$base" "$img")"
+    if [ -f "$path" ]; then
+      note "$f: $img"
+    else
+      note "MISSING $f: $img"
+      status=1
+    fi
+  done < <( { grep -o '](\(\.\./\)*assets/[^)]*)' "$f" | sed 's/^](//;s/)$//'
+              grep -o 'src="\(\.\./\)*assets/[^"]*"' "$f" | sed 's/src="//;s/"$//'
+            } | sort -u )
+done
+
+echo "documentation links"
+# The README was split into docs/ pages, which is exactly how a link to a
+# heading that moved goes stale without anyone noticing. Every relative link
+# must reach a file, and a #anchor on it a heading there, by the slug GitHub
+# derives: lowercase, punctuation dropped, spaces to hyphens, and -1, -2 for
+# a repeated heading. Inline links, with or without a title, and reference
+# definitions are checked; links inside fenced code are not links. Headings
+# are read as ASCII ATX headings (# Title), which is all these files use.
+link_bad=""
+for f in $doc_files; do
+  base="${f%/*}"; [ "$base" = "$f" ] && base="."
+  while read -r target; do
+    [ -n "$target" ] || continue
+    case "$target" in http://*|https://*|mailto:*) continue ;; esac
+    path="${target%%#*}"
+    anchor=""
+    case "$target" in *'#'*) anchor="${target#*#}" ;; esac
+    if [ -z "$path" ]; then
+      dest="$f"
+    else
+      dest="$(_cd_resolve "$base" "$path")"
+    fi
+    if [ ! -e "$dest" ]; then
+      link_bad="$link_bad $f -> $target (no such file);"
+      continue
+    fi
+    if [ -n "$anchor" ] && [ -f "$dest" ]; then
+      _cd_slugs "$dest" | grep -qxF "$anchor" \
+        || link_bad="$link_bad $f -> $target (no such heading);"
+    fi
+  done < <(awk "$_cd_fence_awk"'
+    # A reference definition, [label]: target, carries its target alone.
+    /^ {0,3}\[[^]]+\]:[ \t]*[^ \t]/ {
+      t = $0; sub(/^ {0,3}\[[^]]+\]:[ \t]*/, "", t); sub(/[ \t].*$/, "", t)
+      gsub(/^<|>$/, "", t); print t; next
+    }
+    {
+      line = $0
+      # An inline link, [text](target "optional title"): the target is the
+      # first word inside the parentheses.
+      while (match(line, /\]\([^)]+\)/)) {
+        t = substr(line, RSTART + 2, RLENGTH - 3)
+        sub(/^[ \t]+/, "", t); sub(/[ \t].*$/, "", t)
+        gsub(/^<|>$/, "", t)
+        print t
+        line = substr(line, RSTART + RLENGTH)
+      }
+    }' "$f")
+done
+if [ -n "$link_bad" ]; then
+  gate doc-links 0 "broken links:$link_bad"
+else
+  gate doc-links 1 "every relative link and anchor resolves"
+fi
 
 echo
 if [ "$status" -eq 0 ]; then echo "docs are in step with the code"; else echo "docs need updating"; fi
