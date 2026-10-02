@@ -1003,9 +1003,9 @@ _ct_project_basename() {
 # basename of DIR itself when no checkout is found above it; or the literal
 # "-" when DIR is empty, "/", or equal to $HOME.
 #
-# Only ever a basename, never a path: the README promises the history file's
+# Only ever a basename, never a path: the docs promise the history file's
 # PROJECTS column holds "the project's directory name, never the path above
-# it" (README.md, the history section). Every value that names a real
+# it" (docs/reports.md). Every value that names a real
 # directory -- the found checkout, or the no-checkout fallback -- is passed
 # through _ct_project_basename, which is where the neutralising described on
 # that helper happens; this function does not repeat it. The "-" sentinel
