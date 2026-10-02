@@ -64,33 +64,27 @@ yourself stays.
 
 ## Codex compatibility
 
-The repository also carries the universal `plugin.json` and Codex
-`.codex-plugin/plugin.json` manifests. When the plugin is installed in Codex,
-its lifecycle hooks provide the prompt send time, slow-tool and heartbeat notes,
-resumption context, and end-of-session totals. Codex may ask you to review and
-trust the hooks in `/hooks` before they run; that is a Codex safety step, not a
-plugin setting. See the official [Codex hooks
+The repository is its own Codex marketplace, named `aranea`, and carries the
+Codex manifest in `.codex-plugin/plugin.json`. Installed in Codex, the plugin's
+lifecycle hooks provide the prompt send time, slow-tool and heartbeat notes,
+resumption and compaction context, the turn timeline, command memory and
+end-of-session totals. See the official [Codex hooks
 documentation](https://learn.chatgpt.com/docs/hooks).
 
 ### Install in Codex CLI
 
-Codex CLI uses Codex-format marketplaces. In a Codex session, open `/plugins`,
-choose a configured marketplace that contains `claude-timestamp`, install it,
-and start a new session so the plugin is loaded. The equivalent CLI commands
-are:
-
 ```bash
-codex plugin marketplace list
+codex plugin marketplace add AraneaDev/claude-timestamp
 codex plugin add claude-timestamp@aranea
 ```
 
-The Claude marketplace URL under [Claude Code](#claude-code) above is a Claude Code feed and
-cannot be passed directly to `codex plugin marketplace add` on current Codex
-CLI versions. Codex accepts a local or Git marketplace root containing
-`.agents/plugins/marketplace.json`; this repository currently provides the
-plugin package and its Codex manifest, but is not itself a marketplace root.
-If you maintain or receive a Codex marketplace entry for Aranea, add that
-marketplace first and then use the commands above.
+Start a new session afterwards. Codex asks you to review and trust the plugin's
+hooks before they run, in the startup prompt or in `/hooks`; that is a Codex
+safety step, not a plugin setting, and until you trust them nothing is
+recorded. In a Codex session, `/plugins` does the same install from a menu.
+
+The Claude marketplace URL under [Claude Code](#claude-code) above is a Claude
+Code feed; Codex reads its own format, which this repository provides.
 
 Codex tool timing is measured from `PreToolUse` to `PostToolUse`, because its
 payload does not include Claude Code's `duration_ms`. Those measurements have

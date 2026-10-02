@@ -100,9 +100,14 @@ claude plugin install claude-timestamp@aranea
 
 Start a new session afterwards: hooks are bound when a session starts.
 
-In **Codex**, install it from a Codex-format marketplace that carries
-`claude-timestamp`; the Claude Code feed above does not work there. See
-[Install in Codex CLI](docs/install.md#install-in-codex-cli).
+**Codex**
+
+```bash
+codex plugin marketplace add AraneaDev/claude-timestamp
+codex plugin add claude-timestamp@aranea
+```
+
+Start a new session afterwards, and trust the plugin's hooks when Codex asks.
 
 <a name="if-the-install-fails-on-port-22"></a>
 For installing `jq`, Windows with WSL and a blocked SSH port, see
