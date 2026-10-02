@@ -176,7 +176,7 @@ cannot run anything.
 | `TOOL_COLOR` | inherit | Colour of `%tool`; empty follows `COLOR` |
 | `ELAPSED` | `on` | Show how long the turn took |
 | `INJECT_CONTEXT` | `true` | Tell Claude the local time each prompt was sent. `false` also silences the heartbeat, slow tool, slow commands, resumption and time-awareness pointer notes |
-| `HEARTBEAT_AFTER` | `900` | Tell Claude how long the open turn has run, every this many seconds. `0` disables, and `INJECT_CONTEXT=false` silences it too |
+| `HEARTBEAT_AFTER` | `900` | Tell Claude how long the open turn has run, once per this many seconds, at the first tool result after each interval; a single long tool call produces one note when it finishes. `0` disables, and `INJECT_CONTEXT=false` silences it too |
 | `SLOW_TOOL_AFTER` | `60` | Tell Claude when one tool call took at least this many seconds. `0` disables, and `INJECT_CONTEXT=false` silences it too |
 | `RESUME_NOTE` | `on` | Tell Claude, when a session starts, how long ago this conversation or project was last active. `INJECT_CONTEXT=false` silences it too |
 | `COMMAND_MEMORY` | `on` | Remember how long each Bash command takes in each project, by a short key such as `npm test`, and tell Claude at session start which are usually slow. `INJECT_CONTEXT=false` silences the note, not the recording |

@@ -55,8 +55,12 @@ That rewrites outgoing GitHub SSH URLs and nothing else, so it takes nothing
 away on a machine that could not use them in the first place. To undo it:
 
 ```bash
-git config --global --unset-all url."https://github.com/".insteadOf
+git config --global --unset url."https://github.com/".insteadOf '^git@github\.com:$'
+git config --global --unset url."https://github.com/".insteadOf '^ssh://git@github\.com/$'
 ```
+
+Each removes only the value added above, so any other GitHub rewrite you set
+yourself stays.
 
 ## Codex compatibility
 

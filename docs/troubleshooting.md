@@ -22,7 +22,8 @@ bash "$CLAUDE_PLUGIN_ROOT/hooks/scripts/setup.sh" --doctor
 It checks that `jq` is present, that the config parses, that a pinned timezone
 can actually be applied on this machine, and that the state directory is
 writable, and exits non-zero if any of that fails. It also reports when this
-client last drew a marker, which separates the two failures that look identical
+client last drew a marker. "Never" is expected until a message has been
+displayed. After one has, it separates the two failures that look identical
 from the outside: a plugin that never ran, and a plugin that drew a marker the
 client then discarded. The first is an install to fix; the second is not
 something any setting here can change. It also reports whether
