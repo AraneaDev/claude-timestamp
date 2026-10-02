@@ -742,11 +742,12 @@ cx_bad=""
 [ -e plugin.json ] && cx_bad="$cx_bad a root plugin.json turns off the plugin's hooks in Codex;"
 if [ -r .agents/plugins/marketplace.json ]; then
   cx_name="$(jq -r .name .codex-plugin/plugin.json)"
-  cx_entry="$(jq -r --arg n "$cx_name" '[.plugins[]? | select(.name == $n) | .source.path] | first // ""' .agents/plugins/marketplace.json)"
+  # Both halves of the source: a local source, and this root as its path.
+  cx_entry="$(jq -r --arg n "$cx_name" '[.plugins[]? | select(.name == $n) | "\(.source.source // "")|\(.source.path // "")"] | first // ""' .agents/plugins/marketplace.json)"
   case "$cx_entry" in
-    ./|.) ;;
+    "local|./"|"local|.") ;;
     "") cx_bad="$cx_bad the marketplace does not list $cx_name;" ;;
-    *) cx_bad="$cx_bad the marketplace points $cx_name at $cx_entry, not this root;" ;;
+    *) cx_bad="$cx_bad the marketplace source for $cx_name is $cx_entry, not a local source at this root;" ;;
   esac
 else
   cx_bad="$cx_bad no .agents/plugins/marketplace.json;"
