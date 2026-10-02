@@ -104,8 +104,10 @@ In **Codex**, install it from a Codex-format marketplace that carries
 `claude-timestamp`; the Claude Code feed above does not work there. See
 [Install in Codex CLI](docs/install.md#install-in-codex-cli).
 
+<a name="if-the-install-fails-on-port-22"></a>
 For installing `jq`, Windows with WSL and a blocked SSH port, see
-[Install](docs/install.md).
+[Install](docs/install.md); a blocked port 22 is under
+[If the install fails on port 22](docs/install.md#if-the-install-fails-on-port-22).
 
 ## Works in
 
