@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.36](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.35...v0.0.36) (2026-10-02)
+
+
+### Fixes
+
+* make the Codex plugin run its hooks, and publish a Codex marketplace ([#98](https://github.com/AraneaDev/claude-timestamp/issues/98)) ([1a8b1ee](https://github.com/AraneaDev/claude-timestamp/commit/1a8b1ee3a8e28ce0900563577fcaa42ed7e4da07))
+
 ## [0.0.35](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.34...v0.0.35) (2026-10-02)
 
 
