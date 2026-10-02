@@ -4,7 +4,7 @@
 
 **Time awareness for coding agents, in Claude Code and Codex.**
 
-Every message stamped with the time it happened and how long it took.
+In Claude Code, every message stamped with the time it happened and how long it took.
 The agent hears when a turn runs long, a command is slow, or work resumes after a gap.
 At the end, where the session's time actually went.
 
@@ -35,11 +35,11 @@ There is nothing to set up. The defaults work as soon as it is installed.
 
 ### On your screen
 
-Every assistant message carries the local time and how long the turn took,
-from the moment you pressed enter to the moment the reply appeared. A slow turn
-changes colour, and a gap between messages is marked, so a session
-you return to the next morning still reads in order. On exit you get the
-totals.
+In Claude Code, every assistant message carries the local time and how long
+the turn took, from the moment you pressed enter to the moment the reply
+appeared. A slow turn changes colour, and a gap between messages is marked, so
+a session you return to the next morning still reads in order. On exit you get
+the totals.
 
 ```text
 claude-timestamp: session lasted 1h30m over 12 turns, 24m18s of it waiting, 35m00s away.

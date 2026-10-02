@@ -2,7 +2,7 @@
   "name": "claude-timestamp",
   "displayName": "Claude Timestamp",
   "version": "0.0.35",
-  "description": "Time awareness for coding agents, in Claude Code and Codex: stamps every message with the local time and how long the turn took, tells the agent when a turn runs long, a tool call is slow or work resumes after a gap, remembers how long each command usually takes in a project, and reports where a session's time went.",
+  "description": "Time awareness for coding agents, in Claude Code and Codex: in Claude Code, stamps every message with the local time and how long the turn took; in both, tells the agent when a turn runs long, a tool call is slow or work resumes after a gap, remembers how long each command usually takes in a project, and reports where a session's time went.",
   "author": {
     "name": "AraneaDev",
     "url": "https://github.com/AraneaDev"

@@ -65,11 +65,28 @@ _cd_resolve() {
   printf '%s' "$out"
 }
 
+# A fenced block closes only on the character it opened with, repeated at
+# least as many times and nothing else on the line, the way GitHub reads it,
+# so a ``` line inside a ````block is content, not a close.
+# shellcheck disable=SC2016  # awk source, its $0 is awk's, not the shell's
+_cd_fence_awk='
+  {
+    l = $0; sub(/^ {0,3}/, "", l)
+    if (fence) {
+      n = 0; while (substr(l, n + 1, 1) == fch) n++
+      if (n >= flen && substr(l, n + 1) ~ /^[ \t]*$/) fence = 0
+      next
+    }
+    c = substr(l, 1, 1)
+    if (c == "`" || c == "~") {
+      n = 0; while (substr(l, n + 1, 1) == c) n++
+      if (n >= 3) { fence = 1; fch = c; flen = n; next }
+    }
+  }'
+
 # The anchors GitHub generates for a file's headings, one per line.
 _cd_slugs() {
-  awk '
-    /^[ ]{0,3}(```|~~~)/ { fence = !fence; next }
-    fence { next }
+  awk "$_cd_fence_awk"'
     /^#{1,6} / {
       h = $0
       sub(/^#+ +/, "", h); sub(/ +#*$/, "", h)
@@ -757,7 +774,9 @@ echo "documentation links"
 # heading that moved goes stale without anyone noticing. Every relative link
 # must reach a file, and a #anchor on it a heading there, by the slug GitHub
 # derives: lowercase, punctuation dropped, spaces to hyphens, and -1, -2 for
-# a repeated heading. Links inside fenced code are not links.
+# a repeated heading. Inline links, with or without a title, and reference
+# definitions are checked; links inside fenced code are not links. Headings
+# are read as ASCII ATX headings (# Title), which is all these files use.
 link_bad=""
 for f in $doc_files; do
   base="${f%/*}"; [ "$base" = "$f" ] && base="."
@@ -780,13 +799,21 @@ for f in $doc_files; do
       _cd_slugs "$dest" | grep -qxF "$anchor" \
         || link_bad="$link_bad $f -> $target (no such heading);"
     fi
-  done < <(awk '
-    /^[ ]{0,3}(```|~~~)/ { fence = !fence; next }
-    fence { next }
+  done < <(awk "$_cd_fence_awk"'
+    # A reference definition, [label]: target, carries its target alone.
+    /^ {0,3}\[[^]]+\]:[ \t]*[^ \t]/ {
+      t = $0; sub(/^ {0,3}\[[^]]+\]:[ \t]*/, "", t); sub(/[ \t].*$/, "", t)
+      gsub(/^<|>$/, "", t); print t; next
+    }
     {
       line = $0
-      while (match(line, /\]\([^) ]+\)/)) {
-        print substr(line, RSTART + 2, RLENGTH - 3)
+      # An inline link, [text](target "optional title"): the target is the
+      # first word inside the parentheses.
+      while (match(line, /\]\([^)]+\)/)) {
+        t = substr(line, RSTART + 2, RLENGTH - 3)
+        sub(/^[ \t]+/, "", t); sub(/[ \t].*$/, "", t)
+        gsub(/^<|>$/, "", t)
+        print t
         line = substr(line, RSTART + RLENGTH)
       }
     }' "$f")
