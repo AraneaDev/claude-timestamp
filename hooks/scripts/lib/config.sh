@@ -479,7 +479,8 @@ ct_mtime() {
 #            under the threshold rather than being reported as ended.
 #   other    clear, compact and fork continue work that is already in view.
 ct_resume_note() {
-  local source="${1:-}" transcript="${2:-}" now="${3:-}" last="" label newest="" f gap day clock
+  local source="${1:-}" transcript="${2:-}" now="${3:-}" cwd="${4:-}" last="" label newest="" f gap day clock
+  local root want line n
   case "$now" in ''|*[!0-9]*) return 0 ;; esac
   [ -n "$transcript" ] || return 0
   case "$source" in
@@ -504,13 +505,44 @@ ct_resume_note() {
       ;;
     startup)
       [ -d "${transcript%/*}" ] || return 0
-      # ls -t is the portable newest-first; the names are session ids.
-      # shellcheck disable=SC2012
-      while IFS= read -r f; do
-        [ "$f" = "$transcript" ] && continue
-        newest="$f"
-        break
-      done < <(ls -t "${transcript%/*}"/*.jsonl 2>/dev/null)
+      case "${transcript%/*}" in
+        */sessions/[0-9][0-9][0-9][0-9]/[0-9][0-9]/[0-9][0-9])
+          # Codex keeps one folder per day for every project, so the folder
+          # says nothing about the project. Each transcript's first line
+          # (session_meta) names its cwd: the newest transcript with this
+          # session's cwd, across all the date folders, is the previous
+          # session in this project. Read with the builtin, so the scan forks
+          # nothing, and stopped after 200 transcripts, so a long history
+          # cannot slow session start. Matched with the closing quote, so
+          # /a/proj does not match /a/proj2.
+          [ -n "$cwd" ] || return 0
+          root="${transcript%/*/*/*/*}"
+          want="${cwd//\\/\\\\}"
+          want="\"cwd\":\"${want//\"/\\\"}\""
+          n=0
+          # shellcheck disable=SC2012
+          while IFS= read -r f; do
+            [ "$f" = "$transcript" ] && continue
+            n=$((n + 1))
+            [ "$n" -gt 200 ] && break
+            line=""
+            IFS= read -r line < "$f" 2>/dev/null || :
+            case "$line" in
+              *"$want"*) newest="$f"; break ;;
+            esac
+          done < <(ls -t "$root"/*/*/*/*.jsonl 2>/dev/null)
+          ;;
+        *)
+          # Claude Code keeps one folder per project. ls -t is the portable
+          # newest-first; the names are session ids.
+          # shellcheck disable=SC2012
+          while IFS= read -r f; do
+            [ "$f" = "$transcript" ] && continue
+            newest="$f"
+            break
+          done < <(ls -t "${transcript%/*}"/*.jsonl 2>/dev/null)
+          ;;
+      esac
       [ -n "$newest" ] || return 0
       last="$(ct_mtime "$newest")" || return 0
       label="Previous session in this project ended"

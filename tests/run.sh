@@ -6647,6 +6647,34 @@ is "resume: fork says nothing" "" "$(ct_resume_note fork "$rs_dir/conv.jsonl" "$
 is "resume: no transcript path says nothing" "" "$(ct_resume_note resume "" "$rs_now")"
 
 echo
+echo "agent notes: resumption in Codex"
+
+# Codex keeps one folder per day for every project, so the previous session in
+# this project is found by the cwd in each transcript's first line, across
+# date folders, and another project's newer session is not it.
+cx_root="$WORK/codexhome/sessions"
+rm -rf "$cx_root"; mkdir -p "$cx_root/2026/09/30" "$cx_root/2026/10/01" "$cx_root/2026/10/02"
+cx_meta() { printf '{"timestamp":"2026-10-01T00:00:00.000Z","type":"session_meta","payload":{"id":"x","cwd":"%s","source":"exec"}}\n{"timestamp":"2026-10-01T00:00:01.000Z","type":"event"}\n' "$1"; }
+cx_meta "$WORK/projB" > "$cx_root/2026/09/30/b-old.jsonl"; touch -t "$(rs_ago 300)" "$cx_root/2026/09/30/b-old.jsonl"
+cx_meta "$WORK/projA" > "$cx_root/2026/10/01/a-new.jsonl"; touch -t "$(rs_ago 180)" "$cx_root/2026/10/01/a-new.jsonl"
+cx_meta "$WORK/projB" > "$cx_root/2026/10/02/self.jsonl"
+cx_now="$(date +%s)"
+contains "codex resume: the previous session in this project, not the newer one elsewhere" \
+  "Previous session in this project ended 5h ago" \
+  "$(ct_resume_note startup "$cx_root/2026/10/02/self.jsonl" "$cx_now" "$WORK/projB")"
+rm -f "$cx_root/2026/09/30/b-old.jsonl"
+is "codex resume: only other projects' sessions say nothing" "" \
+  "$(ct_resume_note startup "$cx_root/2026/10/02/self.jsonl" "$cx_now" "$WORK/projB")"
+cx_meta "$WORK/projA" > "$cx_root/2026/10/02/a-today.jsonl"; touch -t "$(rs_ago 180)" "$cx_root/2026/10/02/a-today.jsonl"
+is "codex resume: another project's session the same day is not this project's" "" \
+  "$(ct_resume_note startup "$cx_root/2026/10/02/self.jsonl" "$cx_now" "$WORK/projB")"
+is "codex resume: no cwd says nothing" "" \
+  "$(ct_resume_note startup "$cx_root/2026/10/02/self.jsonl" "$cx_now" "")"
+cx_meta "$WORK/projB2" > "$cx_root/2026/09/30/b2.jsonl"; touch -t "$(rs_ago 300)" "$cx_root/2026/09/30/b2.jsonl"
+is "codex resume: a project whose name extends this one's is another project" "" \
+  "$(ct_resume_note startup "$cx_root/2026/10/02/self.jsonl" "$cx_now" "$WORK/projB")"
+
+echo
 echo "agent notes: session start"
 
 if command -v jq >/dev/null 2>&1; then

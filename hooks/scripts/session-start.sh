@@ -235,7 +235,7 @@ if [ "$CT_INJECT_CONTEXT" != "false" ]; then
     if [ "$origin" = "compact" ]; then
       context="$(ct_compact_note "$session_id" "$(date +%s)" "$CT_CONTEXT_FORMAT")"
     else
-      context="$(ct_resume_note "$origin" "$transcript" "$(date +%s)")"
+      context="$(ct_resume_note "$origin" "$transcript" "$(date +%s)" "$cwd")"
     fi
   fi
   if [ "$CT_COMMAND_MEMORY" = "on" ]; then
