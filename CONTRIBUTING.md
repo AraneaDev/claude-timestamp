@@ -28,15 +28,13 @@ shellcheck -S style -e SC1091 hooks/scripts/*.sh hooks/scripts/lib/*.sh tests/ru
 ```
 
 All three run in CI, on Linux, macOS and Windows. macOS runs the suite twice,
-the second time under `/bin/bash`, which is still 3.2, so the compatibility
-claim in the README is tested rather than asserted.
+the second time under `/bin/bash`, which is still 3.2, so the bash 3.2 claim
+in the platform notes is tested rather than asserted.
 
 `SC1091` is excluded because every hook resolves its library path at runtime,
 which shellcheck cannot follow.
 
-Each case in the suite resets the config and state directory before it runs,
-so no test can inherit anything from the one before it. The interactive wizard
-is covered too: it reads answers from stdin when there is no terminal, which
+The interactive wizard is covered too: it reads answers from stdin when there is no terminal, which
 makes the whole flow scriptable without a pseudo-terminal.
 
 `tools/check-docs.sh` catches the ways the documentation goes stale without
@@ -129,7 +127,8 @@ collapse them into the PR's own title.
 
 ## Releases
 
-Automated by [release-please](https://github.com/googleapis/release-please) via
+Versions follow [semantic versioning](https://semver.org). Releases are
+automated by [release-please](https://github.com/googleapis/release-please) via
 `.github/workflows/release-please.yml`:
 
 1. Write commits on `main` following the convention above.
@@ -140,7 +139,8 @@ Automated by [release-please](https://github.com/googleapis/release-please) via
    `RELEASE_PLEASE_TOKEN` secret. Review it and merge.
 4. Merging that PR creates the `vX.Y.Z` tag and the GitHub Release, then the
    same workflow runs the tests, checks the docs, and asserts the tag matches
-   the version it just released.
+   the version it just released. `tools/check-docs.sh` fails if the five files
+   that carry the version ever disagree.
 
 Tags are plain `vX.Y.Z`. Claude Code only looks for `{name}--v*` tags when it
 resolves a plugin dependency pinned to a version range, and falls back to

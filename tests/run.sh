@@ -51,11 +51,11 @@ refutes() {
 }
 
 # Record an assertion that this environment cannot run, without changing the
-# total. The suite's assertion count is published in the README and checked by
-# tools/check-docs.sh, so a case that runs only under some privilege would
-# otherwise make that number unsatisfiable: right for whoever ran it locally
-# and wrong for CI, or the reverse. Counted, and printed loudly enough that a
-# skip is never mistaken for a pass.
+# total. The suite's assertion count is published in CONTRIBUTING and the
+# README badge, and checked by tools/check-docs.sh, so a case that runs only
+# under some privilege would otherwise make that number unsatisfiable: right
+# for whoever ran it locally and wrong for CI, or the reverse. Counted, and
+# printed loudly enough that a skip is never mistaken for a pass.
 skip() { PASS=$((PASS + 1)); printf '  SKIP %s\n         reason:   %s\n' "$1" "$2"; }
 
 # Compare against a wall-clock value that can tick between two reads. The
@@ -142,7 +142,7 @@ export TMPDIR="$WORK/state"
 # Probe once rather than testing $OSTYPE, because what matters is what this
 # filesystem actually does, and skip the cases that need either. The skips are
 # counted, so the assertion total is the same on every platform and the number
-# the README publishes stays checkable.
+# CONTRIBUTING and the README badge publish stays checkable.
 mkdir -p "$WORK/cap"
 CT_HAS_MODES=0
 mkdir -m 700 "$WORK/cap/modes" 2>/dev/null

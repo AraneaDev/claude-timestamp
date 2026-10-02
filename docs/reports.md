@@ -1,4 +1,4 @@
-# What the sessions add up to
+# Reports and history
 
 Part of the claude-timestamp documentation. Start at the [README](../README.md).
 

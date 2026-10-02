@@ -18,7 +18,7 @@ At the end, where the session's time actually went.
 
 <img src="assets/timestamps.webp" alt="A real Claude Code session, timestamps on assistant messages, with a slow turn highlighted" width="840">
 
-<sub>Two fast turns render dim. The third crosses the slow threshold, so its duration is coloured and, with `TOOL_TIMING` on, named after the tool that caused it. A real session, played back at real speed.</sub>
+<sub>Two fast turns render dim. The third crosses the slow threshold, so its duration is coloured and, with `TOOL_TIMING` on, named after the tool that caused it. Tool timing is off by default, so a plain install will not show the tool on its own. A real session, played back at real speed.</sub>
 
 </div>
 
@@ -35,14 +35,19 @@ There is nothing to set up. The defaults work as soon as it is installed.
 
 ### On your screen
 
-Every assistant message carries the local time and how long the turn took, a
-slow turn changes colour, and a gap between messages is marked, so a session
+Every assistant message carries the local time and how long the turn took,
+from the moment you pressed enter to the moment the reply appeared. A slow turn
+changes colour, and a gap between messages is marked, so a session
 you return to the next morning still reads in order. On exit you get the
 totals.
 
 ```text
 claude-timestamp: session lasted 1h30m over 12 turns, 24m18s of it waiting, 35m00s away.
+slowest tools: Bash 41.2s (18 calls), WebFetch 8.1s (1 call), Read 2.0s (37 calls). 2 failed
 ```
+
+Waiting and away never cover the same seconds, so together they add up to no
+more than the session. The second line appears with `TOOL_TIMING` on.
 
 <p align="center">
   <img src="assets/session.webp" alt="An idle divider above a stamped message, and the end-of-session summary below it" width="700">
@@ -95,7 +100,7 @@ claude plugin install claude-timestamp@aranea
 
 Start a new session afterwards: hooks are bound when a session starts.
 
-**Codex** installs it from a Codex-format marketplace that carries
+In **Codex**, install it from a Codex-format marketplace that carries
 `claude-timestamp`; the Claude Code feed above does not work there. See
 [Install in Codex CLI](docs/install.md#install-in-codex-cli).
 
@@ -125,7 +130,9 @@ Checked against Claude Code and Codex CLI 0.154.0.
 | `/timestamps` command | ✓ | ✗ | Codex uses the `timestamps` skill or `setup.sh` |
 
 The **Chat** and **Cowork** tabs of the desktop app are not Claude Code and
-have no hooks, so nothing here reaches them.
+have no hooks, so nothing here reaches them. Cloud sessions on the web read
+hooks from the repository and from managed settings rather than from your
+`~/.claude`, so a personal install does not apply there either.
 
 ## Configure
 

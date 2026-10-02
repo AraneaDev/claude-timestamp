@@ -80,7 +80,7 @@ codex plugin marketplace list
 codex plugin add claude-timestamp@aranea
 ```
 
-The Claude marketplace URL in [Install](#claude-code) is a Claude Code feed and
+The Claude marketplace URL under [Claude Code](#claude-code) above is a Claude Code feed and
 cannot be passed directly to `codex plugin marketplace add` on current Codex
 CLI versions. Codex accepts a local or Git marketplace root containing
 `.agents/plugins/marketplace.json`; this repository currently provides the

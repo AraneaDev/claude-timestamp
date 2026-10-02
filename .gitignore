@@ -16,4 +16,5 @@ __pycache__/
 # notes a tool may write under it are ignored. Root-anchored so an unrelated
 # directory deeper in the tree is not swallowed with them.
 /docs/superpowers/
+/docs/test-gen/
 /.superpowers/

@@ -2,7 +2,7 @@
 
 Part of the claude-timestamp documentation. Start at the [README](../README.md).
 
-The marker is drawn on your screen and never reaches the model. A few short
+The marker is drawn on your screen, never enters the transcript and never reaches the model. A few short
 notes do reach it, each as a system reminder, and each only when there is
 something to say. `INJECT_CONTEXT=false` switches all of them off, and each
 has a setting of its own.
