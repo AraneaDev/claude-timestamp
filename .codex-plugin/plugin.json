@@ -2,6 +2,6 @@
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "claude-timestamp",
   "version": "0.0.35",
-  "description": "Track local time, turn duration, tool timing and session totals for Claude Code and Codex.",
+  "description": "Time awareness for coding agents, in Claude Code and Codex: timestamps, turn durations, notes the agent receives, command durations and session history.",
   "hooks": "./hooks/codex-hooks.json"
 }
