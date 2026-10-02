@@ -12,7 +12,8 @@ __pycache__/
 
 # Working notes about the work, not reference material for using it: specs,
 # plans, ledgers, task briefs, review diffs. Kept out of a repository someone
-# else will read. Root-anchored so an unrelated docs/ directory deeper in the
-# tree is not swallowed with them.
-/docs/
+# else will read. docs/ itself is published documentation; only the working
+# notes a tool may write under it are ignored. Root-anchored so an unrelated
+# directory deeper in the tree is not swallowed with them.
+/docs/superpowers/
 /.superpowers/
