@@ -165,7 +165,8 @@ if [ -z "$agent_id" ] || [ "$subagent_notes" = "on" ]; then
     ct_read_flag_var "$session_id" "cmdmem"
     if [ "$_CT_FLAG" = "on" ]; then
       ct_read_flag_var "$session_id" "project"
-      usual="$(ct_command_usual "$(ct_commands_path)" "$_CT_FLAG" "$cmd_key")" || usual=""
+      ct_commands_path_var
+      usual="$(ct_command_usual "$_CT_COMMANDS_PATH" "$_CT_FLAG" "$cmd_key")" || usual=""
       if [ -n "$usual" ]; then
         ct_slow_tool_note_var "$tool_name" "$ms" "$outcome" "$st_after" "$usual" || :
       fi
@@ -195,11 +196,19 @@ fi
 if [ "$tool_name" = "Bash" ] && [ -n "$cmd_key" ] && [ -n "$ms" ] && [ "$background" != "true" ]; then
   ct_read_flag_var "$session_id" "cmdmem"
   if [ "$_CT_FLAG" = "on" ]; then
-    ct_read_flag_var "$session_id" "project"; cm_project="${_CT_FLAG:--}"
-    ct_epoch_var
-    # shellcheck disable=SC2153  # _CT_NOW is assigned by ct_epoch_var (lib/state.sh)
-    printf '%s\t%s\t%s\t%s\t%s\n' "$_CT_NOW" "$cm_project" "$cmd_key" "$ms" "$outcome" \
-      >> "$(ct_commands_path)" 2>/dev/null || :
+    # Outside any project (no cwd, or $HOME) a duration describes nothing
+    # that a later session could look up, so it is not kept.
+    ct_read_flag_var "$session_id" "project"; cm_project="$_CT_FLAG"
+    case "$cm_project" in
+      ''|-) ;;
+      *)
+        ct_epoch_var
+        ct_commands_path_var
+        # shellcheck disable=SC2153  # _CT_NOW is assigned by ct_epoch_var (lib/state.sh)
+        printf '%s\t%s\t%s\t%s\t%s\n' "$_CT_NOW" "$cm_project" "$cmd_key" "$ms" "$outcome" \
+          >> "$_CT_COMMANDS_PATH" 2>/dev/null || :
+        ;;
+    esac
   fi
 fi
 

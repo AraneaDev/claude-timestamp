@@ -6826,13 +6826,14 @@ if command -v jq >/dev/null 2>&1; then
   fresh
   contains "pointer: follows the resumption note" "ago (" "$(ss_ctx "$(ss_run)")"
   contains "pointer: in that order" ". claude-timestamp reports" "$(ss_ctx "$(ss_run)")"
+  contains "pointer: mentions usually slow commands" "usually slow commands" "$(ss_ctx "$(ss_run)")"
   # With every note off there is nothing to report, so the pointer keeps only
   # the part that is still true.
   fresh 'HEARTBEAT_AFTER=0' 'SLOW_TOOL_AFTER=0' 'RESUME_NOTE=off'
   is "pointer: with every note off it only offers session history" \
     "The claude-timestamp:time-awareness skill can query session history." "$(ss_ctx "$(ss_run)")"
 else
-  for ptr_label in "names skill" "inject off" "after resume" "order" "all notes off"; do
+  for ptr_label in "names skill" "inject off" "after resume" "order" "slow commands" "all notes off"; do
     skip "pointer: $ptr_label" "jq is not installed"
   done
 fi
@@ -7011,12 +7012,29 @@ body line")"
   is "key: thousands of words, two kept" "git add f1" "$(ck "$ck_long")"
   ck_t1="$(date +%s)"
   is_near "key: and quickly" 0 "$(( ck_t1 - ck_t0 ))" 1
+  # A flag left where the program should be is no key at all.
+  is "key: sudo with a flag has no key" "" "$(ck 'sudo -u postgres psql')"
+  is "key: time with a flag has no key" "" "$(ck 'time -p make')"
+  # Subshells and groups are keyed on the command inside them.
+  is "key: a subshell keys on its command" "npm test" "$(ck '(cd sub && npm test)')"
+  is "key: a group keys on its command" "npm test" "$(ck '{ cd sub && npm test; }')"
+  # ${...} and $(...) belong to the word they sit in, so an env prefix
+  # carrying one is still stripped whole.
+  # shellcheck disable=SC2016  # the $ is the input under test, not an expansion
+  {
+    is "key: an env prefix with \${} is stripped whole" "npm test" "$(ck 'NODE_ENV=${ENV} npm test')"
+    is "key: an env prefix with \$() is stripped whole" "make build" "$(ck 'GIT_SHA=$(git rev-parse HEAD) make build')"
+    is "key: a PATH prefix with \$() is stripped whole" "make" "$(ck 'PATH=$PATH:$(pwd)/bin make')"
+    is "key: a command substitution as the program is no key" "" "$(ck '$(cat token) --flag')"
+  }
+  is "key: braces inside quotes are left alone" "awk file" "$(ck "awk '{print \$1}' file")"
   is "key: at most 60 characters" "60" "$(ck "$(printf 'x%.0s' $(seq 1 200))" | tr -d '\r\n' | wc -c | tr -d ' ')"
 else
   for ck_label in "and segment" "script path" "run ids" "quotes" "abs path" "sudo" "url" \
                   "heredoc" "pipe" "two args" "test file" "assignment" "empty" "non-string" \
                   "tabs" "non-ascii" "user@host" "scp" "ssh clone" "scoped" "node id" "echo" \
-                  "printf" "token" "long" "long fast" "60 chars"; do
+                  "printf" "token" "long" "long fast" "sudo flag" "time flag" "subshell" "group" \
+                  "quoted braces" "env brace" "env paren" "path paren" "subst program" "60 chars"; do
     skip "key: $ck_label" "jq is not installed"
   done
 fi
@@ -7109,7 +7127,7 @@ is "stats: an even count takes the middle two" "x	4	2500	10000	0" \
 # Only the last 20 runs count, also before session end prunes the rest.
 is "stats: only the last twenty runs count" "w	20	50	0	0" \
   "$(awk 'BEGIN { for (i = 1; i <= 10; i++) printf "1\tq\tw\t0\tok\n"; for (i = 1; i <= 10; i++) printf "1\tq\tw\t100\tok\n"; printf "1\tq\tw\t0\tok\n" }' > "$WORK/window.tsv"; ct_command_stats "$WORK/window.tsv" q)"
-is "stats: all projects carry the project first" "other	make" "$(ct_command_stats "$sc_file" all | head -n 1 | cut -f1-2)"
+is "stats: all projects carry the project first" "other	make" "$(ct_command_stats "$sc_file" "" all | head -n 1 | cut -f1-2)"
 is "note: three at most, at least three runs, over the threshold, this project only" \
   "Usually slow in this project: cargo build ~6m40s (3 runs), bash tests/run.sh ~4m00s (3 runs), npm test ~1m30s (3 runs)." \
   "$(ct_slow_commands_note "$sc_file" sc-proj 60)"
@@ -7201,6 +7219,144 @@ else
   for cr_label in "this project" "median" "not other" "project flag" "all" "all both" \
                   "json one" "json median" "json failed" "refuses setting" "refuses since" "off"; do
     skip "report: $cr_label" "jq is not installed"
+  done
+fi
+
+echo
+echo "turn timeline: fixes"
+
+# The tool timing in force during a turn decides its tool fields, not the
+# setting the next prompt stages before it reconciles that turn.
+fresh
+tf_base="$(ct_state_file tf)"
+tf_now="$(date +%s)"
+ct_turn_open tf "$(( tf_now - 100 ))"
+printf 'Bash 80.000 ok\n' > "$tf_base.turntools"
+ct_turn_close tf "$tf_now" interrupted on
+is "timeline fixes: a close carries the timing that was in force" "1	80	Bash:80" "$(cut -f5-7 "$tf_base.turnlog")"
+ct_turn_open tf "$(( tf_now - 10 ))"
+ct_stage_flag tf tooltiming on
+: > "$tf_base.turntools"
+ct_turn_close tf "$tf_now" interrupted off
+is "timeline fixes: off means not measured, whatever is staged now" "-	-	-" "$(sed -n 2p "$tf_base.turnlog" | cut -f5-7)"
+ct_turn_open tf "$(( tf_now - 10 ))"
+ct_turn_close tf "$tf_now" error
+is "timeline fixes: an error close is recorded as error" "error" "$(sed -n 3p "$tf_base.turnlog" | cut -f9)"
+
+if command -v jq >/dev/null 2>&1; then
+  fresh 'TOOL_TIMING=on'
+  tfh_log="$(ct_state_file tfh).turnlog"
+  printf '{"session_id":"tfh"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  printf '{"session_id":"tfh","tool_name":"Bash","hook_event_name":"PostToolUse","duration_ms":2000}' \
+    | bash "$SCRIPTS/post-tool-use.sh" >/dev/null
+  printf 'TOOL_TIMING=off\n' > "$CLAUDE_TIMESTAMP_CONFIG"
+  printf '{"session_id":"tfh"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  is "timeline fixes: a reconciled turn keeps the timing it ran under" "1" "$(cut -f5 "$tfh_log")"
+  printf '{"session_id":"tfh","hook_event_name":"StopFailure"}' | bash "$SCRIPTS/stop.sh"
+  is "timeline fixes: StopFailure closes as error" "error" "$(sed -n 2p "$tfh_log" | cut -f9)"
+  is "timeline fixes: --turns --json lists an error turn" "error" \
+    "$(env CLAUDE_CODE_SESSION_ID=tfh bash "$SCRIPTS/setup.sh" --turns --json | jq -r '.turns[1].how')"
+  printf '7\t1\t\t\t-\t-\t-\t0\tstop\n' >> "$tfh_log"
+  is "timeline fixes: a row with empty numeric fields is skipped" "2" \
+    "$(env CLAUDE_CODE_SESSION_ID=tfh bash "$SCRIPTS/setup.sh" --turns --json | jq '.turns | length')"
+else
+  for tf_label in "reconciled timing" "stopfailure" "json error" "empty fields"; do
+    skip "timeline fixes: $tf_label" "jq is not installed"
+  done
+fi
+
+echo
+echo "session json: slowest tools"
+
+if command -v jq >/dev/null 2>&1; then
+  fresh 'TOOL_TIMING=on'
+  printf '{"session_id":"sj"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  printf '{"session_id":"sj","tool_name":"Bash","hook_event_name":"PostToolUse","duration_ms":2000}' \
+    | bash "$SCRIPTS/post-tool-use.sh" >/dev/null
+  is "session json: slowest tools are data" '[{"tool":"Bash","secs":2,"calls":1}]' \
+    "$(env CLAUDE_CODE_SESSION_ID=sj bash "$SCRIPTS/setup.sh" --session --json | jq -c '.slowest_tools')"
+  fresh
+  printf '{"session_id":"sj"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  is "session json: and null without tool timing" "null" \
+    "$(env CLAUDE_CODE_SESSION_ID=sj bash "$SCRIPTS/setup.sh" --session --json | jq -c '.slowest_tools')"
+else
+  for sj_label in "data" "null"; do skip "session json: $sj_label" "jq is not installed"; done
+fi
+
+echo
+echo "command memory: plumbing"
+
+printf '1\tq\tok-key\t1000\tok\nx\tq\tbad-epoch\t1000\tok\n1\tq\tbad-outcome\t1000\tmaybe\n' > "$WORK/rows.tsv"
+is "plumbing: stats read only rows pruning would keep" "ok-key" "$(ct_command_stats "$WORK/rows.tsv" q | cut -f1 | tr '\n' ' ' | sed 's/ $//')"
+printf '1\t-\tnpm test\t5000\tok\n1\t-\tnpm test\t5000\tok\n1\t-\tnpm test\t5000\tok\n' > "$WORK/noproj.tsv"
+is "plumbing: no project has no usual figure" "" "$(ct_command_usual "$WORK/noproj.tsv" - 'npm test')"
+
+if command -v jq >/dev/null 2>&1; then
+  pl_lines() { if [ -r "$CLAUDE_TIMESTAMP_COMMANDS" ]; then wc -l < "$CLAUDE_TIMESTAMP_COMMANDS" | tr -d ' '; else echo 0; fi; }
+  mkdir -p "$WORK/proj-p"
+  fresh
+  printf '{"session_id":"pl","cwd":"%s"}' "$WORK/proj-p" | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  printf '{"session_id":"pl","tool_name":"Bash","hook_event_name":"PostToolUse","tool_input":{"command":"npm test"}}' \
+    | bash "$SCRIPTS/post-tool-use.sh" >/dev/null
+  is "plumbing: a call without a duration is not recorded" "0" "$(pl_lines)"
+  fresh
+  printf '{"session_id":"pl"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+  printf '{"session_id":"pl","tool_name":"Bash","hook_event_name":"PostToolUse","duration_ms":4000,"tool_input":{"command":"npm test"}}' \
+    | bash "$SCRIPTS/post-tool-use.sh" >/dev/null
+  is "plumbing: a call outside any project is not recorded" "0" "$(pl_lines)"
+else
+  for pl_label in "no duration" "no project"; do skip "plumbing: $pl_label" "jq is not installed"; done
+fi
+
+echo
+echo "command memory: report fixes"
+
+if command -v jq >/dev/null 2>&1; then
+  fresh
+  mkdir -p "$WORK/all" "$WORK/hm" "$WORK/pc/.claude"
+  for i in 1 2 3; do
+    printf '%s\tall\tnpm test\t90000\tok\n' "$(date +%s)" >> "$CLAUDE_TIMESTAMP_COMMANDS"
+    printf '%s\tother\tmake\t5000\tok\n' "$(date +%s)" >> "$CLAUDE_TIMESTAMP_COMMANDS"
+  done
+  out="$(cd "$WORK/all" && bash "$SCRIPTS/setup.sh" --commands 2>&1)"
+  contains "report fixes: a project named all reports its own commands" "npm test" "$out"
+  lacks "report fixes: and only its own" "make" "$out"
+  rf_err="$(printf '{"session_id":"rf","source":"startup","cwd":"%s"}' "$WORK/all" | bash "$SCRIPTS/session-start.sh" 2>&1 >/dev/null)"
+  is "report fixes: its session start writes nothing to stderr" "" "$rf_err"
+  contains "report fixes: and names its slow command" "Usually slow in this project: npm test" \
+    "$(printf '{"session_id":"rf","source":"startup","cwd":"%s"}' "$WORK/all" | bash "$SCRIPTS/session-start.sh" | jq -r '.hookSpecificOutput.additionalContext // ""')"
+  out="$(bash "$SCRIPTS/setup.sh" --commands --project=all 2>&1)"
+  contains "report fixes: --project=all still lists every project" "make" "$out"
+  out="$(bash "$SCRIPTS/setup.sh" --commands --stats 2>&1)"; rc=$?
+  is "report fixes: --commands with --stats is refused" "2" "$rc"
+  contains "report fixes: and says to pick one" "Pick one report" "$out"
+  is "report fixes: --project=all says so in JSON" "null true" \
+    "$(bash "$SCRIPTS/setup.sh" --commands --project=all --json | jq -r '"\(.project) \(.all)"')"
+  is "report fixes: a project named all is a name in JSON" "all false" \
+    "$(cd "$WORK/all" && bash "$SCRIPTS/setup.sh" --commands --json | jq -r '"\(.project) \(.all)"')"
+  out="$(bash "$SCRIPTS/setup.sh" --commands --session 2>&1)"; rc=$?
+  is "report fixes: --commands with --session is refused" "2" "$rc"
+  out="$(bash "$SCRIPTS/setup.sh" --commands --turns 2>&1)"; rc=$?
+  is "report fixes: --commands with --turns is refused" "2" "$rc"
+  out="$(cd "$WORK/hm" && HOME="$WORK/hm" bash "$SCRIPTS/setup.sh" --commands 2>&1)"
+  contains "report fixes: outside a project it says what to pass" "--project=NAME or --project=all" "$out"
+  printf 'COMMAND_MEMORY=off\n' > "$WORK/pc/.claude/claude-timestamp.conf"
+  out="$(cd "$WORK/pc" && env -u CLAUDE_TIMESTAMP_CONFIG HOME="$WORK/hm" bash "$SCRIPTS/setup.sh" --commands 2>&1)"
+  contains "report fixes: a project's own COMMAND_MEMORY=off is shown" "COMMAND_MEMORY is off" "$out"
+  contains "report fixes: --doctor says whether the memory file can be written" "runs recorded, writable" \
+    "$(bash "$SCRIPTS/setup.sh" --doctor 2>&1)"
+  fresh
+  for i in 1 2 3; do
+    printf '%s\tcols\tbash spec/a-very-long-script-name-for-alignment.sh\t240000\tok\n' "$(date +%s)" >> "$CLAUDE_TIMESTAMP_COMMANDS"
+    printf '%s\tcols\tmake\t240000\tok\n' "$(date +%s)" >> "$CLAUDE_TIMESTAMP_COMMANDS"
+  done
+  is "report fixes: columns line up under a long key" "1" \
+    "$(bash "$SCRIPTS/setup.sh" --commands --project=cols | awk '/4m00s/ { print index($0, "4m00s") }' | sort -u | wc -l | tr -d ' ')"
+else
+  for rf_label in "named all" "only own" "stderr" "note" "project all" "stats refused" "pick one" \
+                  "json all mode" "json all name" "session refused" \
+                  "turns refused" "outside project" "project config" "doctor" "columns"; do
+    skip "report fixes: $rf_label" "jq is not installed"
   done
 fi
 

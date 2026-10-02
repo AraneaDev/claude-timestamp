@@ -36,7 +36,7 @@ that what you knew before the gap may be stale. Before building on it, check
 what could have moved: the branch and `git status`, running servers, open
 pull requests and CI runs, and files the user may have edited meanwhile.
 
-**`Conversation compacted. Session started 09:12:05 (3h04m ago), 41 turns so far, 1h02m of it waiting. Longest turns: 10:37:21 (22m04s).`**
+**`Conversation compacted. Session started 09:12:05 (3h04m ago), 41 turns so far, 1h02m of it waiting. Longest turns: 10:37:21 (22m04s), 14:05:10 (15m30s).`**
 arrives after a compaction. The summary you are working from has no clock;
 this line is the measured timeline. Use it, or `--turns`, when the user asks
 what happened when, rather than reconstructing times from the summary.
@@ -91,9 +91,9 @@ bash "$setup" --session --json
 ```
 
 Each turn has its start, its length, how many turn-length reminders it
-produced, and whether it ended normally or was interrupted. With
-`TOOL_TIMING` on it also has the number of tool calls and the tool that took
-most of it.
+produced, and whether it ended normally, was interrupted or ended in an API
+error. With `TOOL_TIMING` on it also has the number of tool calls and the
+tool that took most of it.
 
 In both reports, **waiting** is the time the user spent waiting for your
 replies, from each prompt to its answer. **Away** is the breaks between one

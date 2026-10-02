@@ -53,6 +53,9 @@ ct_load_config "$cwd"
 # left the flag reading "on" and the tool log still growing.
 if state_file="$(ct_state_file "$session_id")"; then
   ct_stage_flag "$session_id" "enabled"    "$CT_ENABLED"
+  # The tool timing the previous turn ran under, read before it is
+  # re-staged: the turn reconciled below is recorded with it.
+  ct_read_flag_var "$session_id" "tooltiming"; prev_timing="$_CT_FLAG"
   ct_stage_flag "$session_id" "tooltiming" "$CT_TOOL_TIMING"
 
   # The notes the tool hook may send the model, resolved here against every
@@ -73,7 +76,8 @@ if state_file="$(ct_state_file "$session_id")"; then
   ct_stage_flag "$session_id" "subagents" "$CT_SUBAGENTS"
 
   # Duration memory needs to know the project, and the tool hook has no cwd.
-  # Resolved once per prompt; ct_project_name forks nothing.
+  # Resolved once per prompt, at the cost of one subshell; ct_project_name
+  # itself runs no external command.
   cmdmem="off"
   if [ "$CT_ENABLED" = "on" ] && [ "$CT_COMMAND_MEMORY" = "on" ]; then
     cmdmem="on"
@@ -108,7 +112,7 @@ if state_file="$(ct_state_file "$session_id")"; then
   # is what an interrupt looks like from here. It contributes the part of
   # itself that was observed: up to the last message drawn on screen. This has
   # to happen before the new turn is opened, or the evidence is gone.
-  ct_turn_close "$session_id" "$(ct_read_counter "${state_file}.last")" interrupted
+  ct_turn_close "$session_id" "$(ct_read_counter "${state_file}.last")" interrupted "${prev_timing:-}"
   ct_record_away "$session_id" "$now"
   ct_turn_open "$session_id" "$now"
 

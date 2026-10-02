@@ -25,7 +25,11 @@
 #
 # A string rather than a file so post-tool-use.sh can prepend it to the one jq
 # call it already makes. Written without regex builtins, which a jq built
-# without oniguruma lacks; 34 and 39 are the double and single quote.
+# without oniguruma lacks; 34 and 39 are the double and single quote, and
+# 40, 41, 123 and 125 the parentheses and braces of a subshell or a group,
+# blanked outside quotes so the command inside them is what gets keyed. After
+# a $ (36) they open ${...} or $(...) instead, which is skipped like a quote:
+# it belongs to the word it sits in, so NODE_ENV=${ENV} stays one prefix.
 #
 #   first line only (heredocs) -> quoted text blanked -> last segment of
 #   && || ; -> first segment of | -> leading VAR=x, env, time, sudo, nice,
@@ -40,10 +44,13 @@
 # shellcheck disable=SC2016,SC2034  # jq source, not shell; read by the hooks that source this file
 CT_JQ_CMDKEY='def ct_cmdkey:
   def unquote:
-    [foreach explode[] as $c ({q: null, e: null};
-      if .q != null then (if $c == .q then .q = null else . end) | .e = null
-      elif $c == 34 or $c == 39 then .q = $c | .e = 32
-      else .e = $c end;
+    [foreach explode[] as $c ({q: null, e: null, p: null};
+      (if .q != null then (if $c == .q then .q = null else . end) | .e = null
+       elif .p == 36 and $c == 40 then .q = 41 | .e = null
+       elif .p == 36 and $c == 123 then .q = 125 | .e = null
+       elif $c == 34 or $c == 39 then .q = $c | .e = 32
+       elif $c == 40 or $c == 41 or $c == 123 or $c == 125 then .e = 32
+       else .e = $c end) | .p = $c;
       .e // empty)] | implode;
   def splitall($seps): reduce $seps[] as $s ([.]; (map(split($s)) | add) // []);
   def words: split(" ") | map(select(length > 0));
@@ -66,7 +73,7 @@ CT_JQ_CMDKEY='def ct_cmdkey:
     | ((split("|") | .[0]) // "") | words | .[0:40] | strip
     | if length == 0 then ""
       else (.[0] | split("/") | last) as $prog
-        | if ($prog | plain | not) then ""
+        | if ($prog | plain | not) or ($prog | startswith("-")) then ""
           elif $prog == "echo" or $prog == "printf" then $prog
           else ([$prog] + (.[1:3] | take)) | join(" ") | .[0:60] end
       end
@@ -473,19 +480,24 @@ ct_turn_tool_summary() {
 
 # Append a closed turn to the session's timeline, <state>.turnlog. Called from
 # ct_close_turn only, after .closed is written, so a turn is recorded once.
-#   $1 state file   $2 start   $3 end   $4 stop|interrupted
+#   $1 state file   $2 start   $3 end   $4 stop|interrupted|error
+#   $5 the tool timing in force during the turn (optional)
 #
 # Read before the next ct_turn_open, which is the only thing that clears .hb;
 # the per-turn tool log is cleared by the prompt hook after the close, too.
-# Whether tool timing was on comes from the flag the prompt hook staged, so
-# "no calls" (0) and "not measured" (-) stay distinguishable.
+# Whether tool timing was on comes from $5 or, without it, from the flag the
+# prompt hook staged, so "no calls" (0) and "not measured" (-) stay
+# distinguishable.
 ct_append_turn() {
-  local base="${1:-}" started="${2:-0}" ended="${3:-0}" how="${4:-stop}" n hb timing="" tools
+  local base="${1:-}" started="${2:-0}" ended="${3:-0}" how="${4:-stop}" timing="${5:-}" n hb tools
   [ -n "$base" ] || return 0
-  case "$how" in stop|interrupted) ;; *) how="stop" ;; esac
+  case "$how" in stop|interrupted|error) ;; *) how="stop" ;; esac
   n="$(ct_read_counter "${base}.turns")"
   hb="$(ct_read_counter "${base}.hb")"
-  if [ -r "${base}.tooltiming" ]; then
+  # The caller may know the tool timing that was in force during the turn,
+  # which is not always what is staged now: the prompt hook re-stages it
+  # before it reconciles the turn it interrupted.
+  if [ -z "$timing" ] && [ -r "${base}.tooltiming" ]; then
     IFS= read -r timing < "${base}.tooltiming" 2>/dev/null || :
   fi
   tools=$'-\t-\t-'
@@ -514,7 +526,7 @@ ct_append_turn() {
 # while a prompt reconciling a turn that was interrupted only knows when its
 # last message was drawn.
 ct_close_turn() {
-  local state_file="${1:-}" ended="${2:-0}" how="${3:-stop}" started
+  local state_file="${1:-}" ended="${2:-0}" how="${3:-stop}" timing="${4:-}" started
   [ -n "$state_file" ] || return 0
   [ -r "$state_file" ] || return 0
   [ -e "${state_file}.closed" ] && return 0
@@ -540,7 +552,7 @@ ct_close_turn() {
     ended="$started"
   fi
   printf '%s' "$ended" > "${state_file}.closed"
-  ct_append_turn "$state_file" "$started" "$ended" "$how"
+  ct_append_turn "$state_file" "$started" "$ended" "$how" "$timing"
   return 0
 }
 
@@ -590,10 +602,10 @@ ct_turn_open() {
 # layout. Idempotent: a hook can cause the model to run again, so a turn seeing
 # two closes is a case to survive rather than one to assume away.
 ct_turn_close() {
-  local sid="${1:-}" ended="${2:-0}" how="${3:-stop}" base
+  local sid="${1:-}" ended="${2:-0}" how="${3:-stop}" timing="${4:-}" base
   ct_state_file_var "$sid" || return 0
   base="$_CT_STATE_FILE"
-  ct_close_turn "$base" "$ended" "$how"
+  ct_close_turn "$base" "$ended" "$how" "$timing"
   return 0
 }
 
@@ -895,17 +907,26 @@ ct_prune_commands() {
 }
 
 # Per command in one project, over its last 20 runs: key, runs, median ms,
-# last ms and failures, tab-separated, slowest median first. "all" lists every project, with the
-# project as an extra first column. The median of an even count is the mean of
-# the middle two, rounded down. Lines that are not whole are skipped.
+# last ms and failures, tab-separated, slowest median first.
+#   $1 the memory file   $2 project   $3 "all" to list every project instead,
+#   with the project as an extra first column
+# The median of an even count is the mean of the middle two, rounded down.
+# Rows that pruning would drop are skipped here too.
 ct_command_stats() {
-  local file="${1:-}" project="${2:-}" col=3
+  local file="${1:-}" project="${2:-}" mode="${3:-}" col=3
   [ -r "$file" ] || return 0
-  [ -n "$project" ] || return 0
-  [ "$project" = "all" ] && col=4
-  awk -F '\t' -v want="$project" '
-    NF == 5 && $4 ~ /^[0-9]+$/ && (want == "all" || $2 == want) {
-      id = (want == "all") ? $2 "\t" $3 : $3
+  # "all" is a mode, never a project name, so a directory called all is
+  # still just a project.
+  if [ "$mode" = "all" ]; then
+    col=4
+  else
+    mode=""
+    [ -n "$project" ] || return 0
+  fi
+  awk -F '\t' -v want="$project" -v mode="$mode" '
+    NF == 5 && $1 ~ /^[0-9]+$/ && $4 ~ /^[0-9]+$/ && ($5 == "ok" || $5 == "fail") \
+      && (mode == "all" || $2 == want) {
+      id = (mode == "all") ? $2 "\t" $3 : $3
       c = ++n[id]; v[id, c] = $4; bad[id, c] = ($5 == "fail"); last[id] = $4
     }
     END {
@@ -936,6 +957,8 @@ ct_slow_commands_note() {
     return 0
   fi
   while IFS=$'\t' read -r key runs med _; do
+    case "$runs" in ''|*[!0-9]*) continue ;; esac
+    case "$med" in ''|*[!0-9]*) continue ;; esac
     [ "$runs" -ge 3 ] || continue
     [ $(( med / 1000 )) -ge "$after" ] || continue
     list="${list:+$list, }$key ~$(ct_format_duration $(( med / 1000 ))) ($runs runs)"
@@ -954,6 +977,8 @@ ct_slow_commands_note() {
 ct_command_usual() {
   local file="${1:-}" project="${2:-}" want="${3:-}" key runs med
   [ -n "$want" ] || return 0
+  # Outside any project there is nothing to compare with.
+  case "$project" in ''|-) return 0 ;; esac
   while IFS=$'\t' read -r key runs med _; do
     if [ "$key" = "$want" ] && [ "$runs" -ge 3 ]; then
       printf '%s' "$(( med / 1000 ))"

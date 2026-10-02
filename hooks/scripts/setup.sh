@@ -39,6 +39,9 @@ ZONEINFO="${CLAUDE_TIMESTAMP_ZONEINFO:-/usr/share/zoneinfo}"
 CT_STATS_SINCE=""
 CT_STATS_SINCE_DAYS=""
 CT_STATS_PROJECT=""
+# Set by --commands --project=all: list every project rather than one named
+# "all", so a directory that really is called all stays reachable.
+CT_COMMANDS_ALL=0
 
 # Set by --json: --session, --turns and --commands print JSON instead of a table.
 CT_JSON=0
@@ -102,8 +105,9 @@ Flags
                               call rather than per message; off, 0, 0 and off
                               together bring back the free path.
   --inject-context=true|false Tell Claude the time each prompt was sent. false
-                              also silences the heartbeat, slow tool,
-                              resumption and time-awareness pointer notes.
+                              also silences the heartbeat, slow tool, slow
+                              commands, resumption and time-awareness pointer
+                              notes.
   --heartbeat-after=SECONDS   Tell Claude how long a turn has run, every this
                               many seconds (0 disables).
   --slow-tool-after=SECONDS   Tell Claude when one tool call took this long
@@ -809,14 +813,26 @@ session_report() {
 # end in local ISO 8601, and the open turn last. Lines that are not whole are
 # skipped; a torn append must not become a turn.
 _ct_turn_rows() {
-  local base="$1" now="$2" n start end secs tools tsecs slow hb how iso='%Y-%m-%dT%H:%M:%S%z'
+  local base="$1" now="$2" want_iso="${3:-1}" n start end secs tools tsecs slow hb how f whole
+  local iso='%Y-%m-%dT%H:%M:%S%z' start_iso="-" end_iso="-"
   if [ -r "${base}.turnlog" ]; then
     while IFS=$'\t' read -r n start end secs tools tsecs slow hb how; do
-      case "$n$start$end$secs$hb" in ''|*[!0-9]*) continue ;; esac
-      case "$how" in stop|interrupted) ;; *) continue ;; esac
+      # Each number checked on its own: a joined check passes a line with an
+      # empty field as long as the others are digits.
+      whole=1
+      for f in "$n" "$start" "$end" "$secs" "$hb"; do
+        case "$f" in ''|*[!0-9]*) whole=0 ;; esac
+      done
+      [ "$whole" = "1" ] || continue
+      case "$how" in stop|interrupted|error) ;; *) continue ;; esac
+      # Only JSON prints the ISO times; the table would pay two `date`
+      # processes per row for nothing.
+      if [ "$want_iso" = "1" ]; then
+        start_iso="$(ct_format_epoch "$start" "$iso")"
+        end_iso="$(ct_format_epoch "$end" "$iso")"
+      fi
       printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$n" "$start" "$end" "$secs" \
-        "$tools" "$tsecs" "$slow" "$hb" "$how" \
-        "$(ct_format_epoch "$start" "$iso")" "$(ct_format_epoch "$end" "$iso")"
+        "$tools" "$tsecs" "$slow" "$hb" "$how" "$start_iso" "$end_iso"
     done < "${base}.turnlog"
   fi
   if [ ! -e "${base}.closed" ]; then
@@ -826,8 +842,10 @@ _ct_turn_rows() {
       # cannot have run for less than nothing.
       secs=$(( now - start ))
       if [ "$secs" -lt 0 ]; then secs=0; fi
+      start_iso="-"
+      [ "$want_iso" = "1" ] && start_iso="$(ct_format_epoch "$start" "$iso")"
       printf '%s\t%s\t-\t%s\t-\t-\t-\t%s\topen\t%s\t-\n' "$(ct_read_counter "${base}.turns")" "$start" \
-        "$secs" "$(ct_read_counter "${base}.hb")" "$(ct_format_epoch "$start" "$iso")"
+        "$secs" "$(ct_read_counter "${base}.hb")" "$start_iso"
     fi
   fi
   return 0
@@ -846,7 +864,7 @@ _ct_turns_json() {
 }
 
 _ct_session_json() {
-  local base="$1" now="$2" timing="$3" turns current="null" start secs slowest=""
+  local base="$1" now="$2" timing="$3" turns current="null" start secs slowest
   command -v jq >/dev/null 2>&1 || { echo "--json needs jq." >&2; return 2; }
   turns="$(_ct_turns_json "$base" "$now")" || turns='[]'
   if [ ! -e "${base}.closed" ]; then
@@ -857,17 +875,22 @@ _ct_session_json() {
       current="{\"start\":$start,\"secs\":$secs}"
     fi
   fi
-  [ "$timing" = "on" ] && slowest="$(ct_slowest_tools "${base}.tools" 5)"
+  slowest="null"
+  if [ "$timing" = "on" ]; then
+    slowest="$(ct_slowest_tools_tsv "${base}.tools" 5 | jq -R -s -c '
+      [split("\n")[] | select(length > 0) | split("\t")
+       | {tool: .[1], secs: (((.[0] | tonumber) * 10 + 0.5 | floor) / 10), calls: (.[2] | tonumber)}]')" || slowest="[]"
+  fi
   jq -n --argjson start "$_CT_START" --arg start_local "$(ct_format_epoch "$_CT_START" '%Y-%m-%dT%H:%M:%S%z' 2>/dev/null)" \
      --argjson now "$now" --argjson turn_count "$_CT_TURNS" --argjson waiting "$_CT_WAIT" \
      --argjson away "$_CT_IDLE" --argjson current "$current" --arg timing "$timing" \
-     --arg slowest "$slowest" --argjson turns "$turns" '
+     --argjson slowest "$slowest" --argjson turns "$turns" '
     {started: (if $start > 0 then $start else null end),
      started_local: (if $start > 0 then $start_local else null end),
      elapsed: (if $start > 0 then ([$now - $start, 0] | max) else 0 end),
      turn_count: $turn_count, waiting: $waiting, away: $away,
      current_turn: $current, tool_timing: ($timing == "on"),
-     slowest_tools: (if $slowest == "" then null else $slowest end),
+     slowest_tools: $slowest,
      turns: $turns}'
 }
 
@@ -902,7 +925,7 @@ turns_report() {
     fi
     printf '  %4s  %-10s %-12s %-6s %-16s %s\n' "$n" "$(ct_format_epoch "$start" "$_CT_R_FMT")" \
       "$took" "$tools" "$slowest" "$how"
-  done < <(_ct_turn_rows "$_CT_R_BASE" "$now")
+  done < <(_ct_turn_rows "$_CT_R_BASE" "$now" 0)
   return 0
 }
 
@@ -910,22 +933,40 @@ turns_report() {
 # last and the failures, for this directory's project unless --project names
 # another or "all".
 commands_report() {
-  local file project rows key runs med last failed proj
-  ct_load_config
+  local file project mode="" rows key runs med last failed proj kw=7 pw=7
+  ct_load_config "$PWD"
   file="$(ct_commands_path)"
-  project="${CT_STATS_PROJECT:-$(ct_project_name "$PWD")}"
-  rows="$(ct_command_stats "$file" "$project")"
+  if [ "$CT_COMMANDS_ALL" = "1" ]; then
+    mode="all"
+    project=""
+  else
+    project="${CT_STATS_PROJECT:-$(ct_project_name "$PWD")}"
+  fi
+  # Commands are kept per project, so outside one there is nothing to show
+  # unless a project is named.
+  if [ -z "$mode" ] && { [ -z "$project" ] || [ "$project" = "-" ]; }; then
+    if [ "$CT_JSON" = "1" ]; then
+      command -v jq >/dev/null 2>&1 || { echo "--json needs jq." >&2; return 2; }
+      jq -n '{project: null, all: false, commands: []}'
+      return $?
+    fi
+    echo "claude-timestamp keeps commands per project, and this directory is not in one."
+    echo "Pass --project=NAME or --project=all."
+    return 0
+  fi
+  rows="$(ct_command_stats "$file" "$project" "$mode")"
   if [ "$CT_JSON" = "1" ]; then
     command -v jq >/dev/null 2>&1 || { echo "--json needs jq." >&2; return 2; }
-    printf '%s\n' "$rows" | jq -R -s --arg project "$project" '
-      {project: $project,
+    # project is only ever a name; the all-projects mode says so in all.
+    printf '%s\n' "$rows" | jq -R -s --arg project "$project" --arg mode "$mode" '
+      {project: (if $mode == "all" then null else $project end), all: ($mode == "all"),
        commands: [split("\n")[] | select(length > 0) | split("\t")
-         | if $project == "all"
+         | if $mode == "all"
            then {project: .[0], key: .[1], runs: (.[2] | tonumber), median_ms: (.[3] | tonumber), last_ms: (.[4] | tonumber), failed: (.[5] | tonumber)}
            else {key: .[0], runs: (.[1] | tonumber), median_ms: (.[2] | tonumber), last_ms: (.[3] | tonumber), failed: (.[4] | tonumber)} end]}'
     return $?
   fi
-  if [ "$project" = "all" ]; then
+  if [ "$mode" = "all" ]; then
     echo "claude-timestamp commands, all projects"
   else
     echo "claude-timestamp commands in $project"
@@ -939,16 +980,25 @@ commands_report() {
     echo "  Nothing recorded yet."
     return 0
   fi
-  if [ "$project" = "all" ]; then
-    printf '  %-20s %-30s %5s %9s %9s %7s\n' "project" "command" "runs" "median" "last" "failed"
+  # Columns as wide as their longest entry, so a long key does not push the
+  # figures on its row out of line with the others.
+  if [ "$mode" = "all" ]; then
+    while IFS=$'\t' read -r proj key _; do
+      [ "${#proj}" -gt "$pw" ] && pw="${#proj}"
+      [ "${#key}" -gt "$kw" ] && kw="${#key}"
+    done <<< "$rows"
+    printf "  %-${pw}s  %-${kw}s %5s %9s %9s %7s\n" "project" "command" "runs" "median" "last" "failed"
     while IFS=$'\t' read -r proj key runs med last failed; do
-      printf '  %-20s %-30s %5s %9s %9s %7s\n' "$proj" "$key" "$runs" \
+      printf "  %-${pw}s  %-${kw}s %5s %9s %9s %7s\n" "$proj" "$key" "$runs" \
         "$(ct_format_duration $(( med / 1000 )))" "$(ct_format_duration $(( last / 1000 )))" "$failed"
     done <<< "$rows"
   else
-    printf '  %-30s %5s %9s %9s %7s\n' "command" "runs" "median" "last" "failed"
+    while IFS=$'\t' read -r key _; do
+      [ "${#key}" -gt "$kw" ] && kw="${#key}"
+    done <<< "$rows"
+    printf "  %-${kw}s %5s %9s %9s %7s\n" "command" "runs" "median" "last" "failed"
     while IFS=$'\t' read -r key runs med last failed; do
-      printf '  %-30s %5s %9s %9s %7s\n' "$key" "$runs" \
+      printf "  %-${kw}s %5s %9s %9s %7s\n" "$key" "$runs" \
         "$(ct_format_duration $(( med / 1000 )))" "$(ct_format_duration $(( last / 1000 )))" "$failed"
     done <<< "$rows"
   fi
@@ -1079,7 +1129,16 @@ doctor() {
   echo "  heartbeat       $([ "$CT_HEARTBEAT_AFTER" -gt 0 ] 2>/dev/null && echo "every ${CT_HEARTBEAT_AFTER}s" || echo "off")"
   echo "  slow tool note  $([ "$CT_SLOW_TOOL_AFTER" -gt 0 ] 2>/dev/null && echo "after ${CT_SLOW_TOOL_AFTER}s" || echo "off")"
   echo "  resume note     $CT_RESUME_NOTE"
-  echo "  command memory  $CT_COMMAND_MEMORY, $( [ -r "$(ct_commands_path)" ] && wc -l < "$(ct_commands_path)" | tr -d ' ' || echo 0) runs recorded"
+  local cm_file cm_dir cm_runs=0 cm_write="not writable"
+  cm_file="$(ct_commands_path)"
+  cm_dir="$(dirname "$cm_file")"
+  [ -r "$cm_file" ] && cm_runs="$(wc -l < "$cm_file" | tr -d ' ')"
+  if [ -e "$cm_file" ]; then
+    [ -w "$cm_file" ] && cm_write="writable"
+  elif [ -d "$cm_dir" ] && [ -w "$cm_dir" ]; then
+    cm_write="writable"
+  fi
+  echo "  command memory  $CT_COMMAND_MEMORY, $cm_runs runs recorded, $cm_write"
   echo
 
   echo "State"
@@ -1236,7 +1295,8 @@ HISTORY_LIMIT=$CT_HISTORY_LIMIT
 PROJECTS=$CT_PROJECTS
 
 # Tell Claude the local time each prompt was sent. false also silences the
-# heartbeat, slow tool, resumption and time-awareness pointer notes.
+# heartbeat, slow tool, slow commands, resumption and time-awareness pointer
+# notes.
 INJECT_CONTEXT=$CT_INJECT_CONTEXT
 
 # Tell Claude how long the open turn has run, every this many seconds. 0 disables.
@@ -1939,6 +1999,14 @@ main() {
   # filters the command report instead, and --since has nothing to filter.
   if [ "$saw_commands" = "1" ]; then
     action="commands"
+    if [ "$saw_stats_bare" = "1" ] || [ "$saw_session" = "1" ] || [ "$saw_turns" = "1" ]; then
+      echo "Pick one report: --commands, --stats, --session or --turns." >&2
+      exit 2
+    fi
+    if [ "$CT_STATS_PROJECT" = "all" ]; then
+      CT_COMMANDS_ALL=1
+      CT_STATS_PROJECT=""
+    fi
     if [ "$saw_since_flag" = "1" ]; then
       echo "--since filters --stats; --commands keeps the last 20 runs of each command." >&2
       exit 2
@@ -1949,7 +2017,7 @@ main() {
     case "$CT_STATS_PROJECT" in
       on|off)
         echo "--project=$CT_STATS_PROJECT looks like a typo for --projects=$CT_STATS_PROJECT." >&2
-        echo "--project=NAME filters --stats by name; --projects=on|off is the setting" >&2
+        echo "--project=NAME filters a report by name; --projects=on|off is the setting" >&2
         echo "that turns recording project names on or off. No project is named '$CT_STATS_PROJECT'." >&2
         exit 2
         ;;
