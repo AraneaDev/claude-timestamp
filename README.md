@@ -192,6 +192,26 @@ sessions on the web read hooks from the repository and from managed settings
 rather than from your `~/.claude`, so a personal install does not apply there
 either.
 
+It also runs in Codex. What works depends on the client that runs the plugin,
+not on the model: every model gets the same features in Claude Code, and the
+same is true in Codex. Checked against Claude Code and Codex CLI 0.154.0.
+
+| Feature | Claude Code | Codex | Note |
+| --- | :---: | :---: | --- |
+| Timestamp marker on each message | ✓ | ✗ | Codex has no event for drawing on a message |
+| Idle divider and slow-turn colour | ✓ | ✗ | Drawn by the same marker |
+| Prompt time told to Claude | ✓ | ✓ | |
+| Turn-length and slow-tool notes | ✓ | ✓ | Codex timings are whole seconds |
+| Resumption note, for a project or a conversation | ✓ | ✓ | |
+| Note after a compaction | ✓ | ✓ | |
+| Command memory and the usually-slow note | ✓ | ✓ | |
+| Turn timeline, `--turns` | ✓ | ✓ | |
+| A turn that ends in an API error recorded as `error` | ✓ | ✗ | Codex has no `StopFailure` event |
+| Session summary at exit | ✓ | ✓ | Recorded in the history; `codex exec` does not display it |
+| History and `--stats` | ✓ | ✓ | |
+| `time-awareness` skill | ✓ | ✓ | |
+| `/timestamps` command | ✓ | ✗ | Codex uses the `timestamps` skill or `setup.sh` |
+
 ### Codex compatibility
 
 The repository also carries the universal `plugin.json` and Codex
@@ -222,11 +242,9 @@ plugin package and its Codex manifest, but is not itself a marketplace root.
 If you maintain or receive a Codex marketplace entry for Aranea, add that
 marketplace first and then use the commands above.
 
-Codex has no Claude Code `MessageDisplay` event, so it cannot receive the
-per-message visual marker. Its model-facing timing context and session summary
-still work. Codex tool timing is measured from `PreToolUse` to `PostToolUse`
-when the payload does not include Claude Code's `duration_ms`, so those
-measurements have whole-second precision and include the local hook lifecycle.
+Codex tool timing is measured from `PreToolUse` to `PostToolUse`, because its
+payload does not include Claude Code's `duration_ms`. Those measurements have
+whole-second precision and include the local hook lifecycle.
 
 The `time-awareness` and `timestamps` skills are bundled for Codex. When using
 the repository directly, Codex also reads the root [AGENTS.md](AGENTS.md), and
