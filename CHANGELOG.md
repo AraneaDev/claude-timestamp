@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.34](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.33...v0.0.34) (2026-10-02)
+
+
+### Fixes
+
+* close the minor findings from the timeline and command memory reviews ([#92](https://github.com/AraneaDev/claude-timestamp/issues/92)) ([2498f4a](https://github.com/AraneaDev/claude-timestamp/commit/2498f4a85f1c0fd6c4f001c792139fd9c14e1db5))
+
 ## [0.0.33](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.32...v0.0.33) (2026-10-01)
 
 
