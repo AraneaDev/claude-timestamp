@@ -93,10 +93,14 @@ It needs `bash` and `jq`.
 
 **Claude Code**
 
-```bash
-claude plugin marketplace add https://aranea-development.nl/plugins/marketplace.json
+<!-- aranea-install:start -->
+Install from the Aranea marketplace:
+
+```sh
+claude plugin marketplace add https://github.com/AraneaDev/aranea-marketplace
 claude plugin install claude-timestamp@aranea
 ```
+<!-- aranea-install:end -->
 
 Start a new session afterwards: hooks are bound when a session starts.
 
@@ -109,10 +113,7 @@ codex plugin add claude-timestamp@aranea
 
 Start a new session afterwards, and trust the plugin's hooks when Codex asks.
 
-<a name="if-the-install-fails-on-port-22"></a>
-For installing `jq`, Windows with WSL and a blocked SSH port, see
-[Install](docs/install.md); a blocked port 22 is under
-[If the install fails on port 22](docs/install.md#if-the-install-fails-on-port-22).
+For installing `jq` and for Windows with WSL, see [Install](docs/install.md).
 
 ## Works in
 
