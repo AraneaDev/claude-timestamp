@@ -23,7 +23,7 @@ Use the matching CLI flag for a requested change, for example:
 
 ```bash
 bash "$(git rev-parse --show-toplevel)/hooks/scripts/setup.sh" --tz=Europe/Amsterdam
-bash "$(git rev-parse --show-toplevel)/hooks/scripts/setup.sh" --format=short
+bash "$(git rev-parse --show-toplevel)/hooks/scripts/setup.sh" --display=short
 bash "$(git rev-parse --show-toplevel)/hooks/scripts/setup.sh" --color=none
 bash "$(git rev-parse --show-toplevel)/hooks/scripts/setup.sh" --tool-timing=on
 ```
