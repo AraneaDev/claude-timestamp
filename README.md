@@ -149,9 +149,11 @@ or a preset; it takes effect on the next message. Every setting, the marker's
 layout, colours and per-project settings are in
 [Configuration](docs/configuration.md).
 
+In Codex, use the bundled `timestamps` skill or `hooks/scripts/setup.sh` to change settings. The visual message marker remains specific to Claude Code.
+
 ## Documentation
 
-- [Install](docs/install.md): requirements, both clients, Windows, a blocked SSH port.
+- [Install](docs/install.md): requirements, both clients, Windows and WSL.
 - [Configuration](docs/configuration.md): `/timestamps`, the marker's layout, colours, every setting.
 - [What Claude is told](docs/agent-notes.md): every note the agent receives, and the skill.
 - [Reports and history](docs/reports.md): `--session`, `--turns`, `--commands`, `--stats`.
