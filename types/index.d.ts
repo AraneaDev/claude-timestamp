@@ -14,7 +14,7 @@ export type LiveCall = {
 
 declare module 'claude-code' {
   interface PluginState {
-    'claude-timestamp': {
+    'timestamps': {
       running: LiveCall[]
       /** epoch ms of the open main turn; null between turns */
       turnStartedAt: number | null

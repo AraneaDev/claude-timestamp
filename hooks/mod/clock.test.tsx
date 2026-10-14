@@ -48,7 +48,7 @@ const ON = { enabled: 'on', live: 'on', start: '1700000000' }
 // The clock as the footer shows it, beside a mode the engine already has.
 async function footer($: any): Promise<string> {
   const ui = await $.ui.mount({
-    plugin: 'claude-timestamp',
+    plugin: 'timestamps',
     surface: 'terminal',
     component: 'SessionMode',
     props: { modes: ['focus'] },

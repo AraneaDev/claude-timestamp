@@ -2,7 +2,7 @@
   "name": "aranea",
   "plugins": [
     {
-      "name": "claude-timestamp",
+      "name": "timestamps",
       "source": {
         "source": "local",
         "path": "./"

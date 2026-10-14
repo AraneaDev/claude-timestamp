@@ -9,7 +9,7 @@ has a setting of its own.
 
 | When | What Claude reads | Setting |
 | --- | --- | --- |
-| A session starts | `claude-timestamp reports turn length, slow tool calls, usually slow commands and resumed sessions in system reminders; the claude-timestamp:time-awareness skill explains them and can query session history.` | `INJECT_CONTEXT` |
+| A session starts | `claude-timestamp reports turn length, slow tool calls, usually slow commands and resumed sessions in system reminders; the timestamps:time-awareness skill explains them and can query session history.` | `INJECT_CONTEXT` |
 | Every prompt | `Message sent at local time 10:37:21 CEST, after a 3h break` | `INJECT_CONTEXT`, `CONTEXT_FORMAT` |
 | The first tool result after a turn passes 15 minutes, and every 15 after | `Turn running 15m02s (prompt sent 10:37:21); now 10:52:23 CEST.` | `HEARTBEAT_AFTER` |
 | One tool call takes a minute or more | `That Bash call took 2m14s.` or, for a command with a few earlier runs here, `That Bash call took 6m10s (usually 4m02s).` | `SLOW_TOOL_AFTER` |
