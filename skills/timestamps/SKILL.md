@@ -1,9 +1,9 @@
 ---
 name: timestamps
-description: Configure claude-timestamp when the user asks to change timestamps, timezone, clock format, marker appearance, elapsed time, tool timing, summaries, history, or model-facing time notes.
+description: Configure Timestamps when the user asks to change timestamps, timezone, clock format, marker appearance, elapsed time, tool timing, summaries, history, or model-facing time notes.
 ---
 
-# Configure claude-timestamp
+# Configure Timestamps
 
 Use the repository's CLI so configuration is parsed and validated by the same
 code used by the hooks. Run commands from the Git root, or resolve the root

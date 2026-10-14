@@ -1,6 +1,6 @@
 # Install
 
-Part of the claude-timestamp documentation. Start at the [README](../README.md).
+Part of the Timestamps documentation. Start at the [README](../README.md).
 
 ## Requirements
 

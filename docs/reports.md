@@ -1,6 +1,6 @@
 # Reports and history
 
-Part of the claude-timestamp documentation. Start at the [README](../README.md).
+Part of the Timestamps documentation. Start at the [README](../README.md).
 
 Ask Claude how long you've been at this, or how much of it was waiting, and it
 answers in the chat, no command needed. The `time-awareness` skill runs one of
