@@ -10,13 +10,13 @@ import { cmdKey } from './cmdkey.ts'
 import { formatDuration } from './format.ts'
 import { usualSeconds } from './usual.ts'
 
-export const running = atom({ plugin: 'claude-timestamp', key: 'running' } as const, [] as LiveCall[])
-export const turnStartedAt = atom({ plugin: 'claude-timestamp', key: 'turnStartedAt' } as const, null as number | null)
-export const lastTurnMs = atom({ plugin: 'claude-timestamp', key: 'lastTurnMs' } as const, null as number | null)
+export const running = atom({ plugin: 'timestamps', key: 'running' } as const, [] as LiveCall[])
+export const turnStartedAt = atom({ plugin: 'timestamps', key: 'turnStartedAt' } as const, null as number | null)
+export const lastTurnMs = atom({ plugin: 'timestamps', key: 'lastTurnMs' } as const, null as number | null)
 // What the footer label says; null draws none.
-export const clockText = atom({ plugin: 'claude-timestamp', key: 'clockText' } as const, null as string | null)
+export const clockText = atom({ plugin: 'timestamps', key: 'clockText' } as const, null as string | null)
 export const sessionStartedAt = atom(
-  { plugin: 'claude-timestamp', key: 'sessionStartedAt' } as const,
+  { plugin: 'timestamps', key: 'sessionStartedAt' } as const,
   null as number | null,
 )
 

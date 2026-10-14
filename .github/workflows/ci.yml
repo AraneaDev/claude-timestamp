@@ -238,14 +238,6 @@ jobs:
       - name: Install Claude Code (pinned)
         run: npm install -g @anthropic-ai/claude-code@2.1.296
       - name: Validate the plugin
-        # The plugin's name predates the CLI reserving "claude-" names for
-        # Anthropic's own; that one manifest error is expected and tolerated,
-        # every other error fails the job.
-        run: |
-          claude plugin validate . --json > validate.json || true
-          jq '[.. | objects | select(has("errors")) | .errors[]]' validate.json
-          jq -e '[.. | objects | select(has("errors")) | .errors[]
-                  | select((.path == "name" and (.message | test("reserved"))) | not)]
-                 | length == 0' validate.json
+        run: claude plugin validate .
       - name: Test the hooks module
         run: claude plugin test .

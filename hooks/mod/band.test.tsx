@@ -84,7 +84,7 @@ function world(on: On, flags: Record<string, string> = {}, extraTsv: string[] = 
 // The pill under a running Bash call, as the terminal draws it.
 async function pillText($: any, id: string) {
   const ui = await $.ui.mount({
-    plugin: 'claude-timestamp',
+    plugin: 'timestamps',
     surface: 'terminal',
     component: 'ToolProgress',
     props: { tool_use_id: id, kind: 'background_hint', hint: '(ctrl+b to run in background)' },
@@ -95,7 +95,7 @@ async function pillText($: any, id: string) {
 }
 
 async function bandText($: any, surface: (typeof SURFACES)[number]) {
-  const ui = await $.ui.mount({ plugin: 'claude-timestamp', surface, ...BAND })
+  const ui = await $.ui.mount({ plugin: 'timestamps', surface, ...BAND })
   const mine = await ui.find({ type: 'Text', text: / · / })
   await ui.unmount()
   return mine?.text
@@ -165,7 +165,7 @@ test('LIVE=off: the engine band is drawn and the tool still runs', async ($, on)
   const { clock, finish } = world(on, { live: 'off' })
   const call = $.tool.call({ tool: 'Bash', command: 'npm test', tool_use_id: 'a' } as never)
   await clock.advance(90_000)
-  const ui = await $.ui.mount({ plugin: 'claude-timestamp', surface: 'terminal', ...BAND })
+  const ui = await $.ui.mount({ plugin: 'timestamps', surface: 'terminal', ...BAND })
   expect((await ui.find({ type: 'Text', text: /engine band/ }))?.text).toBe('engine band')
   await ui.unmount()
   finish('a')

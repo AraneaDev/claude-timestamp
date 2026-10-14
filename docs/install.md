@@ -21,11 +21,28 @@ are separate installs](#windows-wsl-and-the-desktop-app-are-separate-installs).
 
 ```bash
 claude plugin marketplace add https://github.com/AraneaDev/aranea-marketplace
-claude plugin install claude-timestamp@aranea
+claude plugin install timestamps@aranea
 ```
 
 Hooks are bound when a session starts, so start a new session before markers
 appear. An already-running session will not pick the plugin up.
+
+### Upgrading from `claude-timestamp`
+
+Up to 0.0.37 the plugin was named `claude-timestamp`. Claude Code reserves
+names starting with `claude-` for Anthropic's own plugins, so from 0.0.38 it
+is `timestamps`. Remove the old one before installing the new one, or both
+run and every marker is drawn twice:
+
+```bash
+claude plugin uninstall claude-timestamp@aranea
+claude plugin marketplace update aranea
+claude plugin install timestamps@aranea
+```
+
+Settings, history and command memory stay where they are and carry over. In
+Codex, the same with `codex plugin remove claude-timestamp@aranea` and
+`codex plugin add timestamps@aranea`.
 
 ## Codex compatibility
 
@@ -40,7 +57,7 @@ documentation](https://learn.chatgpt.com/docs/hooks).
 
 ```bash
 codex plugin marketplace add AraneaDev/claude-timestamp
-codex plugin add claude-timestamp@aranea
+codex plugin add timestamps@aranea
 ```
 
 Start a new session afterwards. Codex asks you to review and trust the plugin's
@@ -83,7 +100,7 @@ In WSL, on Debian or Ubuntu:
 ```bash
 sudo apt-get install jq
 claude plugin marketplace add https://github.com/AraneaDev/aranea-marketplace
-claude plugin install claude-timestamp@aranea
+claude plugin install timestamps@aranea
 ```
 
 On Windows:
@@ -91,7 +108,7 @@ On Windows:
 ```powershell
 winget install jqlang.jq
 claude plugin marketplace add https://github.com/AraneaDev/aranea-marketplace
-claude plugin install claude-timestamp@aranea
+claude plugin install timestamps@aranea
 ```
 
 The desktop app's plugin browser lists what your configured marketplaces
@@ -103,7 +120,7 @@ nothing else installed:
 
 ```text
 /plugin marketplace add https://github.com/AraneaDev/aranea-marketplace
-/plugin install claude-timestamp@aranea
+/plugin install timestamps@aranea
 ```
 
 Restart the desktop app after installing `jq`. It reads Windows user and system

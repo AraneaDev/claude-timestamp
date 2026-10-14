@@ -1063,7 +1063,7 @@ def shot_skill():
     try:
         raw = capture_pty(
             ["claude", "--plugin-dir", str(plugin), "--model", "haiku",
-             "--settings", json.dumps({"enabledPlugins": {"claude-timestamp@aranea": False}}),
+             "--settings", json.dumps({"enabledPlugins": {"timestamps@aranea": False}}),
              "--allowedTools", "Bash", "Skill"],
             keys=[
                 (6.0, "What is the capital of Portugal? One word, no punctuation."), (7.5, "\r"),

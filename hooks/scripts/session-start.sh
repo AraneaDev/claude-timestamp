@@ -217,6 +217,15 @@ if ct_tz_unhonoured; then
   _ct_add_note "claude-timestamp: this system has no timezone database, so ${CT_TZ} cannot be applied. Showing local time instead. Run /timestamps and choose \"local\" to silence this."
 fi
 
+# Up to 0.0.37 this plugin was named claude-timestamp. Installed under both
+# names, every hook runs twice and every marker is drawn twice; only this
+# copy knows the old name, so it is the one to say so. The list is Claude
+# Code's: a Codex session never reads it.
+installed="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/installed_plugins.json"
+if [ "${CT_CLIENT:-}" != codex ] && [ -r "$installed" ] && grep -q '"claude-timestamp@' "$installed"; then
+  _ct_add_note "claude-timestamp: the plugin is now named timestamps, and the old claude-timestamp is still installed, so every marker is drawn twice. Run: claude plugin uninstall claude-timestamp@aranea"
+fi
+
 # First run: there is no README in this repo by design, so the config command
 # has to introduce itself or nobody will ever know it exists.
 if [ ! -r "$(ct_config_path)" ]; then
@@ -249,9 +258,9 @@ if [ "$CT_INJECT_CONTEXT" != "false" ]; then
   # whole numbers on load, and `-eq` reads them as decimal, so "00" is 0 too.
   if [ "$CT_HEARTBEAT_AFTER" -eq 0 ] && [ "$CT_SLOW_TOOL_AFTER" -eq 0 ] \
      && [ "$CT_RESUME_NOTE" != "on" ]; then
-    context="The claude-timestamp:time-awareness skill can query session history."
+    context="The timestamps:time-awareness skill can query session history."
   else
-    context="${context:+$context }claude-timestamp reports turn length, slow tool calls, usually slow commands and resumed sessions in system reminders; the claude-timestamp:time-awareness skill explains them and can query session history."
+    context="${context:+$context }claude-timestamp reports turn length, slow tool calls, usually slow commands and resumed sessions in system reminders; the timestamps:time-awareness skill explains them and can query session history."
   fi
 fi
 

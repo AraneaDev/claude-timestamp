@@ -156,6 +156,9 @@ export CLAUDE_TIMESTAMP_HISTORY="$WORK/history.tsv"
 export CLAUDE_TIMESTAMP_COMMANDS="$WORK/commands.tsv"
 export CLAUDE_TIMESTAMP_FACTS="$WORK/facts.json"
 export CLAUDE_TIMESTAMP_DRAWN="$WORK/drawn"
+# Claude Code's own directory: session start reads its installed-plugin list,
+# and the developer's real one must never decide a test.
+export CLAUDE_CONFIG_DIR="$WORK/claude-home"
 
 source "$SCRIPTS/lib/config.sh"
 source "$SCRIPTS/lib/state.sh"
@@ -1528,6 +1531,21 @@ if command -v jq >/dev/null 2>&1; then
 
   CLAUDE_TIMESTAMP_CONFIG="$WORK/does-not-exist.conf" out="$(printf '{"session_id":"s"}' | bash "$SCRIPTS/session-start.sh")"
   contains "session-start points a new user at /timestamps" "/timestamps" "$out"
+
+  # Up to 0.0.37 the plugin was claude-timestamp: both installed run every hook
+  # twice, so the new one says so.
+  mkdir -p "$CLAUDE_CONFIG_DIR/plugins"
+  printf '{"version":2,"plugins":{"claude-timestamp@aranea":[{}],"timestamps@aranea":[{}]}}\n' \
+    > "$CLAUDE_CONFIG_DIR/plugins/installed_plugins.json"
+  out="$(printf '{"session_id":"s"}' | bash "$SCRIPTS/session-start.sh" | jq -r '.systemMessage // ""')"
+  contains "session start: the old claude-timestamp still installed is named" \
+    "claude plugin uninstall claude-timestamp@aranea" "$out"
+  out="$(printf '{"session_id":"s"}' | CT_CLIENT=codex bash "$SCRIPTS/session-start.sh" | jq -r '.systemMessage // ""')"
+  lacks "session start: Codex is not told of Claude Code's plugins" "claude-timestamp@aranea" "$out"
+  printf '{"version":2,"plugins":{"timestamps@aranea":[{}]}}\n' > "$CLAUDE_CONFIG_DIR/plugins/installed_plugins.json"
+  out="$(printf '{"session_id":"s"}' | bash "$SCRIPTS/session-start.sh" | jq -r '.systemMessage // ""')"
+  lacks "session start: the new name alone says nothing of it" "claude-timestamp@aranea" "$out"
+  rm -f "$CLAUDE_CONFIG_DIR/plugins/installed_plugins.json"
 
   # SessionStart has three things it might say, and a hook returns one object.
   # A project config with a bad key while the user has no config of their own
@@ -6867,7 +6885,7 @@ lacks "skill: no em dashes" "—" "$(cat "$ta_skill" 2>/dev/null)"
 if command -v jq >/dev/null 2>&1; then
   fresh
   ptr_ctx="$(printf '{"session_id":"ptr"}' | bash "$SCRIPTS/session-start.sh" | jq -r '.hookSpecificOutput.additionalContext // ""')"
-  contains "pointer: names the shipped skill" "claude-timestamp:$(sed -n 's/^name: //p' "$ta_skill")" "$ptr_ctx"
+  contains "pointer: names the shipped skill" "timestamps:$(sed -n 's/^name: //p' "$ta_skill")" "$ptr_ctx"
   fresh 'INJECT_CONTEXT=false'
   is "pointer: INJECT_CONTEXT=false leaves it out" "" \
     "$(printf '{"session_id":"ptr"}' | bash "$SCRIPTS/session-start.sh" | jq -r '.hookSpecificOutput.additionalContext // ""')"
@@ -6879,7 +6897,7 @@ if command -v jq >/dev/null 2>&1; then
   # the part that is still true.
   fresh 'HEARTBEAT_AFTER=0' 'SLOW_TOOL_AFTER=0' 'RESUME_NOTE=off'
   is "pointer: with every note off it only offers session history" \
-    "The claude-timestamp:time-awareness skill can query session history." "$(ss_ctx "$(ss_run)")"
+    "The timestamps:time-awareness skill can query session history." "$(ss_ctx "$(ss_run)")"
 else
   for ptr_label in "names skill" "inject off" "after resume" "order" "slow commands" "all notes off"; do
     skip "pointer: $ptr_label" "jq is not installed"
