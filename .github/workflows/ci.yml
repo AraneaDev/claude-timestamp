@@ -156,6 +156,7 @@ jobs:
             tests/run.sh \
             tools/check-docs.sh \
             tools/check-commit-title.sh \
+            tools/live-e2e.sh \
             tools/screenshots/make.sh \
             .githooks/pre-push .githooks/pre-commit .githooks/commit-msg
 
