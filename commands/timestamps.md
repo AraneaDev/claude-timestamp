@@ -1,9 +1,9 @@
 ---
-description: Configure claude-timestamp (timezone, clock format, colour, elapsed time)
+description: Configure Timestamps (timezone, clock format, colour, elapsed time)
 argument-hint: what to change, e.g. "tokyo", "no colour", "12h no seconds", "off"
 ---
 
-Configure the claude-timestamp plugin for this user.
+Configure the Timestamps plugin for this user.
 
 Settings take effect on the **next message**. Every hook reads the config file
 each time it runs, so nothing needs restarting. Say so when you report back,

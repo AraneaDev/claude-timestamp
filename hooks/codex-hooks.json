@@ -1,5 +1,5 @@
 {
-  "description": "Codex lifecycle hooks for claude-timestamp.",
+  "description": "Codex lifecycle hooks for Timestamps.",
   "hooks": {
     "SessionStart": [
       {

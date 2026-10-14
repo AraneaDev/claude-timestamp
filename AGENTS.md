@@ -6,7 +6,7 @@ manifest. Keep the two integrations additive: Claude Code's hooks and
 `hooks/mod/` is a Claude Code hooks module, additive in the same way: it only
 draws what the bash hooks staged, and Codex never loads it.
 
-When a claude-timestamp hook supplies a measured time, turn duration, slow-tool
+When a Timestamps hook supplies a measured time, turn duration, slow-tool
 note, or resumption note, use that value instead of estimating. Codex receives
 the notes and session summary through lifecycle hooks; it cannot display the
 per-message visual marker because Codex has no `MessageDisplay` event.

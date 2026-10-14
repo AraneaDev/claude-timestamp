@@ -1,8 +1,10 @@
 <div align="center">
 
-# Claude Timestamp
+# Timestamps
 
 **Time awareness for coding agents, in Claude Code and Codex.**
+
+<sub>Formerly Claude Timestamp (`claude-timestamp`), renamed in 0.0.38.</sub>
 
 In Claude Code, every message stamped with the time it happened and how long it took.
 The agent hears when a turn runs long, a command is slow, or work resumes after a gap.
@@ -26,7 +28,7 @@ At the end, where the session's time actually went.
 
 A coding agent has no clock. It cannot tell a two-minute turn from a
 forty-minute one, does not know the test suite always takes four minutes, and
-picks up yesterday's work as if no time had passed. Claude Timestamp gives it
+picks up yesterday's work as if no time had passed. Timestamps gives it
 that sense of time, and shows you the same numbers.
 
 There is nothing to set up. The defaults work as soon as it is installed.

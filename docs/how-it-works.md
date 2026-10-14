@@ -1,6 +1,6 @@
 # How it works
 
-Part of the claude-timestamp documentation. Start at the [README](../README.md).
+Part of the Timestamps documentation. Start at the [README](../README.md).
 
 Six scripts across eight events, and one skill. Most of it is harness-only and
 costs no model context. The exceptions are the short notes listed under

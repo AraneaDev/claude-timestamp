@@ -1,6 +1,6 @@
 # What Claude is told
 
-Part of the claude-timestamp documentation. Start at the [README](../README.md).
+Part of the Timestamps documentation. Start at the [README](../README.md).
 
 The marker is drawn on your screen, never enters the transcript and never reaches the model. A few short
 notes do reach it, each as a system reminder, and each only when there is
