@@ -2,24 +2,16 @@
 // ct_read_flag_var address it. Every read can fail (first prompt not yet
 // staged, a session older than the LIVE setting, a pruned file): a failure is
 // "unknown", never a throw, so the live layer only ever gets quieter.
-import type { EngineInterface } from 'claude-code'
+// The four things read here, as an interface rather than $ itself: the
+// engine follows $ only into functions of the file that holds the hook, so
+// live.ts adapts its $ to this, and the tests pass plain fakes.
+export type EnvName = 'TMPDIR' | 'UID' | 'HOME' | 'CLAUDE_TIMESTAMP_COMMANDS'
 
-// The four things read here, as an interface rather than $ itself, so the
-// readers are tested with plain fakes. hostOf adapts a hook's $.
 export type Host = {
-  env: (name: string) => Promise<string | undefined>
+  env: (name: EnvName) => Promise<string | undefined>
   sessionId: () => Promise<string>
   read: (path: string) => Promise<string>
   run: (argv: readonly string[]) => Promise<{ exitCode: number; stdout: string }>
-}
-
-export function hostOf($: EngineInterface): Host {
-  return {
-    env: name => $.env.get(name),
-    sessionId: () => $.session.id(),
-    read: path => $.fs.read(path),
-    run: argv => $.process.run(argv),
-  }
 }
 
 export type BashState = {
