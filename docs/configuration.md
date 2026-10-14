@@ -201,7 +201,7 @@ doing nothing, and it is named at the start of the next session and by
 `--doctor`:
 
 ```text
-claude-timestamp: some settings could not be used.
+Some timestamps settings could not be used.
   COLOR=banana is not valid, using dim
   SLOW_AFTER=soon is not valid, using 60
 Run /timestamps to fix them.

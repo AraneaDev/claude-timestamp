@@ -1,12 +1,12 @@
 ---
 name: time-awareness
-description: Use when a claude-timestamp system reminder or Codex hook context says how long a turn has run, that a tool call was slow, or that a conversation or project is resumed after a gap; when the user asks how long something took, when they started, or where their time went; and before writing a date into notes, memory, a commit or a document.
+description: Use when a Timestamps system reminder or Codex hook context says how long a turn has run, that a tool call was slow, or that a conversation or project is resumed after a gap; when the user asks how long something took, when they started, or where their time went; and before writing a date into notes, memory, a commit or a document.
 user-invocable: false
 ---
 
 # Time awareness
 
-claude-timestamp tells you about time in short system reminders or hook context.
+Timestamps tells you about time in short system reminders or hook context.
 They state facts and nothing else. This is what to do with them.
 
 ## The reminders
