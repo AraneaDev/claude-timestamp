@@ -27,6 +27,11 @@ function world(on: On, flags: Record<string, string>, env: Record<string, string
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
   on('session.start', ($, e) => ({ cwd: e.cwd }))
+  // The engine's footer labels, beneath the plugin: the modes, joined.
+  on('ui.render', { component: 'SessionMode' }, ($, e) => {
+    const { Text } = $.ui.resolve(e)
+    return <Text>{e.props.modes.join(' & ')}</Text>
+  })
   on('session.end', ($, e) => ({ sessionId: e.sessionId }) as never)
   // While set, a read of the session's fallback start waits half a second:
   // how a tick is caught mid-draw.
@@ -39,6 +44,19 @@ function world(on: On, flags: Record<string, string>, env: Record<string, string
 }
 
 const ON = { enabled: 'on', live: 'on', start: '1700000000' }
+
+// The clock as the footer shows it, beside a mode the engine already has.
+async function footer($: any): Promise<string> {
+  const ui = await $.ui.mount({
+    plugin: 'claude-timestamp',
+    surface: 'terminal',
+    component: 'SessionMode',
+    props: { modes: ['focus'] },
+  })
+  const drawn = await ui.find({ type: 'Text' })
+  await ui.unmount()
+  return (drawn?.text ?? '').replace(/^focus( & )?/, '')
+}
 const done = (durationMs: number, agentId?: string) =>
   ({ answer: '', durationMs, isAborted: false, turnId: 't1', reason: 'answer', agentId }) as never
 
@@ -46,7 +64,7 @@ test('ticks every second during a turn, with the session total', async ($, on) =
   const { clock, statuses } = world(on, ON)
   await $.turn.start({ text: 'hi', turnId: 't1' })
   await clock.advance(72_000)
-  expect(statuses.at(-1)).toBe('⏱ 1m12s · session 2m52s')
+  expect(await footer($)).toBe('⏱ 1m12s · session 2m52s')
 })
 
 test('holds the final duration after the turn completes', async ($, on) => {
@@ -54,10 +72,10 @@ test('holds the final duration after the turn completes', async ($, on) => {
   await $.turn.start({ text: 'hi', turnId: 't1' })
   await clock.advance(5_000)
   await $.turn.complete(done(5_400))
-  const held = statuses.at(-1)
+  const held = await footer($)
   await clock.advance(10_000)
   expect(held).toBe('⏱ 5s · session 1m45s')
-  expect(statuses.at(-1)).toBe(held)
+  expect(await footer($)).toBe(held)
 })
 
 // A subagent's run raises turn.complete with its agentId, and no turn.start.
@@ -67,14 +85,14 @@ test("a subagent's completion does not stop the main clock", async ($, on) => {
   await clock.advance(10_000)
   await $.turn.complete(done(3_000, 'agent-1'))
   await clock.advance(2_000)
-  expect(statuses.at(-1)).toBe('⏱ 12s · session 1m52s')
+  expect(await footer($)).toBe('⏱ 12s · session 1m52s')
 })
 
-test('LIVE=off keeps the status line clear', async ($, on) => {
+test('LIVE=off draws no clock', async ($, on) => {
   const { clock, statuses } = world(on, { ...ON, live: 'off' })
   await $.turn.start({ text: 'hi', turnId: 't1' })
   await clock.advance(5_000)
-  expect(statuses.filter(s => s !== undefined)).toEqual([])
+  expect(await footer($)).toBe('')
 })
 
 test("no .start: the session total counts from the mod's own session start", async ($, on) => {
@@ -83,7 +101,7 @@ test("no .start: the session total counts from the mod's own session start", asy
   await clock.advance(1_000)
   await $.turn.start({ text: 'hi', turnId: 't1' })
   await clock.advance(3_000)
-  expect(statuses.at(-1)).toBe('⏱ 3s · session 4s')
+  expect(await footer($)).toBe('⏱ 3s · session 4s')
 })
 
 test('LIVE=off: once the turn has started, nothing more is read', async ($, on) => {
@@ -101,7 +119,7 @@ test('id -u runs once, however many turns tick', async ($, on) => {
   await $.turn.complete(done(3_000))
   await $.turn.start({ text: 'again', turnId: 't2' })
   await w.clock.advance(3_000)
-  expect(w.statuses.at(-1)).toBe('⏱ 3s · session 1m46s')
+  expect(await footer($)).toBe('⏱ 3s · session 1m46s')
   expect(w.runs()).toBe(1)
 })
 
@@ -111,7 +129,7 @@ test('a missed turn.complete does not carry its start into the next turn', async
   await w.clock.advance(120_000)
   await $.turn.start({ text: 'again', turnId: 't2' })
   await w.clock.advance(5_000)
-  expect(w.statuses.at(-1)).toMatch(/^⏱ 5s · /)
+  expect(await footer($)).toMatch(/^⏱ 5s · /)
 })
 
 test('a tick still drawing when the turn ends does not replace the held figure', async ($, on) => {
@@ -123,7 +141,7 @@ test('a tick still drawing when the turn ends does not replace the held figure',
   w.hold.on = false
   await $.turn.complete(done(7_000))
   await w.clock.advance(500)
-  expect(w.statuses.at(-1)).toBe('⏱ 7s')
+  expect(await footer($)).toBe('⏱ 7s')
 })
 
 test('/clear starts the session total again', async ($, on) => {
@@ -134,5 +152,13 @@ test('/clear starts the session total again', async ($, on) => {
   await w.clock.advance(1_000)
   await $.turn.start({ text: 'hi', turnId: 't1' })
   await w.clock.advance(3_000)
-  expect(w.statuses.at(-1)).toBe('⏱ 3s · session 4s')
+  expect(await footer($)).toBe('⏱ 3s · session 4s')
+})
+
+test('the clock is a footer label, never a pinned status notice', async ($, on) => {
+  const { clock, statuses } = world(on, ON)
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  await clock.advance(3_000)
+  expect(await footer($)).toBe('⏱ 3s · session 1m43s')
+  expect(statuses.filter(s => s !== undefined)).toEqual([])
 })

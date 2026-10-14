@@ -45,9 +45,11 @@ module named in `hooks.json` beside the scripts. It measures and records
 nothing. It reads what the scripts staged for the session (whether the plugin
 and `LIVE` are on, the session's start, the slow-tool threshold, the project)
 and the command memory, and draws from them while a turn is still running: a
-clock in the status line, and a band above the prompt when a tool passes its
-usual time. A call that went to a permission prompt, or that asks you a
-question, is left out of the band: its time is partly yours, and nothing says
-when you answered. While the band shows, it takes the place of anything else a
-plugin draws above the prompt. If the module fails, or the build has no
-modules, the plugin behaves exactly as described above. Codex never loads it.
+clock among the dim labels in the footer, and, once a tool passes its usual
+time, that time in the line under the call (a Bash call in the terminal) or in
+a line above the prompt (any other tool, and the desktop). A call that waited
+on a permission dialog, or that asks you a question, is left out: its time is
+partly yours, and nothing says when you answered. While the line above the
+prompt shows, it takes the place of anything else a plugin draws there. If the
+module fails, or the build has no modules, the plugin behaves exactly as
+described above. Codex never loads it.

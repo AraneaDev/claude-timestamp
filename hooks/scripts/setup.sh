@@ -117,7 +117,7 @@ Flags
   --command-memory=on|off     Remember how long each Bash command takes in each
                               project, and tell Claude which are usually slow.
   --live=on|off               Claude Code only: a ticking turn clock in the
-                              status line, and a band while a tool runs slow.
+                              footer, and a slow tool's time while it runs.
   --enabled=on|off            Master switch. off silences every hook without
                               uninstalling the plugin.
   --project                   Write to this project instead of your account,
@@ -1317,8 +1317,8 @@ RESUME_NOTE=$CT_RESUME_NOTE
 # start which commands are usually slow here.
 COMMAND_MEMORY=$CT_COMMAND_MEMORY
 
-# Claude Code only: a ticking turn clock in the status line, and a band above
-# the prompt while a tool runs past its usual time. Display only.
+# Claude Code only: a ticking turn clock in the footer, and a slow tool's time
+# while it runs past its usual time. Display only.
 LIVE=$CT_LIVE
 CONF
   echo "Wrote $(ct_tilde "$file")"

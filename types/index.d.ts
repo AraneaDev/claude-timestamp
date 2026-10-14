@@ -22,6 +22,8 @@ declare module 'claude-code' {
       lastTurnMs: number | null
       /** epoch ms, the mod's own fallback when bash's .start is unreadable */
       sessionStartedAt: number | null
+      /** the footer label the clock draws; null draws none */
+      clockText: string | null
     }
   }
 }

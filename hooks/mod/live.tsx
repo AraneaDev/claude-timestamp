@@ -1,5 +1,5 @@
-// The live layer's hooks: a ticking clock in the status line, and a band
-// above the prompt while a tool runs slow. Display only: bash measures and
+// The live layer's hooks: a ticking clock among the footer's labels, and a
+// slow tool's time under its call (Bash, terminal) or above the prompt. Display only: bash measures and
 // records. What a drawing reads is in $.state, so a hot reload keeps it.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, On, Timer } from 'claude-code'
@@ -13,6 +13,8 @@ import { usualSeconds } from './usual.ts'
 export const running = atom({ plugin: 'claude-timestamp', key: 'running' } as const, [] as LiveCall[])
 export const turnStartedAt = atom({ plugin: 'claude-timestamp', key: 'turnStartedAt' } as const, null as number | null)
 export const lastTurnMs = atom({ plugin: 'claude-timestamp', key: 'lastTurnMs' } as const, null as number | null)
+// What the footer label says; null draws none.
+export const clockText = atom({ plugin: 'claude-timestamp', key: 'clockText' } as const, null as string | null)
 export const sessionStartedAt = atom(
   { plugin: 'claude-timestamp', key: 'sessionStartedAt' } as const,
   null as number | null,
@@ -71,25 +73,26 @@ async function bashState($: EngineInterface): Promise<BashState> {
   return (turnBash = await readBashState(hostOf($)))
 }
 
-// isCurrent is asked right before the status is written, with no await in
-// between: a tick still drawing when its turn ends must not replace the
-// figure the turn's completion wrote.
+// isCurrent is asked right before the label is written: a tick still
+// drawing when its turn ends must not replace the figure the turn's
+// completion wrote.
 async function paint($: EngineInterface, isCurrent: () => boolean = () => true): Promise<void> {
   const bash = turnBash ?? (await bashState($))
   if (!bash.isOn) {
-    if (isCurrent()) $.ui.status(undefined)
+    if (isCurrent()) await update($, clockText, () => null)
     return
   }
   const now = await $.clock.now()
   const started = await read($, turnStartedAt)
   const turnMs = started !== null ? now - started : await read($, lastTurnMs)
   if (turnMs === null) {
-    if (isCurrent()) $.ui.status(undefined)
+    if (isCurrent()) await update($, clockText, () => null)
     return
   }
   const sessionStart = bash.sessionStartedAt ?? (await read($, sessionStartedAt))
   const session = sessionStart === null ? '' : ` · session ${formatDuration((now - sessionStart) / 1000)}`
-  if (isCurrent()) $.ui.status(`⏱ ${formatDuration(turnMs / 1000)}${session}`)
+  const text = `⏱ ${formatDuration(turnMs / 1000)}${session}`
+  if (isCurrent()) await update($, clockText, () => text)
 }
 
 function startTicking($: EngineInterface): void {
@@ -108,7 +111,8 @@ function stopTicking(): void {
 let redraw: Timer | undefined
 // Looked up once per call, when it has run MIN_BAND_S; lost on reload, then
 // looked up again. null means "looked, nothing usual".
-const usualById = new Map<string, number | null>()
+const usualByCall = new Map<string, number | null>()
+const cacheKey = (call: LiveCall) => `${call.id}@${call.startedAt}`
 
 // The band's elapsed time moves with the clock, not with state, so while
 // anything runs it is redrawn each second.
@@ -123,10 +127,44 @@ function syncRedraw($: EngineInterface, isRunning: boolean): void {
 
 async function usualFor($: EngineInterface, call: LiveCall, project: string | undefined): Promise<number | undefined> {
   if (!call.key) return undefined
-  if (!usualById.has(call.id)) {
-    usualById.set(call.id, usualSeconds(await readCommandsFile(hostOf($)), project, call.key) ?? null)
+  const k = cacheKey(call)
+  if (!usualByCall.has(k)) {
+    usualByCall.set(k, usualSeconds(await readCommandsFile(hostOf($)), project, call.key) ?? null)
   }
-  return usualById.get(call.id) ?? undefined
+  return usualByCall.get(k) ?? undefined
+}
+
+type Slow = { call: LiveCall; elapsed: number; usual?: number }
+
+// The calls among these that are slow, longest first. Most redraws are of
+// short calls, so they are answered before any file is read.
+async function slowCalls($: EngineInterface, calls: readonly LiveCall[]): Promise<Slow[]> {
+  const now = await $.clock.now()
+  const candidates = calls.filter(c => !c.isAsked && now - c.startedAt >= MIN_BAND_S * 1000)
+  if (candidates.length === 0) return []
+  const bash = await bashState($)
+  if (!bash.isOn) return []
+  const slow: Slow[] = []
+  for (const call of candidates) {
+    const elapsed = (now - call.startedAt) / 1000
+    const usual = bash.isCommandMemoryOn ? await usualFor($, call, bash.project) : undefined
+    // A known usual time is the better measure, so it alone decides; the
+    // slow-tool threshold is for calls with no history, in whole seconds as
+    // bash's own note counts them.
+    const isSlow =
+      usual !== undefined
+        ? elapsed > Math.max(USUAL_FACTOR * usual, MIN_BAND_S)
+        : bash.slowToolAfter > 0 && Math.floor(elapsed) >= bash.slowToolAfter
+    if (isSlow) slow.push({ call, elapsed, usual })
+  }
+  return slow.sort((a, b) => b.elapsed - a.elapsed)
+}
+
+// `1m10s`, and `usually ~40s` when the command has a usual time.
+function describe(slow: Slow): string[] {
+  const parts = [formatDuration(slow.elapsed)]
+  if (slow.usual !== undefined) parts.push(`usually ~${formatDuration(slow.usual)}`)
+  return parts
 }
 
 export function registerLive(on: On): void {
@@ -162,7 +200,7 @@ export function registerLive(on: On): void {
       await paint($)
     } else {
       stopTicking()
-      $.ui.status(undefined)
+      await update($, clockText, () => null)
     }
     return next(e)
   })
@@ -175,6 +213,7 @@ export function registerLive(on: On): void {
       // The main loop's calls are over when its turn is; one still listed was
       // left behind by a hook that never finished.
       const left = await update($, running, list => list.filter(c => c.agentId !== undefined))
+      for (const k of [...usualByCall.keys()]) if (!left.some(c => cacheKey(c) === k)) usualByCall.delete(k)
       syncRedraw($, left.length > 0)
       await paint($)
     }
@@ -199,48 +238,55 @@ export function registerLive(on: On): void {
       return await next(e)
     } finally {
       const left = await update($, running, list => list.filter(c => c.id !== id))
-      usualById.delete(id)
+      usualByCall.delete(cacheKey(call))
       syncRedraw($, left.length > 0)
     }
   }).catch(($, e, next) => next(e))
 
-  // A call that goes to a permission prompt has the person's time in its
-  // elapsed time, and no event says when they answered: the band leaves it out.
-  on('tool.check', async ($, e, next) => {
-    const verdict = await next(e)
-    const id = e.tool_use_id
-    if (verdict.decision === 'ask' && id !== undefined) {
-      await update($, running, list => list.map(c => (c.id === id ? { ...c, isAsked: true } : c)))
-    }
-    return verdict
+  // A call that waited on a permission dialog has the person's time in its
+  // elapsed time, and no event says when they answered: the live layer leaves
+  // it out. The dialog's hook names no call, so the newest unasked one of that
+  // tool is the one. The auto-mode classifier raises no dialog, so its
+  // approvals stay in.
+  on('classic.PermissionRequest', async ($, e, next) => {
+    const tool = e.tool_name
+    await update($, running, list => {
+      const at = list.findLastIndex(c => c.tool === tool && !c.isAsked)
+      return at < 0 ? list : list.map((c, i) => (i === at ? { ...c, isAsked: true } : c))
+    })
+    return next(e)
   }).catch(($, e, next) => next(e))
 
+  // The footer's dim labels, where the clock sits beside the engine's modes.
+  on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
+    const text = await read($, clockText)
+    if (text === null) return next(e)
+    return next({ ...e, props: { ...e.props, modes: [...e.props.modes, text] } })
+  }).catch(($, e, next) => next(e))
+
+  // The pill under a running Bash call: its own time, where the person looks.
+  on('ui.render', { component: 'ToolProgress' }, async ($, e, next) => {
+    const calls = await read($, running)
+    const call = calls.find(c => c.id === e.props.tool_use_id)
+    if (call === undefined) return next(e)
+    const found = await slowCalls($, [call])
+    const mine = found[0]
+    if (mine === undefined) return next(e)
+    const hint = e.props.hint
+    const inner = hint.startsWith('(') && hint.endsWith(')') ? hint.slice(1, -1) : hint
+    return next({ ...e, props: { ...e.props, hint: `(${describe(mine).join(' · ')} · ${inner})` } })
+  }).catch(($, e, next) => next(e))
+
+  // Everything else that runs slow: other tools, and Bash where no pill is
+  // drawn (the terminal draws one, the desktop does not).
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
     const calls = await read($, running)
-    const now = await $.clock.now()
-    const candidates = calls.filter(c => !c.isAsked && now - c.startedAt >= MIN_BAND_S * 1000)
-    // Most redraws are of short calls: answer them before reading any file.
-    if (candidates.length === 0) return next(e)
-    const bash = await bashState($)
-    if (!bash.isOn) return next(e)
-    const slow: Array<{ call: LiveCall; elapsed: number; usual?: number }> = []
-    for (const call of candidates) {
-      const elapsed = (now - call.startedAt) / 1000
-      const usual = bash.isCommandMemoryOn ? await usualFor($, call, bash.project) : undefined
-      // A known usual time is the better measure, so it alone decides; the
-      // slow-tool threshold is for calls with no history, in whole seconds as
-      // bash's own note counts them.
-      const isSlow =
-        usual !== undefined
-          ? elapsed > Math.max(USUAL_FACTOR * usual, MIN_BAND_S)
-          : bash.slowToolAfter > 0 && Math.floor(elapsed) >= bash.slowToolAfter
-      if (isSlow) slow.push({ call, elapsed, usual })
-    }
-    const top = slow.sort((a, b) => b.elapsed - a.elapsed)[0]
+    const shown = e.surface === 'terminal' ? calls.filter(c => c.tool !== 'Bash') : calls
+    const slow = await slowCalls($, shown)
+    const top = slow[0]
     if (top === undefined) return next(e)
-    const parts = [top.call.key ?? top.call.tool, formatDuration(top.elapsed)]
-    if (top.usual !== undefined) parts.push(`usually ~${formatDuration(top.usual)}`)
+    const parts = [top.call.key ?? top.call.tool, ...describe(top)]
     if (slow.length > 1) parts.push(`+${slow.length - 1} more`)
     const { Text } = $.ui.resolve(e)
     return <Text dimColor>{parts.join(' · ')}</Text>

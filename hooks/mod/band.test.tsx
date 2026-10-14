@@ -35,6 +35,12 @@ function world(on: On, flags: Record<string, string> = {}, extraTsv: string[] = 
     const { Text } = $.ui.resolve(e)
     return <Text>engine band</Text>
   })
+  // The engine's run-in-background pill, beneath the plugin.
+  on('ui.render', { component: 'ToolProgress' }, ($, e) => {
+    const { Text } = $.ui.resolve(e)
+    return <Text>{e.props.hint}</Text>
+  })
+  on('classic.PermissionRequest', () => ({}) as never)
   // Each tool runs until the test finishes it.
   on('turn.complete', () => ({ text: '' }))
   on('tool.check', () => ({ decision: 'ask' as const }))
@@ -75,6 +81,19 @@ function world(on: On, flags: Record<string, string> = {}, extraTsv: string[] = 
   }
 }
 
+// The pill under a running Bash call, as the terminal draws it.
+async function pillText($: any, id: string) {
+  const ui = await $.ui.mount({
+    plugin: 'claude-timestamp',
+    surface: 'terminal',
+    component: 'ToolProgress',
+    props: { tool_use_id: id, kind: 'background_hint', hint: '(ctrl+b to run in background)' },
+  })
+  const drawn = await ui.find({ type: 'Text' })
+  await ui.unmount()
+  return drawn?.text
+}
+
 async function bandText($: any, surface: (typeof SURFACES)[number]) {
   const ui = await $.ui.mount({ plugin: 'claude-timestamp', surface, ...BAND })
   const mine = await ui.find({ type: 'Text', text: / · / })
@@ -86,21 +105,24 @@ test('quiet below the threshold, shown above it, with the usual time', async ($,
   const { clock, finish } = world(on)
   const call = $.tool.call({ tool: 'Bash', command: 'npm test', tool_use_id: 'a' } as never)
   await clock.advance(30_000)
-  for (const s of SURFACES) expect(await bandText($, s)).toBeUndefined()
+  expect(await bandText($, 'desktop')).toBeUndefined()
+  expect(await pillText($, 'a')).toBe('(ctrl+b to run in background)')
   await clock.advance(31_000)
-  for (const s of SURFACES) expect(await bandText($, s)).toBe('npm test · 1m01s · usually ~40s')
+  expect(await bandText($, 'desktop')).toBe('npm test · 1m01s · usually ~40s')
+  expect(await pillText($, 'a')).toBe('(1m01s · usually ~40s · ctrl+b to run in background)')
   finish('a')
   await call
-  for (const s of SURFACES) expect(await bandText($, s)).toBeUndefined()
+  expect(await bandText($, 'desktop')).toBeUndefined()
+  expect(await pillText($, 'a')).toBe('(ctrl+b to run in background)')
 })
 
 test('an unknown command waits for SLOW_TOOL_AFTER', async ($, on) => {
   const { clock, finish } = world(on, { livetool: '20' })
   const call = $.tool.call({ tool: 'Bash', command: 'make', tool_use_id: 'a' } as never)
   await clock.advance(19_000)
-  expect(await bandText($, 'terminal')).toBeUndefined()
+  expect(await bandText($, 'desktop')).toBeUndefined()
   await clock.advance(2_000)
-  expect(await bandText($, 'terminal')).toBe('make · 21s')
+  expect(await bandText($, 'desktop')).toBe('make · 21s')
   finish('a')
   await call
 })
@@ -112,10 +134,10 @@ test('several running: the longest slow one, plus a count', async ($, on) => {
   const two = $.tool.call({ tool: 'Read', file_path: '/x', tool_use_id: 'b' } as never)
   await clock.advance(55_000)
   // The Read is not slow yet, so it is not counted.
-  expect(await bandText($, 'terminal')).toBe('make · 1m05s')
+  expect(await bandText($, 'desktop')).toBe('make · 1m05s')
   finish('a')
   await one
-  expect(await bandText($, 'terminal')).toBeUndefined()
+  expect(await bandText($, 'desktop')).toBeUndefined()
   finish('b')
   await two
 })
@@ -124,7 +146,7 @@ test('a background command never shows', async ($, on) => {
   const { clock, finish } = world(on)
   const call = $.tool.call({ tool: 'Bash', command: 'npm test', run_in_background: true, tool_use_id: 'a' } as never)
   await clock.advance(120_000)
-  expect(await bandText($, 'terminal')).toBeUndefined()
+  expect(await bandText($, 'desktop')).toBeUndefined()
   finish('a')
   await call
 })
@@ -133,10 +155,10 @@ test('a tool that errors beneath still leaves the band', async ($, on) => {
   const { clock, fail } = world(on)
   const call = $.tool.call({ tool: 'Bash', command: 'make', tool_use_id: 'a' } as never).catch(() => undefined)
   await clock.advance(70_000)
-  expect(await bandText($, 'terminal')).toBe('make · 1m10s')
+  expect(await bandText($, 'desktop')).toBe('make · 1m10s')
   fail('a')
   await call
-  expect(await bandText($, 'terminal')).toBeUndefined()
+  expect(await bandText($, 'desktop')).toBeUndefined()
 })
 
 test('LIVE=off: the engine band is drawn and the tool still runs', async ($, on) => {
@@ -155,7 +177,7 @@ test('a short call costs no reads when the band is drawn', async ($, on) => {
   const call = $.tool.call({ tool: 'Bash', command: 'npm test', tool_use_id: 'a' } as never)
   await w.clock.advance(5_000)
   const before = w.reads()
-  expect(await bandText($, 'terminal')).toBeUndefined()
+  expect(await bandText($, 'desktop')).toBeUndefined()
   expect(w.reads()).toBe(before)
   w.finish('a')
   await call
@@ -165,7 +187,7 @@ test('a question put to the person never shows', async ($, on) => {
   const w = world(on)
   const call = $.tool.call({ tool: 'AskUserQuestion', questions: [], tool_use_id: 'q' } as never)
   await w.clock.advance(120_000)
-  expect(await bandText($, 'terminal')).toBeUndefined()
+  expect(await bandText($, 'desktop')).toBeUndefined()
   w.finish('q')
   await call
 })
@@ -173,11 +195,10 @@ test('a question put to the person never shows', async ($, on) => {
 test('a call that waited on a permission prompt never shows', async ($, on) => {
   const w = world(on)
   const call = $.tool.call({ tool: 'Bash', command: 'npm test', tool_use_id: 'a' } as never)
-  // In a session tool.check runs inside the call's next, after its hook began.
   await w.clock.settle()
-  await $.tool.check({ tool: 'Bash', input: { command: 'npm test' }, tool_use_id: 'a' } as never)
+  await $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command: 'npm test' } } as never)
   await w.clock.advance(120_000)
-  expect(await bandText($, 'terminal')).toBeUndefined()
+  expect(await bandText($, 'desktop')).toBeUndefined()
   w.finish('a')
   await call
 })
@@ -186,9 +207,9 @@ test('a call left behind is dropped when the main turn completes', async ($, on)
   const w = world(on)
   void $.tool.call({ tool: 'Bash', command: 'make', tool_use_id: 'a' } as never).catch(() => undefined)
   await w.clock.advance(70_000)
-  expect(await bandText($, 'terminal')).toBe('make · 1m10s')
+  expect(await bandText($, 'desktop')).toBe('make · 1m10s')
   await $.turn.complete({ answer: '', durationMs: 70_000, isAborted: true, turnId: 't1', reason: 'aborted' } as never)
-  expect(await bandText($, 'terminal')).toBeUndefined()
+  expect(await bandText($, 'desktop')).toBeUndefined()
 })
 
 test('a refused first state write still runs the tool, once', async ($, on) => {
@@ -221,7 +242,7 @@ test('several slow: the longest, plus how many more are slow', async ($, on) => 
   await w.clock.advance(10_000)
   const two = $.tool.call({ tool: 'Read', file_path: '/x', tool_use_id: 'b' } as never)
   await w.clock.advance(65_000)
-  expect(await bandText($, 'terminal')).toBe('make · 1m15s · +1 more')
+  expect(await bandText($, 'desktop')).toBe('make · 1m15s · +1 more')
   w.finish('a')
   w.finish('b')
   await one
@@ -233,9 +254,9 @@ test('a call still inside its usual time waits for it, past SLOW_TOOL_AFTER', as
   const w = world(on, {}, slow)
   const call = $.tool.call({ tool: 'Bash', command: 'make', tool_use_id: 'a' } as never)
   await w.clock.advance(61_000)
-  expect(await bandText($, 'terminal')).toBeUndefined()
+  expect(await bandText($, 'desktop')).toBeUndefined()
   await w.clock.advance(120_000)
-  expect(await bandText($, 'terminal')).toBe('make · 3m01s · usually ~2m00s')
+  expect(await bandText($, 'desktop')).toBe('make · 3m01s · usually ~2m00s')
   w.finish('a')
   await call
 })
@@ -244,7 +265,47 @@ test('SLOW_TOOL_AFTER counts whole seconds, as bash does', async ($, on) => {
   const w = world(on, { livetool: '20' })
   const call = $.tool.call({ tool: 'Bash', command: 'make', tool_use_id: 'a' } as never)
   await w.clock.advance(20_000)
-  expect(await bandText($, 'terminal')).toBe('make · 20s')
+  expect(await bandText($, 'desktop')).toBe('make · 20s')
+  w.finish('a')
+  await call
+})
+
+test('a call the auto-mode classifier approved still shows', async ($, on) => {
+  const w = world(on)
+  const call = $.tool.call({ tool: 'Bash', command: 'make', tool_use_id: 'a' } as never)
+  // In a session tool.check runs inside the call's next, after its hook began.
+  await w.clock.settle()
+  await $.tool.check({ tool: 'Bash', input: { command: 'make' }, tool_use_id: 'a' } as never)
+  await w.clock.advance(70_000)
+  expect(await pillText($, 'a')).toBe('(1m10s · ctrl+b to run in background)')
+  w.finish('a')
+  await call
+})
+
+test('on the terminal a slow Bash call shows in its pill, and the band leaves it', async ($, on) => {
+  const w = world(on)
+  const call = $.tool.call({ tool: 'Bash', command: 'make', tool_use_id: 'a' } as never)
+  await w.clock.advance(70_000)
+  expect(await pillText($, 'a')).toBe('(1m10s · ctrl+b to run in background)')
+  expect(await bandText($, 'terminal')).toBeUndefined()
+  w.finish('a')
+  await call
+})
+
+test('a slow call that is not Bash still gets the band on the terminal', async ($, on) => {
+  const w = world(on)
+  const call = $.tool.call({ tool: 'Read', file_path: '/x', tool_use_id: 'r' } as never)
+  await w.clock.advance(70_000)
+  expect(await bandText($, 'terminal')).toBe('Read · 1m10s')
+  w.finish('r')
+  await call
+})
+
+test('LIVE=off leaves the pill as the engine drew it', async ($, on) => {
+  const w = world(on, { live: 'off' })
+  const call = $.tool.call({ tool: 'Bash', command: 'make', tool_use_id: 'a' } as never)
+  await w.clock.advance(70_000)
+  expect(await pillText($, 'a')).toBe('(ctrl+b to run in background)')
   w.finish('a')
   await call
 })
