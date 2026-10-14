@@ -31,6 +31,12 @@ All three run in CI, on Linux, macOS and Windows. macOS runs the suite twice,
 the second time under `/bin/bash`, which is still 3.2, so the bash 3.2 claim
 in the platform notes is tested rather than asserted.
 
+The live layer (`hooks/mod/`) has its own tests, `claude plugin test .`, run
+in CI too. `tools/live-e2e.sh` checks what it draws in a real session: it
+starts `claude --plugin-dir .` in a detached tmux pane, has it run one slow
+command, and reads the screen. It makes real model calls, so it is run by
+hand before a change to the live layer is merged.
+
 `SC1091` is excluded because every hook resolves its library path at runtime,
 which shellcheck cannot follow.
 
