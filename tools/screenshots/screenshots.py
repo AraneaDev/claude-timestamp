@@ -632,9 +632,9 @@ def shot_picker():
 
     Unlike every other shot here, this one does not set CLAUDE_TIMESTAMP_CONFIG.
     That variable is honoured by the hooks that paint the transcript markers,
-    but /timestamps is a prompt: it reads the literal path
+    but /timestamps:configure is a prompt: it reads the literal path
     ~/.claude/claude-timestamp.conf and cannot be redirected by the
-    environment. Pointing the hooks at a demo config while /timestamps read the
+    environment. Pointing the hooks at a demo config while /timestamps:configure read the
     real one produced a frame that visibly disagreed with itself -- the hooks'
     duration was coloured past a demo SLOW_AFTER while the picker's own text
     named the real, much higher, threshold. Leaving the variable unset means
@@ -681,7 +681,7 @@ def shot_picker():
         raw = capture_pty(
             ["claude", "--plugin-dir", str(plugin),
              "--settings", json.dumps({"enabledPlugins": {"timestamps@aranea": False}})],
-            keys=[(6.0, "/timestamps"), (7.5, "\r")],
+            keys=[(6.0, "/timestamps:configure"), (7.5, "\r")],
             cols=cols, rows=rows, settle=12, total=100,
         )
     finally:

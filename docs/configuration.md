@@ -5,15 +5,15 @@ Part of the Timestamps documentation. Start at the [README](../README.md).
 Nothing needs configuring. The defaults work, and the plugin tells you where to
 change them on first run.
 
-Run `/timestamps` inside Claude Code. Bare, it shows what you have now and
+Run `/timestamps:configure` inside Claude Code. Bare, it shows what you have now and
 offers a handful of presets, each previewed as the marker it actually produces:
 
 <p align="center">
   <img src="../assets/picker.webp" alt="The in-chat picker, showing presets with a preview of each" width="760">
 </p>
 
-It also takes the request directly, so `/timestamps tokyo`, `/timestamps no
-colour` and `/timestamps 12 hour clock` each land in one step.
+It also takes the request directly, so `/timestamps:configure tokyo`, `/timestamps:configure no
+colour` and `/timestamps:configure 12 hour clock` each land in one step.
 
 ## The marker's layout
 
@@ -102,7 +102,7 @@ Changes take effect on your **next message**. Every hook reads the config file
 each time it runs, so nothing needs restarting. Only installing the plugin
 needs a new session, because that is when hooks are bound.
 
-Nothing about this runs a shell script. `/timestamps` reads
+Nothing about this runs a shell script. `/timestamps:configure` reads
 `schema.json`, which ships with the plugin and describes every setting, and
 edits your config file directly.
 
@@ -188,7 +188,7 @@ cannot run anything.
 | `SUMMARY` | `on` | Report session totals on exit. Independent of `HISTORY`: both read the same counters, which are kept either way |
 | `SUBAGENTS` | `on` | Stamp subagent messages as well. Also decides whether a subagent is told about its own slow tool calls |
 | `TOOL_TIMING` | `off` | Record what each tool call cost and name the slowest |
-| `HISTORY` | `on` | Record each finished session, for `/timestamps` and `--stats`. Independent of `SUMMARY` |
+| `HISTORY` | `on` | Record each finished session, for `/timestamps:configure` and `--stats`. Independent of `SUMMARY` |
 | `HISTORY_LIMIT` | `200` | How many recorded sessions to keep, 1 or more; `HISTORY=off` keeps none |
 | `PROJECTS` | `off` | Record the project's directory name in each history row. Never a path, and off unless you turn it on |
 
@@ -204,7 +204,7 @@ doing nothing, and it is named at the start of the next session and by
 Some timestamps settings could not be used.
   COLOR=banana is not valid, using dim
   SLOW_AFTER=soon is not valid, using 60
-Run /timestamps to fix them.
+Run /timestamps:configure to fix them.
 ```
 
 Clock formats render as `14:03:22` for `24h`, `14:03` for `short`, `2:03 PM`
@@ -231,4 +231,4 @@ Alongside the config, the plugin writes `~/.claude/claude-timestamp.facts.json`
 at the start of every session. It holds what cannot be worked out by reading
 the configuration: whether this machine has a timezone database, whether the
 state directory is writable, and which version is installed. That is what lets
-`/timestamps` answer questions about your setup without running anything.
+`/timestamps:configure` answer questions about your setup without running anything.

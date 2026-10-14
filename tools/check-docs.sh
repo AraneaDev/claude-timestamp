@@ -189,7 +189,7 @@ done < <(jq -r '.keys | to_entries[] | select(.value.values) |
 
 # An alias is a value the validator accepts that the picker does not offer:
 # ct_is_valid_color takes "off" and "grey" as well as "none" and "gray", and
-# for a while schema.json said neither. commands/timestamps.md calls the schema
+# for a while schema.json said neither. commands/configure.md calls the schema
 # the only source of truth about what a key may hold and tells the model to
 # refuse anything it does not accept, so a user asking for grey was told grey
 # is not a colour. Held to the same standard as `values`: listed here means the

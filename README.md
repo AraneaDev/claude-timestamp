@@ -13,7 +13,7 @@ At the end, where the session's time actually went.
 [![Release](https://img.shields.io/github/v/release/AraneaDev/timestamps)](https://github.com/AraneaDev/timestamps/releases)
 [![Tool page](https://img.shields.io/badge/tool%20page-aranea--development.nl-0b7285)](https://aranea-development.nl/en/tools/timestamps)
 [![CI](https://github.com/AraneaDev/timestamps/actions/workflows/ci.yml/badge.svg)](https://github.com/AraneaDev/timestamps/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-1534%20passing-2b8a3e)](tests/run.sh)
+[![Tests](https://img.shields.io/badge/tests-1536%20passing-2b8a3e)](tests/run.sh)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-364fc7)](docs/troubleshooting.md#platform-notes)
 [![Conventional Commits](https://img.shields.io/badge/commits-conventional-fe5196?logo=conventionalcommits&logoColor=white)](https://www.conventionalcommits.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
@@ -148,7 +148,7 @@ Checked against Claude Code and Codex CLI 0.154.0.
 | Session summary at exit | ✓ | ✓ | Recorded in the history; `codex exec` does not display it |
 | History and `--stats` | ✓ | ✓ | |
 | `time-awareness` skill | ✓ | ✓ | |
-| `/timestamps` command | ✓ | ✗ | Codex uses the `timestamps` skill or `setup.sh` |
+| `/timestamps:configure` command | ✓ | ✗ | Codex uses the `timestamps` skill or `setup.sh` |
 
 The **Chat** and **Cowork** tabs of the desktop app are not Claude Code and
 have no hooks, so nothing here reaches them. Cloud sessions on the web read
@@ -157,7 +157,7 @@ hooks from the repository and from managed settings rather than from your
 
 ## Configure
 
-Run `/timestamps` in Claude Code to pick a timezone, a clock format, a colour
+Run `/timestamps:configure` in Claude Code to pick a timezone, a clock format, a colour
 or a preset; it takes effect on the next message. Every setting, the marker's
 layout, colours and per-project settings are in
 [Configuration](docs/configuration.md).
@@ -167,7 +167,7 @@ In Codex, use the bundled `timestamps` skill or `hooks/scripts/setup.sh` to chan
 ## Documentation
 
 - [Install](docs/install.md): requirements, both clients, Windows and WSL.
-- [Configuration](docs/configuration.md): `/timestamps`, the marker's layout, colours, every setting.
+- [Configuration](docs/configuration.md): `/timestamps:configure`, the marker's layout, colours, every setting.
 - [What Claude is told](docs/agent-notes.md): every note the agent receives, and the skill.
 - [Reports and history](docs/reports.md): `--session`, `--turns`, `--commands`, `--stats`.
 - [Troubleshooting](docs/troubleshooting.md): when something is wrong, platform notes.

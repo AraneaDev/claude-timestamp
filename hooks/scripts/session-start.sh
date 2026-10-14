@@ -3,7 +3,7 @@
 #
 # Four jobs, all one-time-per-session: make sure the plugin can actually run,
 # make sure a new user can find the config command, publish facts.json --
-# what this machine can and cannot do, which /timestamps reads instead of
+# what this machine can and cannot do, which /timestamps:configure reads instead of
 # probing for itself, and tell Claude how long ago this conversation or
 # project was last active. Everything here is advisory -- the session is
 # never blocked, so we always exit 0.
@@ -186,7 +186,7 @@ ct_write_facts() {
 ct_write_facts
 
 # Off silences the advisories, but only after the facts have been published:
-# without them, /timestamps would have no way to switch the plugin back on.
+# without them, /timestamps:configure would have no way to switch the plugin back on.
 [ "$CT_ENABLED" = "on" ] || exit 0
 
 # Everything below is a thing worth saying once, at the only moment that is not
@@ -210,11 +210,11 @@ _ct_add_note() { notes="${notes}${notes:+$'\n\n'}$1"; }
 if [ -n "${CT_CONFIG_PROBLEMS:-}" ]; then
   _ct_add_note "Some timestamps settings could not be used.
 ${CT_CONFIG_PROBLEMS}
-Run /timestamps to fix them."
+Run /timestamps:configure to fix them."
 fi
 
 if ct_tz_unhonoured; then
-  _ct_add_note "This system has no timezone database, so ${CT_TZ} cannot be applied. Showing local time instead. Run /timestamps and choose \"local\" to silence this."
+  _ct_add_note "This system has no timezone database, so ${CT_TZ} cannot be applied. Showing local time instead. Run /timestamps:configure and choose \"local\" to silence this."
 fi
 
 # Up to 0.0.37 this plugin was named claude-timestamp. Installed under both
@@ -229,7 +229,7 @@ fi
 # First run: there is no README in this repo by design, so the config command
 # has to introduce itself or nobody will ever know it exists.
 if [ ! -r "$(ct_config_path)" ]; then
-  _ct_add_note "Timestamps is running with default settings. Run /timestamps to pick a timezone, clock format, and color."
+  _ct_add_note "Timestamps is running with default settings. Run /timestamps:configure to pick a timezone, clock format, and color."
 fi
 
 # What Claude is told. systemMessage above goes to the user; this goes to the
