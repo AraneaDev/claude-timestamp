@@ -671,11 +671,21 @@ def shot_picker():
     # under the picker on its own.
     cols, rows = 96, 50
     os.chdir(work)
-    raw = capture_pty(
-        ["claude"],
-        keys=[(6.0, "/timestamps"), (7.5, "\r")],
-        cols=cols, rows=rows, settle=12, total=100,
-    )
+    # This checkout's plugin rather than the installed one, as the skill shot
+    # does, so the picker shown is the command in this tree. The short symlink
+    # keeps any path it prints readable.
+    link_dir = Path(tempfile.mkdtemp(prefix="ct-", dir="/tmp"))
+    plugin = link_dir / "timestamps"
+    plugin.symlink_to(ROOT)
+    try:
+        raw = capture_pty(
+            ["claude", "--plugin-dir", str(plugin),
+             "--settings", json.dumps({"enabledPlugins": {"timestamps@aranea": False}})],
+            keys=[(6.0, "/timestamps"), (7.5, "\r")],
+            cols=cols, rows=rows, settle=12, total=100,
+        )
+    finally:
+        shutil.rmtree(link_dir, ignore_errors=True)
     (work / "picker.raw").write_bytes(raw)
 
     # Crop past the welcome banner, which carries the account's name, email and
