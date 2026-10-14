@@ -95,6 +95,8 @@ PALETTE = {
 BG = "#0d1117"
 FONT_DIRS = [
     "/usr/share/fonts/truetype/dejavu",
+    "/usr/share/fonts/TTF",  # Arch
+    str(Path.home() / ".local/share/fonts"),
     "/usr/local/share/fonts",
     "/Library/Fonts",
     "/System/Library/Fonts",
@@ -153,6 +155,12 @@ def capture_pty(argv, keys, cols, rows, settle=12, total=150, env=None, record=F
     """
     pid, fd = pty.fork()
     if pid == 0:
+        # Run from inside a Claude Code session, the child would inherit its
+        # markers (CLAUDECODE, CLAUDE_CODE_CHILD_SESSION, ...) and draw as a
+        # nested session: a transcript warning, no trust dialog. The shots are
+        # of an ordinary session, so those go.
+        for name in [n for n in os.environ if n == "CLAUDECODE" or n.startswith("CLAUDE_CODE_")]:
+            del os.environ[name]
         os.environ.update(env or {})
         os.environ["TERM"] = "xterm-256color"
         os.environ["COLUMNS"], os.environ["LINES"] = str(cols), str(rows)
@@ -230,6 +238,12 @@ def capture_pty_until(argv, until, answer, cols, rows, tick=0.35, settle=3, tota
     """
     pid, fd = pty.fork()
     if pid == 0:
+        # Run from inside a Claude Code session, the child would inherit its
+        # markers (CLAUDECODE, CLAUDE_CODE_CHILD_SESSION, ...) and draw as a
+        # nested session: a transcript warning, no trust dialog. The shots are
+        # of an ordinary session, so those go.
+        for name in [n for n in os.environ if n == "CLAUDECODE" or n.startswith("CLAUDE_CODE_")]:
+            del os.environ[name]
         os.environ.update(env or {})
         os.environ["TERM"] = "xterm-256color"
         os.environ["COLUMNS"], os.environ["LINES"] = str(cols), str(rows)
@@ -599,6 +613,11 @@ def shot_hero():
     last = max((y for y in range(rows) if lines[y].strip().startswith("✻")), default=rows - 1)
 
     frames = sample_frames(timeline, elapsed, cols, rows, first, last, scale=2, dt=0.45)
+    # Claude takes a moment to start and the first prompt is typed 2s in; until
+    # then the window is empty, and the animation opened on seconds of nothing.
+    # Leading frames that are one flat colour go, with their time.
+    while len(frames) > 1 and all(lo == hi for lo, hi in frames[0][0].getextrema()):
+        elapsed -= frames.pop(0)[1]
     save_timed_animation(frames, ASSETS / "timestamps.webp", elapsed)
     print(f"  real session duration: {elapsed:.1f}s")
 
@@ -725,7 +744,7 @@ def shot_doctor():
     )
     raw = proc.stdout + proc.stderr
     (work / "doctor.raw").write_bytes(raw)
-    render(raw, ASSETS / "doctor.webp", cols=84, rows=36, crlf=True)
+    render(raw, ASSETS / "doctor.webp", cols=84, rows=44, crlf=True)
 
 
 def shot_stats():
@@ -755,15 +774,15 @@ def shot_stats():
 
     history = work / "home" / ".claude" / "claude-timestamp-history.tsv"
     rows = [
-        ("2026-08-04T09:12:00", 4820, 41, 1180, 900, 0, "claude-timestamp",
+        ("2026-08-04T09:12:00", 4820, 41, 1180, 900, 0, "timestamps",
          "Bash:640:28,Read:210:54,Edit:95:22,Grep:40:18,WebFetch:35:3,Glob:12:9,Write:8:4,Task:5:1"),
         ("2026-08-05T10:41:00", 2260, 19, 540, 0, 1, "api-gateway",
          "Bash:310:14,Read:85:20,Edit:40:9,Grep:15:6,Write:10:3"),
-        ("2026-08-06T08:55:00", 7415, 63, 2210, 3600, 2, "claude-timestamp",
+        ("2026-08-06T08:55:00", 7415, 63, 2210, 3600, 2, "timestamps",
          "Bash:1120:52,Read:340:70,Edit:180:40,Grep:95:25,WebFetch:60:5,Task:45:2,Glob:20:11,Write:15:6"),
         ("2026-08-07T14:02:00", 1180, 9, 260, 0, 0, "-",
          "Bash:140:8,Read:55:12,Edit:20:5,Grep:10:4"),
-        ("2026-08-10T09:30:00", 5360, 44, 1490, 1800, 0, "claude-timestamp",
+        ("2026-08-10T09:30:00", 5360, 44, 1490, 1800, 0, "timestamps",
          "Bash:780:35,Read:260:58,Edit:130:28,Grep:70:20,WebFetch:45:4,Write:20:8,Glob:15:10"),
         ("2026-08-11T11:15:00", 3090, 27, 700, 0, 3, "api-gateway",
          "Bash:410:18,Read:110:24,Edit:55:12,WebFetch:35:3,Grep:20:9"),
@@ -771,7 +790,7 @@ def shot_stats():
          "Bash:960:44,Read:300:62,Edit:160:33,Grep:85:22,Task:60:3,WebFetch:40:4,Glob:18:12,Write:12:5"),
         ("2026-08-13T16:20:00", 900, 6, 190, 0, 0, "-",
          "Bash:95:5,Read:40:9,Edit:15:4"),
-        ("2026-08-17T10:00:00", 4100, 33, 1020, 1200, 0, "claude-timestamp",
+        ("2026-08-17T10:00:00", 4100, 33, 1020, 1200, 0, "timestamps",
          "Bash:540:24,Read:180:40,Edit:90:19,Grep:50:14,Write:25:9,Glob:10:7"),
         ("2026-08-19T09:45:00", 2980, 24, 660, 0, 1, "dashboard",
          "Bash:350:16,Read:120:26,Edit:60:13,WebFetch:30:2,Grep:18:8"),
@@ -1055,7 +1074,7 @@ def shot_skill():
     # not at a fixed name in /tmp, which any local user could create first to
     # block the capture; the directory is removed again however the run ends.
     link_dir = Path(tempfile.mkdtemp(prefix="ct-", dir="/tmp"))
-    plugin = link_dir / "claude-timestamp"
+    plugin = link_dir / "timestamps"
     plugin.symlink_to(ROOT)
 
     cols, rows = 96, 60

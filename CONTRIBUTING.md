@@ -94,6 +94,13 @@ The durations in the hero and skill shots differ every run because they are
 real measurements. Python dependencies install into a virtualenv beside the
 script.
 
+The real sessions run in `${TMPDIR:-/tmp}/claude-timestamp-shots`, and Claude
+Code asks once whether to trust a new folder. The script cannot answer that
+dialog: its first keystroke picks "No, exit" and the shot comes out as a few
+blank frames. Before the first run, start `claude` in that folder once, choose
+"Yes, I trust this folder", and exit. The shots need DejaVu Sans Mono
+installed.
+
 Every image is a lossless WebP, animation included: terminal captures are flat
 colour with hard edges, which lossless compression suits far better than a
 lossy setting would, at a fraction of the size PNG and GIF needed for the
