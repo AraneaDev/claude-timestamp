@@ -245,6 +245,12 @@
       "validator": "ct_is_onoff",
       "values": ["on", "off"],
       "describes": "remember how long each Bash command takes in each project, and tell Claude at session start which ones are usually slow"
+    },
+    "LIVE": {
+      "default": "on",
+      "validator": "ct_is_onoff",
+      "values": ["on", "off"],
+      "describes": "Claude Code only: show a ticking turn clock in the footer, and a slow tool's time while it runs past its usual time"
     }
   },
   "preview_context": {

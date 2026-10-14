@@ -10,6 +10,7 @@
   "homepage": "https://github.com/AraneaDev/claude-timestamp",
   "repository": "https://github.com/AraneaDev/claude-timestamp",
   "license": "MIT",
+  "types": "./types/index.d.ts",
   "keywords": [
     "timestamps",
     "time",

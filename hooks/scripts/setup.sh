@@ -116,6 +116,8 @@ Flags
                               this conversation or project was last active.
   --command-memory=on|off     Remember how long each Bash command takes in each
                               project, and tell Claude which are usually slow.
+  --live=on|off               Claude Code only: a ticking turn clock in the
+                              footer, and a slow tool's time while it runs.
   --enabled=on|off            Master switch. off silences every hook without
                               uninstalling the plugin.
   --project                   Write to this project instead of your account,
@@ -183,6 +185,7 @@ heartbeat-after HEARTBEAT_AFTER CT_HEARTBEAT_AFTER  ct_is_seconds           -   
 slow-tool-after SLOW_TOOL_AFTER CT_SLOW_TOOL_AFTER  ct_is_seconds           -        ignore
 resume-note     RESUME_NOTE     CT_RESUME_NOTE      ct_is_onoff             -        ignore
 command-memory  COMMAND_MEMORY  CT_COMMAND_MEMORY   ct_is_onoff             -        ignore
+live            LIVE            CT_LIVE             ct_is_onoff             -        ignore
 "
 
 # --- validation -------------------------------------------------------------
@@ -1313,6 +1316,10 @@ RESUME_NOTE=$CT_RESUME_NOTE
 # such as "npm test", never the full command line. Tells Claude at session
 # start which commands are usually slow here.
 COMMAND_MEMORY=$CT_COMMAND_MEMORY
+
+# Claude Code only: a ticking turn clock in the footer, and a slow tool's time
+# while it runs past its usual time. Display only.
+LIVE=$CT_LIVE
 CONF
   echo "Wrote $(ct_tilde "$file")"
 }
@@ -1520,6 +1527,7 @@ show_config() {
   echo "  Slow tool note  $CT_SLOW_TOOL_AFTER s"
   echo "  Resume note     $CT_RESUME_NOTE"
   echo "  Command memory  $CT_COMMAND_MEMORY"
+  echo "  Live layer      $CT_LIVE"
   echo
   echo -n "  Preview         "; preview
 }

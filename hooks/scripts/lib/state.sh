@@ -67,16 +67,21 @@ CT_JQ_CMDKEY='def ct_cmdkey:
   def prefix: contains("=") or . == "env" or . == "time" or . == "sudo" or . == "nice" or . == "command";
   def strip: if length > 0 and (.[0] | prefix) then .[1:] | strip else . end;
   def take: if length == 0 or (.[0] | stops) then [] else [.[0]] + (.[1:] | take) end;
-  if type != "string" then "" else
-    ((split("\n") | .[0]) // "") | unquote | split("\t") | join(" ")
-    | [splitall(["&&", "||", ";"])[] | select(words | length > 0)] | (last // "")
-    | ((split("|") | .[0]) // "") | words | .[0:40] | strip
+  def segkey:
+    ((split("|") | .[0]) // "") | words | .[0:40] | strip
     | if length == 0 then ""
       else (.[0] | split("/") | last) as $prog
         | if ($prog | plain | not) or ($prog | startswith("-")) then ""
           elif $prog == "echo" or $prog == "printf" then $prog
           else ([$prog] + (.[1:3] | take)) | join(" ") | .[0:60] end
-      end
+      end;
+  # A trailing status report (; echo "exit: $?") is not the command that took
+  # the time: the last segment that is something else names the call.
+  def trailer: . == "echo" or . == "printf" or . == "true" or . == ":" or . == "exit";
+  if type != "string" then "" else
+    ((split("\n") | .[0]) // "") | unquote | split("\t") | join(" ")
+    | [splitall(["&&", "||", ";"])[] | select(words | length > 0) | segkey]
+    | ((map(select(trailer | not)) | last) // last // "")
   end;'
 
 # Where per-session state lives.
@@ -634,6 +639,8 @@ ct_slow_tool_note_var() {
   [ -n "$tool" ] || tool="tool"
   case "$usual" in
     ''|*[!0-9]*) ;;
+    # A median under a second floors to 0, which is no duration to quote.
+    0) tail=" (usually under 1s)" ;;
     *) tail=" (usually $(ct_format_duration "$((10#$usual))"))" ;;
   esac
   if [ "$outcome" = "fail" ]; then

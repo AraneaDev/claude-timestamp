@@ -1654,7 +1654,7 @@ is "a rejected format cannot smuggle a second setting into the file" "on" "$CT_E
 # to be wrong, so flag twenty-one is covered the day it is added.
 fresh 'ENABLED=on'
 flag_table="$(sed -n '/^CT_FLAG_TABLE="$/,/^"$/p' "$SCRIPTS/setup.sh" | sed '1d;$d')"
-is "every setting has a flag in the table" "25" \
+is "every setting has a flag in the table" "26" \
   "$(printf '%s\n' "$flag_table" | grep -c '^[a-z]')"
 # shellcheck disable=SC2034  # t_rest is read to consume the rest of the row
 while read -r t_flag t_rest; do
@@ -6417,6 +6417,26 @@ fresh 'HEARTBEAT_AFTER=0' 'SLOW_TOOL_AFTER=0' 'COMMAND_MEMORY=off'
 printf '{"session_id":"stage-c"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
 refutes "stage: both notes at 0 keep the gate shut" test -e "$(ct_state_file stage-c).timing-on"
 
+echo
+echo "live layer: staging"
+
+fresh
+printf '{"session_id":"live-a"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+is "live: staged on by default" "on" "$(ct_read_flag live-a live)"
+is "live: tool threshold staged raw" "60" "$(ct_read_flag live-a livetool)"
+
+fresh 'INJECT_CONTEXT=false'
+printf '{"session_id":"live-b"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+is "live: livetool ignores INJECT_CONTEXT" "60" "$(ct_read_flag live-b livetool)"
+
+fresh 'LIVE=off'
+printf '{"session_id":"live-c"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+is "live: LIVE=off stages off" "off" "$(ct_read_flag live-c live)"
+
+fresh 'ENABLED=off'
+printf '{"session_id":"live-d"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+is "live: ENABLED=off stages live off" "off" "$(ct_read_flag live-d live)"
+
 fresh 'ENABLED=off'
 printf '{"session_id":"stage-d"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
 is "stage: ENABLED=off stages no heartbeat" "0" "$(ct_read_flag stage-d heartbeat)"
@@ -7000,6 +7020,20 @@ is "command memory: the file lives beside the history" "$WORK/commands.tsv" "$(c
 contains "command memory: --show lists it" "Command memory  off" "$(bash "$SCRIPTS/setup.sh" --show)"
 
 echo
+echo "live layer: setting"
+fresh
+ct_load_config
+is "live: on by default" "on" "$CT_LIVE"
+fresh 'LIVE=off'
+ct_load_config
+is "live: LIVE=off is read" "off" "$CT_LIVE"
+fresh
+bash "$SCRIPTS/setup.sh" --live=off >/dev/null
+ct_load_config
+is "live: --live is written" "off" "$CT_LIVE"
+contains "live: --show lists it" "Live layer      off" "$(bash "$SCRIPTS/setup.sh" --show)"
+
+echo
 echo "command memory: key"
 
 if command -v jq >/dev/null 2>&1; then
@@ -7057,6 +7091,32 @@ body line")"
   }
   is "key: braces inside quotes are left alone" "awk file" "$(ck "awk '{print \$1}' file")"
   is "key: at most 60 characters" "60" "$(ck "$(printf 'x%.0s' $(seq 1 200))" | tr -d '\r\n' | wc -c | tr -d ' ')"
+  # The live layer's TypeScript port is held to the same cases.
+  ck_cases="$ROOT/hooks/mod/cmdkey.cases.ts"
+  ck_n=0
+  while IFS= read -r ck_pair; do
+    ck_cmd="$(printf '%s' "$ck_pair" | jq -r '.[0]')"
+    ck_want="$(printf '%s' "$ck_pair" | jq -r '.[1]')"
+    ck_n=$((ck_n + 1))
+    is "key: shared case $ck_n" "$ck_want" "$(ck "$ck_cmd")"
+  done < <(sed '1d;$d' "$ck_cases" | sed 's/,[[:space:]]*$//' | jq -c '.')
+  # jq stops at the first line that is not JSON, so a broken case would take
+  # every case after it with it, silently.
+  is "key: every shared case was read" "$(grep -c '^  \[' "$ck_cases")" "$ck_n"
+  # The usual time the live layer's band shows, held to bash's own answers.
+  us_cases="$ROOT/hooks/mod/usual.cases.ts"
+  us_file="$WORK/usual-cases.tsv"
+  sed -n '2p' "$us_cases" | sed 's/;[[:space:]]*$//' | jq -j '.' > "$us_file"
+  us_n=0
+  while IFS= read -r us_row; do
+    us_project="$(printf '%s' "$us_row" | jq -r '.[0]')"
+    us_key="$(printf '%s' "$us_row" | jq -r '.[1]')"
+    us_want="$(printf '%s' "$us_row" | jq -r '.[2]')"
+    us_n=$((us_n + 1))
+    is "usual: shared case $us_n ($us_project/$us_key)" "$us_want" "$(ct_command_usual "$us_file" "$us_project" "$us_key")"
+  done < <(sed '1,3d;$d' "$us_cases" | sed 's/,[[:space:]]*$//' | jq -c '.')
+  is "usual: every shared case was read" "$(sed '1,3d' "$us_cases" | grep -c '^  \[')" "$us_n"
+  is "usual: the shared file was read" "$(sed -n '2p' "$us_cases" | sed 's/;[[:space:]]*$//' | jq -r '.' | grep -c .)" "$(grep -c . "$us_file")"
 else
   for ck_label in "and segment" "script path" "run ids" "quotes" "abs path" "sudo" "url" \
                   "heredoc" "pipe" "two args" "test file" "assignment" "empty" "non-string" \
@@ -7065,6 +7125,14 @@ else
                   "quoted braces" "env brace" "env paren" "path paren" "subst program" "60 chars"; do
     skip "key: $ck_label" "jq is not installed"
   done
+  # The shared cases, counted without jq: one element per line.
+  ck_n="$(grep -c '^  \[' "$ROOT/hooks/mod/cmdkey.cases.ts")"
+  for ck_i in $(seq 1 "$ck_n"); do skip "key: shared case $ck_i" "jq is not installed"; done
+  us_n="$(sed '1,3d' "$ROOT/hooks/mod/usual.cases.ts" | grep -c '^  \[')"
+  for us_i in $(seq 1 "$us_n"); do skip "usual: shared case $us_i" "jq is not installed"; done
+  skip "key: every shared case was read" "jq is not installed"
+  skip "usual: every shared case was read" "jq is not installed"
+  skip "usual: the shared file was read" "jq is not installed"
 fi
 
 echo
@@ -7190,6 +7258,8 @@ is "usually: the note carries the usual duration" "That Bash call took 6m10s (us
   "$(ct_slow_tool_note Bash 370000 ok 60 240)"
 is "usually: a failure too" "That Bash call failed after 1m10s (usually 4m00s)." \
   "$(ct_slow_tool_note Bash 70000 fail 60 240)"
+is "usually: a sub-second median says under 1s, not 0s" "That Bash call took 2m30s (usually under 1s)." \
+  "$(ct_slow_tool_note Bash 150000 ok 60 0)"
 is "usually: without it the note is unchanged" "That Bash call took 6m10s." "$(ct_slow_tool_note Bash 370000 ok 60)"
 
 if command -v jq >/dev/null 2>&1; then

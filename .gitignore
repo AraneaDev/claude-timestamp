@@ -18,3 +18,6 @@ __pycache__/
 /docs/superpowers/
 /docs/test-gen/
 /.superpowers/
+
+# Written by Claude Code each time it loads the hooks module.
+/.claude-plugin/types/

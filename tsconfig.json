@@ -1,0 +1,6 @@
+{
+  // tsc -p . type-checks hooks/mod once a session has loaded the mod and
+  // the engine has written .claude-plugin/types/ (gitignored).
+  "extends": "./.claude-plugin/types/tsconfig.json",
+  "include": ["hooks/mod/**/*.ts", "hooks/mod/**/*.tsx", "types/index.d.ts"]
+}

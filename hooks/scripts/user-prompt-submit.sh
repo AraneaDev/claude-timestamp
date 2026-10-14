@@ -69,6 +69,12 @@ if state_file="$(ct_state_file "$session_id")"; then
   fi
   ct_stage_flag "$session_id" "heartbeat" "$notes_hb"
   ct_stage_flag "$session_id" "slowtool"  "$notes_st"
+  # The live layer's band is drawn, never sent to the model, so it reads the
+  # threshold ungated by INJECT_CONTEXT.
+  live="off"
+  [ "$CT_ENABLED" = "on" ] && [ "$CT_LIVE" = "on" ] && live="on"
+  ct_stage_flag "$session_id" "live"     "$live"
+  ct_stage_flag "$session_id" "livetool" "$CT_SLOW_TOOL_AFTER"
   # What the heartbeat renders its clock times with, and whether a subagent's
   # tool calls may carry a note.
   ct_stage_flag "$session_id" "ctxfmt"    "$CT_CONTEXT_FORMAT"

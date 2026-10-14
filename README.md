@@ -11,7 +11,7 @@ At the end, where the session's time actually went.
 [![Release](https://img.shields.io/github/v/release/AraneaDev/claude-timestamp)](https://github.com/AraneaDev/claude-timestamp/releases)
 [![Tool page](https://img.shields.io/badge/tool%20page-aranea--development.nl-0b7285)](https://aranea-development.nl/en/tools/claude-timestamp)
 [![CI](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml/badge.svg)](https://github.com/AraneaDev/claude-timestamp/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-1467%20passing-2b8a3e)](tests/run.sh)
+[![Tests](https://img.shields.io/badge/tests-1530%20passing-2b8a3e)](tests/run.sh)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-364fc7)](docs/troubleshooting.md#platform-notes)
 [![Conventional Commits](https://img.shields.io/badge/commits-conventional-fe5196?logo=conventionalcommits&logoColor=white)](https://www.conventionalcommits.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
@@ -52,6 +52,12 @@ more than the session. The second line appears with `TOOL_TIMING` on.
 <p align="center">
   <img src="assets/session.webp" alt="An idle divider above a stamped message, and the end-of-session summary below it" width="700">
 </p>
+
+While a turn runs, a dim label in the footer counts it up
+(`⏱ 1m12s · session 1h03m`). When a command runs past its usual time, the
+line under it says so (`1m10s · usually ~40s · ctrl+b to run in background`),
+and any other slow tool gets a line above the prompt. Nothing new appears for
+a quick turn. Claude Code only, and display only: Claude is told nothing more.
 
 ### What the agent is told
 
@@ -125,6 +131,8 @@ Checked against Claude Code and Codex CLI 0.154.0.
 | --- | :---: | :---: | --- |
 | Timestamp marker on each message | ✓ | ✗ | Codex has no event for drawing on a message |
 | Idle divider and slow-turn colour | ✓ | ✗ | Drawn by the same marker |
+| Live turn clock in the footer | ✓ | ✗ | Needs a Claude Code build with hooks modules; `LIVE=off` hides it |
+| A slow tool's time, live, beside its usual time | ✓ | ✗ | Same; Codex has no module support |
 | Prompt time told to Claude | ✓ | ✓ | |
 | Turn-length and slow-tool notes | ✓ | ✓ | Codex timings are whole seconds |
 | Resumption note, for a project or a conversation | ✓ | ✓ | |

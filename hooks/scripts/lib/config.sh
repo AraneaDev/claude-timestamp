@@ -168,6 +168,7 @@ _ct_read_config_file() {
       SLOW_TOOL_AFTER) CT_SLOW_TOOL_AFTER="$value" ;;
       RESUME_NOTE)    CT_RESUME_NOTE="$value" ;;
       COMMAND_MEMORY) CT_COMMAND_MEMORY="$value" ;;
+      LIVE)           CT_LIVE="$value" ;;
     esac
   done < "$file"
 }
@@ -205,6 +206,7 @@ ct_load_config() {
   CT_SLOW_TOOL_AFTER="60"     # seconds; 0 disables. Tells the model, so INJECT_CONTEXT gates it too
   CT_RESUME_NOTE="on"         # tell the model how long ago this conversation or project was last active
   CT_COMMAND_MEMORY="on"      # remember how long each Bash command takes, per project
+  CT_LIVE="on"                # Claude Code only: live turn clock and slow-tool band
 
   CT_CONFIG_PROBLEMS=""
   CT_PROJECT_CONFIG=""
@@ -335,6 +337,7 @@ ct_validate_config() {
   _ct_require SLOW_TOOL_AFTER ct_is_seconds     60
   _ct_require RESUME_NOTE    ct_is_onoff        on
   _ct_require COMMAND_MEMORY ct_is_onoff        on
+  _ct_require LIVE           ct_is_onoff        on
 }
 
 # Preset name -> strftime string. Anything containing a % is already a strftime
