@@ -87,8 +87,9 @@ capture plain output instead, since none of them draw anything a pty would
 change; session and session-report drive the real scripts directly with
 planted state, the way tests/run.sh does. Nothing in those images is mocked
 up. Hero, picker and skill talk to an actual Claude Code session, so they need
-a working login and spend tokens; skill loads this checkout's plugin with
-`--plugin-dir` rather than the installed one. Wizard, doctor, stats, markers,
+a working login and spend tokens. All three load this checkout's plugin with
+`--plugin-dir` rather than the installed one, and none of your user settings:
+your hooks, status line and other plugins stay out of the images. Wizard, doctor, stats, markers,
 session and session-report run local scripts only and are free and offline.
 The durations in the hero and skill shots differ every run because they are
 real measurements. Python dependencies install into a virtualenv beside the
