@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.39](https://github.com/AraneaDev/timestamps/compare/v0.0.38...v0.0.39) (2026-10-14)
+
+
+### Fixes
+
+* show the plugin as Timestamps in its title, display name and descriptions ([#107](https://github.com/AraneaDev/timestamps/issues/107)) ([6d74573](https://github.com/AraneaDev/timestamps/commit/6d745739a27fce8b93d393c6abe8bc7ee147901f))
+
 ## [0.0.38](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.37...v0.0.38) (2026-10-14)
 
 
