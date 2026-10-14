@@ -5,7 +5,7 @@ const DIR = '/tmp/claude-timestamp-1000'
 const SURFACES = ['terminal', 'desktop'] as const
 const BAND = {
   component: 'AbovePrompt' as const,
-  props: { hasSurvey: false, isWorking: true, maxRows: 10, bodyColumns: 80, scroll: { offset: 0, bodyRows: 10 } },
+  props: { hasSurvey: false, isWorking: true, maxRows: 10, bodyColumns: 80, scroll: { offset: 0, bodyRows: 10 }, view: {} },
 }
 const TSV = ['1\tapp\tnpm test\t40000\tok', '2\tapp\tnpm test\t40000\tok', '3\tapp\tnpm test\t40000\tok'].join('\n')
 
@@ -22,7 +22,10 @@ function world(on: On, flags: Record<string, string> = {}) {
     ...Object.fromEntries(Object.entries(flags).map(([k, v]) => [`${DIR}/s1.${k}`, v])),
   }
   on('session.id', () => ({ value: 's1' }))
-  on('fs.read', ($, e) => (e.path in files ? { value: files[e.path] } : { deny: `ENOENT ${e.path}` }))
+  on('fs.read', ($, e) => {
+    const text = files[e.path]
+    return text === undefined ? { deny: `ENOENT ${e.path}` } : { value: text }
+  })
   on('ui.status', () => ({ value: undefined }))
   on('ui.invalidate', () => ({ value: undefined }))
   // The engine's own band, beneath the plugin: drawn when the plugin passes.
@@ -40,7 +43,13 @@ function world(on: On, flags: Record<string, string> = {}) {
     })
     return { result: {} } as never
   })
-  return { clock, finish, fail }
+  // Ends a running call; throws when the test names a call that never started.
+  const end = (which: Record<string, () => void>, id: string) => {
+    const act = which[id]
+    if (!act) throw new Error(`no running call ${id}`)
+    act()
+  }
+  return { clock, finish: (id: string) => end(finish, id), fail: (id: string) => end(fail, id) }
 }
 
 async function bandText($: any, surface: (typeof SURFACES)[number]) {
@@ -57,7 +66,7 @@ test('quiet below the threshold, shown above it, with the usual time', async ($,
   for (const s of SURFACES) expect(await bandText($, s)).toBeUndefined()
   await clock.advance(31_000)
   for (const s of SURFACES) expect(await bandText($, s)).toBe('npm test · 1m01s · usually ~40s')
-  finish.a()
+  finish('a')
   await call
   for (const s of SURFACES) expect(await bandText($, s)).toBeUndefined()
 })
@@ -69,7 +78,7 @@ test('an unknown command waits for SLOW_TOOL_AFTER', async ($, on) => {
   expect(await bandText($, 'terminal')).toBeUndefined()
   await clock.advance(2_000)
   expect(await bandText($, 'terminal')).toBe('make · 21s')
-  finish.a()
+  finish('a')
   await call
 })
 
@@ -80,10 +89,10 @@ test('several running: the longest slow one, plus a count', async ($, on) => {
   const two = $.tool.call({ tool: 'Read', file_path: '/x', tool_use_id: 'b' } as never)
   await clock.advance(55_000)
   expect(await bandText($, 'terminal')).toBe('make · 1m05s · +1 more')
-  finish.a()
+  finish('a')
   await one
   expect(await bandText($, 'terminal')).toBeUndefined()
-  finish.b()
+  finish('b')
   await two
 })
 
@@ -92,7 +101,7 @@ test('a background command never shows', async ($, on) => {
   const call = $.tool.call({ tool: 'Bash', command: 'npm test', run_in_background: true, tool_use_id: 'a' } as never)
   await clock.advance(120_000)
   expect(await bandText($, 'terminal')).toBeUndefined()
-  finish.a()
+  finish('a')
   await call
 })
 
@@ -101,7 +110,7 @@ test('a tool that errors beneath still leaves the band', async ($, on) => {
   const call = $.tool.call({ tool: 'Bash', command: 'make', tool_use_id: 'a' } as never).catch(() => undefined)
   await clock.advance(70_000)
   expect(await bandText($, 'terminal')).toBe('make · 1m10s')
-  fail.a()
+  fail('a')
   await call
   expect(await bandText($, 'terminal')).toBeUndefined()
 })
@@ -113,6 +122,6 @@ test('LIVE=off: the engine band is drawn and the tool still runs', async ($, on)
   const ui = await $.ui.mount({ plugin: 'claude-timestamp', surface: 'terminal', ...BAND })
   expect((await ui.find({ type: 'Text', text: /engine band/ }))?.text).toBe('engine band')
   await ui.unmount()
-  finish.a()
+  finish('a')
   await expect(call).resolves.toBeDefined()
 })

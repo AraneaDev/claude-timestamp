@@ -11,14 +11,16 @@ export function usualSeconds(tsv: string, project: string | undefined, key: stri
   for (const line of tsv.split('\n')) {
     const f = line.split('\t')
     if (f.length !== 5) continue
-    if (!/^[0-9]+$/.test(f[0]) || !/^[0-9]+$/.test(f[3])) continue
-    if (f[4] !== 'ok' && f[4] !== 'fail') continue
-    if (f[1] !== project || f[2] !== key) continue
-    runs.push(Number(f[3]))
+    const [epoch = '', where, name, ms = '', outcome] = f
+    if (!/^[0-9]+$/.test(epoch) || !/^[0-9]+$/.test(ms)) continue
+    if (outcome !== 'ok' && outcome !== 'fail') continue
+    if (where !== project || name !== key) continue
+    runs.push(Number(ms))
   }
   if (runs.length < MIN_RUNS) return undefined
   const a = runs.slice(-WINDOW).sort((x, y) => x - y)
   const m = a.length
-  const med = m % 2 ? a[(m - 1) / 2] : Math.floor((a[m / 2 - 1] + a[m / 2]) / 2)
+  const at = (i: number) => a[i] ?? 0
+  const med = m % 2 ? at((m - 1) / 2) : Math.floor((at(m / 2 - 1) + at(m / 2)) / 2)
   return Math.floor(med / 1000)
 }

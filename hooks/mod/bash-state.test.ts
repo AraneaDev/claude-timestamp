@@ -10,8 +10,9 @@ function host(files: Record<string, string>, env: Record<string, string> = { UID
     env: async name => vars[name],
     sessionId: async () => 'ab.c/../d-1',
     read: async path => {
-      if (path in files) return files[path]
-      throw new Error(`ENOENT ${path}`)
+      const text = files[path]
+      if (text === undefined) throw new Error(`ENOENT ${path}`)
+      return text
     },
     run: async () => ({ exitCode: 0, stdout: idU }),
   }

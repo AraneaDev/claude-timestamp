@@ -9,7 +9,8 @@ function world(on: On, flags: Record<string, string>) {
   on('session.id', () => ({ value: 's1' }))
   on('fs.read', ($, e) => {
     const name = e.path.startsWith(`${DIR}/s1.`) ? e.path.slice(`${DIR}/s1.`.length) : ''
-    return name in flags ? { value: flags[name] } : { deny: `ENOENT ${e.path}` }
+    const text = flags[name]
+    return text === undefined ? { deny: `ENOENT ${e.path}` } : { value: text }
   })
   const statuses: Array<string | undefined> = []
   on('ui.status', ($, e) => {

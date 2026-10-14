@@ -37,3 +37,14 @@ Timing state lives in `$TMPDIR/claude-timestamp-<your uid>`, one small file per
 session, cleared when the session ends and pruned after seven days. The
 directory is created private to you, and one belonging to somebody else is
 declined rather than written into.
+
+## The live layer
+
+Claude Code builds that load hooks modules also run `hooks/mod/`, a
+TypeScript module named in `hooks.json` beside the scripts. It measures and
+records nothing. It reads what the scripts staged for the session (whether
+the plugin and `LIVE` are on, the session's start, the slow-tool threshold,
+the project) and the command memory, and draws from them while a turn is
+still running: a clock in the status line, and a band above the prompt
+when a tool passes its usual time. If the module fails, or the build has no
+modules, the plugin behaves exactly as described above. Codex never loads it.

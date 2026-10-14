@@ -67,10 +67,8 @@ export function cmdKey(command: unknown): string {
     .filter(seg => words(seg).length > 0)
   const segment = segments[segments.length - 1] ?? ''
   let ws = words(segment.split('|')[0] ?? '').slice(0, 40)
-  while (ws.length > 0 && isPrefix(ws[0])) ws = ws.slice(1)
-  if (ws.length === 0) return ''
-  const parts = ws[0].split('/')
-  const prog = parts[parts.length - 1]
+  while (ws[0] !== undefined && isPrefix(ws[0])) ws = ws.slice(1)
+  const prog = ws[0]?.split('/').pop() ?? ''
   if (!isPlain(prog) || prog.startsWith('-')) return ''
   if (prog === 'echo' || prog === 'printf') return prog
   const kept: string[] = []

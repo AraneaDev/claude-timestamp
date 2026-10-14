@@ -3,6 +3,8 @@
 This repository contains a Claude Code plugin and a Codex-compatible plugin
 manifest. Keep the two integrations additive: Claude Code's hooks and
 `MessageDisplay` marker are existing behavior and must remain intact.
+`hooks/mod/` is a Claude Code hooks module, additive in the same way: it only
+draws what the bash hooks staged, and Codex never loads it.
 
 When a claude-timestamp hook supplies a measured time, turn duration, slow-tool
 note, or resumption note, use that value instead of estimating. Codex receives

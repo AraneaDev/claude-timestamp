@@ -161,9 +161,8 @@ export function registerLive(on: On): void {
       const isPastSlow = bash.slowToolAfter > 0 && elapsed > bash.slowToolAfter
       if (isPastUsual || isPastSlow) slow.push({ call, elapsed, usual })
     }
-    if (slow.length === 0) return next(e)
-    slow.sort((a, b) => b.elapsed - a.elapsed)
-    const top = slow[0]
+    const top = slow.sort((a, b) => b.elapsed - a.elapsed)[0]
+    if (top === undefined) return next(e)
     const parts = [top.call.key ?? top.call.tool, formatDuration(top.elapsed)]
     if (top.usual !== undefined) parts.push(`usually ~${formatDuration(top.usual)}`)
     if (calls.length > 1) parts.push(`+${calls.length - 1} more`)

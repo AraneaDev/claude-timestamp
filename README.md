@@ -53,6 +53,11 @@ more than the session. The second line appears with `TOOL_TIMING` on.
   <img src="assets/session.webp" alt="An idle divider above a stamped message, and the end-of-session summary below it" width="700">
 </p>
 
+While a turn runs, the status line counts it up (`⏱ 1m12s · session 1h03m`),
+and when a tool runs past its usual time a line above the prompt says so:
+`npm test · 1m10s · usually ~40s`. Nothing new appears for a quick turn.
+Claude Code only, and display only: Claude is told nothing more.
+
 ### What the agent is told
 
 The agent receives the time each prompt was sent, a short note when a turn
@@ -125,6 +130,8 @@ Checked against Claude Code and Codex CLI 0.154.0.
 | --- | :---: | :---: | --- |
 | Timestamp marker on each message | ✓ | ✗ | Codex has no event for drawing on a message |
 | Idle divider and slow-turn colour | ✓ | ✗ | Drawn by the same marker |
+| Live turn clock in the status line | ✓ | ✗ | Needs a Claude Code build with hooks modules; `LIVE=off` hides it |
+| Band while a tool runs past its usual time | ✓ | ✗ | Same; Codex has no module support |
 | Prompt time told to Claude | ✓ | ✓ | |
 | Turn-length and slow-tool notes | ✓ | ✓ | Codex timings are whole seconds |
 | Resumption note, for a project or a conversation | ✓ | ✓ | |
