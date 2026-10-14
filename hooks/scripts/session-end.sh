@@ -67,7 +67,7 @@ fi
 
 summary=""
 if [ "$CT_SUMMARY" = "on" ] && [ "$_CT_START" -gt 0 ] && [ "$_CT_TURNS" -gt 0 ]; then
-  summary="claude-timestamp: session lasted $(ct_format_duration "$total") over $_CT_TURNS turn"
+  summary="Session lasted $(ct_format_duration "$total") over $_CT_TURNS turn"
   [ "$_CT_TURNS" -eq 1 ] || summary="${summary}s"
   summary="${summary}, $(ct_format_duration "$_CT_WAIT") of it waiting"
   # Only mentioned when there was a break worth mentioning, so a session you

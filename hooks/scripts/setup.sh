@@ -48,7 +48,7 @@ CT_JSON=0
 
 usage() {
   cat <<'USAGE'
-claude-timestamp setup
+Timestamps setup
 
   setup.sh                    Interactive wizard.
   setup.sh [flags]            Write settings without prompting.
@@ -527,7 +527,7 @@ EOF
   # "last N sessions" is right for an unfiltered view and wrong for a filtered
   # one: the rows are the ones that matched, not the most recent ones. The
   # filter is spelled out so a narrowed total is never read as an all-time one.
-  printf 'claude-timestamp stats%*s' "$((28 - 21))" ""
+  printf 'Timestamps stats%*s' "$((28 - 15))" ""
   if [ -n "${CT_STATS_SINCE:-}${CT_STATS_PROJECT:-}" ]; then
     printf '%s session' "$n"
   else
@@ -743,9 +743,9 @@ _ct_report_session() {
   _CT_R_FMT="$CT_CONTEXT_FORMAT"
   if [ ! -r "$_CT_R_BASE" ]; then
     if [ "$CT_JSON" = "1" ]; then
-      echo "claude-timestamp has no record of this session yet." >&2
+      echo "No record of this session yet." >&2
     else
-      echo "claude-timestamp has no record of this session yet. It starts counting at the first prompt, and records nothing while ENABLED=off."
+      echo "No record of this session yet. Timestamps starts counting at the first prompt, and records nothing while ENABLED=off."
     fi
     return 1
   fi
@@ -781,7 +781,7 @@ session_report() {
     _ct_session_json "$base" "$now" "$tooltiming"
     return $?
   fi
-  echo "claude-timestamp session"
+  echo "Timestamps session"
   echo
   if [ "$_CT_START" -gt 0 ]; then
     echo "  started         $(ct_format_epoch "$_CT_START" "$ctxfmt") $(ct_zone)"
@@ -916,7 +916,7 @@ turns_report() {
     jq -n --argjson turns "$(_ct_turns_json "$_CT_R_BASE" "$now")" '{turns: $turns}'
     return $?
   fi
-  echo "claude-timestamp turns"
+  echo "Timestamps turns"
   echo
   printf '  %4s  %-10s %-12s %-6s %-16s %s\n' "#" "started" "took" "tools" "slowest" "how"
   while IFS=$'\t' read -r n start _ secs tools _ slow _ how _; do
@@ -953,7 +953,7 @@ commands_report() {
       jq -n '{project: null, all: false, commands: []}'
       return $?
     fi
-    echo "claude-timestamp keeps commands per project, and this directory is not in one."
+    echo "Commands are kept per project, and this directory is not in one."
     echo "Pass --project=NAME or --project=all."
     return 0
   fi
@@ -970,9 +970,9 @@ commands_report() {
     return $?
   fi
   if [ "$mode" = "all" ]; then
-    echo "claude-timestamp commands, all projects"
+    echo "Timestamps commands, all projects"
   else
-    echo "claude-timestamp commands in $project"
+    echo "Timestamps commands in $project"
   fi
   echo
   if [ "$CT_COMMAND_MEMORY" != "on" ]; then
@@ -1015,7 +1015,7 @@ doctor() {
   local problems=0
   ct_load_config
 
-  echo "claude-timestamp doctor"
+  echo "Timestamps doctor"
   echo
 
   echo "Platform"
@@ -1616,7 +1616,7 @@ ask() {
 wizard() {
   ct_load_config
 
-  echo "claude-timestamp setup"
+  echo "Timestamps setup"
   echo "Press Enter to keep the value in brackets."
   echo
 
@@ -1627,7 +1627,7 @@ wizard() {
   # Enabled
   echo "Master switch for the whole plugin. Off silences every hook without"
   echo "uninstalling it, and the rest of your settings stay put for next time."
-  ask "Enable claude-timestamp? (on/off)" "$CT_ENABLED"; answer="$_CT_ANSWER"
+  ask "Enable timestamps? (on/off)" "$CT_ENABLED"; answer="$_CT_ANSWER"
   case "$answer" in on|off) CT_ENABLED="$answer" ;; esac
   echo
 

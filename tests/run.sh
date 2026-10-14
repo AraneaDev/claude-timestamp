@@ -6823,7 +6823,7 @@ if command -v jq >/dev/null 2>&1; then
   contains "session: and says why" "CLAUDE_CODE_SESSION_ID" "$out"
 
   out="$(CLAUDE_CODE_SESSION_ID=never-seen bash "$SCRIPTS/setup.sh" --session 2>&1)"
-  contains "session: an unknown session says there is no record" "no record of this session" "$out"
+  contains "session: an unknown session says there is no record" "No record of this session" "$out"
 
   fresh 'TZ=UTC'
   printf '{"session_id":"live"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
@@ -6891,7 +6891,7 @@ if command -v jq >/dev/null 2>&1; then
     "$(printf '{"session_id":"ptr"}' | bash "$SCRIPTS/session-start.sh" | jq -r '.hookSpecificOutput.additionalContext // ""')"
   fresh
   contains "pointer: follows the resumption note" "ago (" "$(ss_ctx "$(ss_run)")"
-  contains "pointer: in that order" ". claude-timestamp reports" "$(ss_ctx "$(ss_run)")"
+  contains "pointer: in that order" ". Timestamps reports" "$(ss_ctx "$(ss_run)")"
   contains "pointer: mentions usually slow commands" "usually slow commands" "$(ss_ctx "$(ss_run)")"
   # With every note off there is nothing to report, so the pointer keeps only
   # the part that is still true.
@@ -6969,7 +6969,7 @@ if command -v jq >/dev/null 2>&1; then
   printf '{"session_id":"tr","hook_event_name":"Stop"}' | bash "$SCRIPTS/stop.sh"
   printf '{"session_id":"tr"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
   out="$(tr_run --turns)"
-  contains "turns: a header" "claude-timestamp turns" "$out"
+  contains "turns: a header" "Timestamps turns" "$out"
   contains "turns: the closed turn, closed by Stop" "stop" "$out"
   is "turns: the open turn last" "open" "$(printf '%s\n' "$out" | tail -n 1 | awk '{print $NF}')"
   js="$(tr_run --turns --json)"
