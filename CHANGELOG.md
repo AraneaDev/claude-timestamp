@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.0.40](https://github.com/AraneaDev/timestamps/compare/v0.0.39...v0.0.40) (2026-10-14)
+
+
+### Features
+
+* rename the settings command to /timestamps:configure ([#113](https://github.com/AraneaDev/timestamps/issues/113)) ([d5a1f52](https://github.com/AraneaDev/timestamps/commit/d5a1f525d7ee9d1ec4aa74b8730362c1bca66fea))
+
+
+### Fixes
+
+* drop the claude-timestamp: prefix from messages ([#109](https://github.com/AraneaDev/timestamps/issues/109)) ([3433dbd](https://github.com/AraneaDev/timestamps/commit/3433dbdfd98c8c381509f51c5e5a28aaf0887f03))
+* let /timestamps run the command, not the configure skill of the same name ([#112](https://github.com/AraneaDev/timestamps/issues/112)) ([c690b40](https://github.com/AraneaDev/timestamps/commit/c690b40f1d147a595c928bd106dc2d2216f69df7))
+
 ## [0.0.39](https://github.com/AraneaDev/timestamps/compare/v0.0.38...v0.0.39) (2026-10-14)
 
 
