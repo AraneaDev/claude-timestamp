@@ -96,7 +96,7 @@ if [ -n "$summary" ]; then
   jq -n --arg msg "$summary" '{systemMessage: $msg}'
 fi
 
-# Record the session before its state is cleared, so /timestamps stats has
+# Record the session before its state is cleared, so /timestamps:configure stats has
 # something to work from once the session is gone. Independent of SUMMARY:
 # they are separate settings and share only the counters underneath.
 if [ "$CT_HISTORY" = "on" ] && [ "$_CT_START" -gt 0 ] && [ "$_CT_TURNS" -gt 0 ]; then

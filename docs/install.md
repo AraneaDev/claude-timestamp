@@ -40,7 +40,8 @@ claude plugin marketplace update aranea
 claude plugin install timestamps@aranea
 ```
 
-Settings, history and command memory stay where they are and carry over. In
+Settings, history and command memory stay where they are and carry over. The
+settings command is now `/timestamps:configure`; `/timestamps` is gone. In
 Codex, the same with `codex plugin remove claude-timestamp@aranea` and
 `codex plugin add timestamps@aranea`.
 
@@ -81,7 +82,7 @@ bash "$(git rev-parse --show-toplevel)/hooks/scripts/setup.sh" --show
 bash "$(git rev-parse --show-toplevel)/hooks/scripts/setup.sh" --tz=Europe/Amsterdam
 ```
 
-The `/timestamps` command remains the Claude Code interface. Both clients use
+The `/timestamps:configure` command remains the Claude Code interface. Both clients use
 the same `~/.claude/claude-timestamp.conf` and history file, while active call
 state stays isolated by session.
 
@@ -90,7 +91,7 @@ state stays isolated by session.
 Claude Code in WSL and the desktop app on Windows do not share a home directory.
 WSL has `~/.claude`, Windows has `C:\Users\<you>\.claude`. Install the plugin
 on one side and the other side has nothing installed, and the same goes for `jq`
-and for the settings you picked with `/timestamps`. On macOS and Linux there is
+and for the settings you picked with `/timestamps:configure`. On macOS and Linux there is
 one home directory, so one install covers everything.
 
 Install both, on each side you actually use.

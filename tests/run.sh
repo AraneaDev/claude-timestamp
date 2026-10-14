@@ -1530,7 +1530,7 @@ if command -v jq >/dev/null 2>&1; then
   is "session-start shows the user nothing once configured" "" "$(printf '%s' "$out" | jq -r '.systemMessage // ""')"
 
   CLAUDE_TIMESTAMP_CONFIG="$WORK/does-not-exist.conf" out="$(printf '{"session_id":"s"}' | bash "$SCRIPTS/session-start.sh")"
-  contains "session-start points a new user at /timestamps" "/timestamps" "$out"
+  contains "session-start points a new user at /timestamps:configure" "/timestamps:configure" "$out"
 
   # Up to 0.0.37 the plugin was claude-timestamp: both installed run every hook
   # twice, so the new one says so.
@@ -1559,7 +1559,7 @@ if command -v jq >/dev/null 2>&1; then
           printf '{"cwd":"%s/proj"}' "$SS" | bash "$SCRIPTS/session-start.sh" )"
   is "session start: emits exactly one JSON object" "1" "$(printf '%s' "$out" | jq -s 'length')"
   contains "session start: the object mentions the bad colour" "COLOR=banana" "$out"
-  contains "session start: and the first-run pointer"          "/timestamps"  "$out"
+  contains "session start: and the first-run pointer"          "/timestamps:configure"  "$out"
 else
   echo "  skip jq not installed, hook tests not run"
 fi
@@ -1796,7 +1796,7 @@ echo "invalid value messages"
 # CT_FLAG_TABLE, which is what makes the flag path and the wizard say the same
 # thing about the same bad value. One arm per validator, pinned here, because
 # an arm that stops naming the setting or stops echoing the offending value
-# leaves the /timestamps command relaying a sentence the user cannot act on.
+# leaves the /timestamps:configure command relaying a sentence the user cannot act on.
 #
 # Every case reads stderr with `2>&1 >/dev/null`, so an assertion here is about
 # what the user is told and never about what a successful write would have
@@ -2214,7 +2214,7 @@ refutes "invalid: unbalanced open brace"  ct_is_valid_marker '[%time{ %elapsed]'
 refutes "invalid: unbalanced close brace" ct_is_valid_marker '[%time} %elapsed]'
 
 # A group exists to disappear when the parts inside it are empty, which is the
-# only rule the README, the schema and /timestamps state about it. A group
+# only rule the README, the schema and /timestamps:configure state about it. A group
 # holding no part at all cannot do that: the renderer has nothing to test, so
 # it falls through and emits the braces themselves, and the user reads literal
 # {hi} on every message for the rest of the session. Refused at the validator,
@@ -2335,7 +2335,7 @@ fi
 
 # Every named look in schema.json must render to the string stored beside it.
 #
-# /timestamps may not run anything, so it shows these stored strings as
+# /timestamps:configure may not run anything, so it shows these stored strings as
 # previews. Without this test they would be prose that drifts; with it they are
 # strings CI has proven the renderer produces, which is what keeps the promise
 # that a preview cannot differ from what you will actually see.
@@ -2360,7 +2360,7 @@ $marker_names
 EOF
 
   # ct_is_valid_color accepts "off" and "grey" as aliases for "none" and
-  # "gray", and schema.json listed neither. commands/timestamps.md calls the
+  # "gray", and schema.json listed neither. commands/configure.md calls the
   # schema the only source of truth about what a key may hold and tells the
   # model to refuse a value it does not accept -- so a user asking for grey
   # was told grey is not a colour, by a contract narrower than the code behind
@@ -2607,7 +2607,7 @@ if command -v jq >/dev/null 2>&1; then
 
   out="$(printf '{"session_id":"x"}' | bash "$SCRIPTS/session-start.sh" | jq -r '.systemMessage')"
   contains "session start names the broken settings" "COLOR=banana" "$out"
-  contains "session start points at the fix" "/timestamps" "$out"
+  contains "session start points at the fix" "/timestamps:configure" "$out"
 
   fresh 'COLOR=cyan'
   out="$(printf '{"session_id":"x"}' | bash "$SCRIPTS/session-start.sh")"
@@ -4219,7 +4219,7 @@ is "the search stops at home"                       "dim 24h "      "$(layered "
 # directory reached by its real path then never matches $HOME as written. The
 # stop at home has to survive that. Without it the account config is picked up
 # as a project layer: the settings still resolve, because it is the same file
-# read twice, but --doctor, --show and /timestamps all then report a project
+# read twice, but --doctor, --show and /timestamps:configure all then report a project
 # file that does not exist, and the slash command is told to say a project
 # pins the setting and is usually committed and shared.
 # write_project_config already resolves both sides for exactly this reason.
@@ -4701,7 +4701,7 @@ fi
 age="$(( $(date +%s) - $(jq -r '.clients.cli.written_at // 0' "$CLAUDE_TIMESTAMP_FACTS") ))"
 asserts "facts: carries a fresh write time" test "$age" -ge 0 -a "$age" -le 5
 
-# /timestamps is asked to diagnose "no colour, not a terminal" from facts the
+# /timestamps:configure is asked to diagnose "no colour, not a terminal" from facts the
 # hook actually writes, so the entrypoint it inherits from Claude Code has to
 # be one of them, and it is the key rather than a field.
 rm -f "$CLAUDE_TIMESTAMP_FACTS"
@@ -4786,7 +4786,7 @@ rm -f "$CLAUDE_TIMESTAMP_CONFIG" "$CLAUDE_TIMESTAMP_FACTS"
 out="$(printf '{"session_id":"facts"}' | BASH_ENV="$BLOCK_ROOT_CD" bash "$SCRIPTS/session-start.sh")"
 status=$?
 is "facts: a root-resolution failure still exits 0" "0" "$status"
-contains "facts: a root-resolution failure still emits the first-run banner" "/timestamps" "$out"
+contains "facts: a root-resolution failure still emits the first-run banner" "/timestamps:configure" "$out"
 asserts "facts: a root-resolution failure still writes a valid facts file" jq -e . "$CLAUDE_TIMESTAMP_FACTS"
 is "facts: a root-resolution failure falls back to an unknown version" \
    "unknown" "$(jq -r '.clients[].version' "$CLAUDE_TIMESTAMP_FACTS")"
@@ -4886,7 +4886,7 @@ is "enabled=off: no session summary" "" "$out"
 is "enabled=off: state is still cleared" "" \
    "$(find "$(ct_state_dir)" -name 'off-3*' 2>/dev/null)"
 
-# The facts file must still be written, or /timestamps could never turn the
+# The facts file must still be written, or /timestamps:configure could never turn the
 # plugin back on. COLOR=banana is pinned alongside ENABLED=off so a config
 # problem exists that would otherwise produce a systemMessage -- proving
 # silence here comes from the ENABLED guard, not from there being nothing to
@@ -5818,7 +5818,7 @@ refutes "atomic write: and nothing is created on the way" test -e "$WA/absent"
 # A read-only parent is the realistic version of the same failure: the config
 # directory exists but the write cannot land. The contract is that the target
 # is left exactly as it was and the temp is cleaned up, so a failed
-# `/timestamps` leaves a working config rather than an empty one.
+# `/timestamps:configure` leaves a working config rather than an empty one.
 #
 # Root ignores the mode bits entirely -- checked: the write succeeds as root --
 # so this needs an unprivileged user and a filesystem that has mode bits at all.
@@ -5908,7 +5908,7 @@ else
 fi
 
 # Two wizards finishing at once -- two terminals, or a hook and a hand-run
-# `/timestamps`. Whoever renames last wins, and that is fine; what may never
+# `/timestamps:configure`. Whoever renames last wins, and that is fine; what may never
 # happen is a survivor built from both. Repeated, because a single round would
 # pass even on a writer that truncates in place and simply got lucky.
 rm -rf "$WA/race"; mkdir -p "$WA/race"
@@ -6744,7 +6744,7 @@ if command -v jq >/dev/null 2>&1; then
   rm -f "$CLAUDE_TIMESTAMP_CONFIG"
   out="$(ss_run)"
   is "session start: one object carries both audiences" "1" "$(printf '%s' "$out" | jq -s 'length')"
-  contains "session start: the user still gets the first-run note" "/timestamps" "$(printf '%s' "$out" | jq -r '.systemMessage // ""')"
+  contains "session start: the user still gets the first-run note" "/timestamps:configure" "$(printf '%s' "$out" | jq -r '.systemMessage // ""')"
   contains "session start: and Claude gets the resumption note" "Previous session" "$(ss_ctx "$out")"
 else
   for ss_label in "last active" "event name" "resume off" "inject off" "enabled off" \
@@ -6876,10 +6876,14 @@ ta_skill="$ROOT/skills/time-awareness/SKILL.md"
 asserts "skill: SKILL.md ships" test -r "$ta_skill"
 is "skill: named after its directory" "time-awareness" "$(sed -n 's/^name: //p' "$ta_skill" 2>/dev/null)"
 is "skill: hidden from the slash menu" "false" "$(sed -n 's/^user-invocable: //p' "$ta_skill" 2>/dev/null)"
-# The configure skill shares its name with /timestamps, and Claude Code then
-# runs the skill for the command; hidden, the slash command is the command.
-is "configure skill: hidden from the slash menu, so /timestamps is the command" "false" \
+# The configure skill is for Claude and Codex. In the slash menu it sat beside
+# the command, and once shared the command's name and ran in its place.
+is "configure skill: hidden from the slash menu, beside /timestamps:configure" "false" \
   "$(sed -n 's/^user-invocable: //p' "$ROOT/skills/timestamps/SKILL.md" 2>/dev/null)"
+# The command is /timestamps:configure: a command file named timestamps.md would show as
+# /timestamps:timestamps.
+asserts "command: /timestamps:configure ships" test -r "$ROOT/commands/configure.md"
+asserts "command: no /timestamps:timestamps beside it" test ! -e "$ROOT/commands/timestamps.md"
 asserts "skill: the script it runs is where it says" test -r "$ROOT/skills/time-awareness/../../hooks/scripts/setup.sh"
 for ta_quote in "Turn running" "That Bash call took" "Previous session in this project ended" "Resuming this conversation" "Conversation compacted" "Usually slow in this project" "(usually"; do
   contains "skill: explains '$ta_quote'" "$ta_quote" "$(cat "$ta_skill" 2>/dev/null)"

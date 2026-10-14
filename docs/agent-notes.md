@@ -24,7 +24,7 @@ running?". It says what each note is a reason to do: check the work against
 the request after a long stretch, run a slow command in the background next
 time, re-check the branch and CI after a gap. It can also run
 `setup.sh --session` and `--stats` to answer from measurement. It does not
-appear in your `/` menu; `/timestamps` is still where you change settings.
+appear in your `/` menu; `/timestamps:configure` is still where you change settings.
 
 <p align="center">
   <img src="../assets/skill.webp" alt="Claude loading the time-awareness skill and answering how long the session has run from the measured report" width="760">

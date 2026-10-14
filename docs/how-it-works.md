@@ -9,7 +9,7 @@ costs no model context. The exceptions are the short notes listed under
 
 | Hook | Job |
 | --- | --- |
-| `SessionStart` | Check `jq`, prune old state, point a new user at `/timestamps`; tell Claude how long ago this project or conversation was last active, and that the skill exists |
+| `SessionStart` | Check `jq`, prune old state, point a new user at `/timestamps:configure`; tell Claude how long ago this project or conversation was last active, and that the skill exists |
 | `UserPromptSubmit` | Open the turn, close one an interrupt left behind, tell Claude the local time |
 | `MessageDisplay` | Draw the marker on the first batch of each message |
 | `Stop` / `StopFailure` | Close the turn and record what it cost |

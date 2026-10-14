@@ -6,7 +6,7 @@
 #   setup.sh                     interactive wizard, previews each choice
 #   setup.sh --tz=CET --color=none   non-interactive write, no prompts
 #
-# The non-interactive form exists because the /timestamps slash command cannot
+# The non-interactive form exists because the /timestamps:configure slash command cannot
 # drive an interactive prompt -- Claude Code's Bash tool has no interactive
 # stdin. So the command asks the questions conversationally and calls this
 # script with flags. Same script, same validation, same config file.
@@ -807,7 +807,7 @@ session_report() {
     tools="$(ct_slowest_tools "${base}.tools" 5)"
     echo "  slowest tools   ${tools:-none timed yet}"
   else
-    echo "  tool timing     off; turn it on with /timestamps to see which tools took longest"
+    echo "  tool timing     off; turn it on with /timestamps:configure to see which tools took longest"
   fi
   return 0
 }
@@ -976,7 +976,7 @@ commands_report() {
   fi
   echo
   if [ "$CT_COMMAND_MEMORY" != "on" ]; then
-    echo "  COMMAND_MEMORY is off; turn it on with /timestamps to start recording."
+    echo "  COMMAND_MEMORY is off; turn it on with /timestamps:configure to start recording."
     [ -n "$rows" ] && echo
   fi
   if [ -z "$rows" ]; then
@@ -1239,7 +1239,7 @@ write_config() {
   mkdir -p "$dir"
   _ct_write_atomic "$file" <<CONF
 # claude-timestamp configuration
-# Written by setup.sh -- safe to edit by hand. Run /timestamps to change it
+# Written by setup.sh -- safe to edit by hand. Run /timestamps:configure to change it
 # interactively. Unknown keys are ignored.
 
 # Master switch. off silences every hook without uninstalling the plugin.
@@ -1448,7 +1448,7 @@ TABLE
           case "$line" in
             '# claude-timestamp settings for this project'|\
             '# Layered over your own configuration, which still supplies everything'|\
-            '# not listed here. Run /timestamps to change it.') continue ;;
+            '# not listed here. Run /timestamps:configure to change it.') continue ;;
           esac
           out="${out}${line}
 "
@@ -1476,14 +1476,14 @@ TABLE
   {
     echo "# claude-timestamp settings for this project"
     echo "# Layered over your own configuration, which still supplies everything"
-    echo "# not listed here. Run /timestamps to change it."
+    echo "# not listed here. Run /timestamps:configure to change it."
     echo
     printf '%s' "$out"
   } | _ct_write_atomic "$file"
   echo "Wrote $(ct_tilde "$file")"
 }
 
-# Prints the effective settings for whoever ran --show (or the /timestamps
+# Prints the effective settings for whoever ran --show (or the /timestamps:configure
 # slash command's "how it looks" path) to confirm what is actually configured,
 # without reading the config file -- or two, once a project layer is
 # involved -- by hand.
@@ -1612,7 +1612,7 @@ ask() {
 # SLOW_COLOR, DATE_ROLLOVER, SUBAGENTS, HISTORY_LIMIT, HEARTBEAT_AFTER,
 # SLOW_TOOL_AFTER and RESUME_NOTE are reachable only through their own flags;
 # a curated set of ready-made marker templates is offered separately, through
-# the /timestamps slash command's looks picker.
+# the /timestamps:configure slash command's looks picker.
 wizard() {
   ct_load_config
 

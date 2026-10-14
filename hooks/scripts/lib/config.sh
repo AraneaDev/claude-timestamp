@@ -67,7 +67,7 @@ ct_find_project_config() {
   # directory reached by its real path then never equals $HOME as written, the
   # stop below never fires, and the account config is picked up as a project
   # layer. The settings still come out right -- it is the same file read twice
-  # -- but --doctor, --show and /timestamps then all report a project file
+  # -- but --doctor, --show and /timestamps:configure then all report a project file
   # that does not exist, and the slash command is told to say a project pins
   # the setting and is usually committed and shared.
   #
@@ -858,7 +858,7 @@ ct_render_marker() {
 # renderer.
 # A group must also hold at least one placeholder. Disappearing when the parts
 # inside it are empty is the only thing a group does, and the only rule the
-# README, schema.json and commands/timestamps.md state about one -- a group
+# README, schema.json and commands/configure.md state about one -- a group
 # holding no part cannot do it. The renderer has nothing to test there, so it
 # falls through and emits the braces themselves, and "[{hi}%time]" draws a
 # literal {hi} on every message for the rest of the session. Refused here,
@@ -1144,7 +1144,7 @@ ct_slowest_tools() {
 # Whole seconds. The per-call millisecond precision the log keeps is what makes
 # a single slow call findable; summed over a session and then over a hundred
 # sessions it is noise, and dropping it keeps the field readable by eye, which
-# is the property /timestamps depends on.
+# is the property /timestamps:configure depends on.
 #
 # Eight tools, where the session summary keeps three. Three is right for "what
 # made this session slow", which wants a headline. This field feeds totals
@@ -1207,7 +1207,7 @@ ct_tool_digest() {
       # $1 is milliseconds here, the same scaling the first stage applied to
       # the sort key; converted back to whole seconds only now, for the one
       # part of the output format that has not changed: still whole seconds,
-      # still truncated, since /timestamps and the history documentation both
+      # still truncated, since /timestamps:configure and the history documentation both
       # read this field that way.
       printf "%s%s:%d:%d", (NR > 1 ? "," : ""), $2, int($1 / 1000), $3
     }' \
