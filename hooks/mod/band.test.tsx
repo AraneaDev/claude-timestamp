@@ -22,7 +22,9 @@ function world(on: On, flags: Record<string, string> = {}) {
     ...Object.fromEntries(Object.entries(flags).map(([k, v]) => [`${DIR}/s1.${k}`, v])),
   }
   on('session.id', () => ({ value: 's1' }))
+  let reads = 0
   on('fs.read', ($, e) => {
+    reads += 1
     const text = files[e.path]
     return text === undefined ? { deny: `ENOENT ${e.path}` } : { value: text }
   })
@@ -34,9 +36,22 @@ function world(on: On, flags: Record<string, string> = {}) {
     return <Text>engine band</Text>
   })
   // Each tool runs until the test finishes it.
+  on('turn.complete', () => ({ text: '' }))
+  on('tool.check', () => ({ decision: 'ask' as const }))
+  // How many state writes to refuse, and which: the module's own bookkeeping
+  // failing must never stop or repeat the tool.
+  const refuse = { from: Infinity, count: 0 }
+  let writes = 0
+  on('state.set', ($, e, next) => {
+    writes += 1
+    if (writes >= refuse.from && writes < refuse.from + refuse.count) return { deny: 'refused by the test' }
+    return next(e)
+  })
+  let ran = 0
   const finish: Record<string, () => void> = {}
   const fail: Record<string, () => void> = {}
   on('tool.call', async ($, e) => {
+    ran += 1
     await new Promise<void>((resolve, reject) => {
       finish[e.tool_use_id ?? ''] = resolve
       fail[e.tool_use_id ?? ''] = () => reject(new Error('boom'))
@@ -49,7 +64,15 @@ function world(on: On, flags: Record<string, string> = {}) {
     if (!act) throw new Error(`no running call ${id}`)
     act()
   }
-  return { clock, finish: (id: string) => end(finish, id), fail: (id: string) => end(fail, id) }
+  return {
+    clock,
+    finish: (id: string) => end(finish, id),
+    fail: (id: string) => end(fail, id),
+    reads: () => reads,
+    ran: () => ran,
+    writes: () => writes,
+    refuse,
+  }
 }
 
 async function bandText($: any, surface: (typeof SURFACES)[number]) {
@@ -124,4 +147,69 @@ test('LIVE=off: the engine band is drawn and the tool still runs', async ($, on)
   await ui.unmount()
   finish('a')
   await expect(call).resolves.toBeDefined()
+})
+
+test('a short call costs no reads when the band is drawn', async ($, on) => {
+  const w = world(on)
+  const call = $.tool.call({ tool: 'Bash', command: 'npm test', tool_use_id: 'a' } as never)
+  await w.clock.advance(5_000)
+  const before = w.reads()
+  expect(await bandText($, 'terminal')).toBeUndefined()
+  expect(w.reads()).toBe(before)
+  w.finish('a')
+  await call
+})
+
+test('a question put to the person never shows', async ($, on) => {
+  const w = world(on)
+  const call = $.tool.call({ tool: 'AskUserQuestion', questions: [], tool_use_id: 'q' } as never)
+  await w.clock.advance(120_000)
+  expect(await bandText($, 'terminal')).toBeUndefined()
+  w.finish('q')
+  await call
+})
+
+test('a call that waited on a permission prompt never shows', async ($, on) => {
+  const w = world(on)
+  const call = $.tool.call({ tool: 'Bash', command: 'npm test', tool_use_id: 'a' } as never)
+  // In a session tool.check runs inside the call's next, after its hook began.
+  await w.clock.settle()
+  await $.tool.check({ tool: 'Bash', input: { command: 'npm test' }, tool_use_id: 'a' } as never)
+  await w.clock.advance(120_000)
+  expect(await bandText($, 'terminal')).toBeUndefined()
+  w.finish('a')
+  await call
+})
+
+test('a call left behind is dropped when the main turn completes', async ($, on) => {
+  const w = world(on)
+  void $.tool.call({ tool: 'Bash', command: 'make', tool_use_id: 'a' } as never).catch(() => undefined)
+  await w.clock.advance(70_000)
+  expect(await bandText($, 'terminal')).toBe('make · 1m10s')
+  await $.turn.complete({ answer: '', durationMs: 70_000, isAborted: true, turnId: 't1', reason: 'aborted' } as never)
+  expect(await bandText($, 'terminal')).toBeUndefined()
+})
+
+test('a refused first state write still runs the tool, once', async ($, on) => {
+  const w = world(on)
+  w.refuse.from = 1
+  w.refuse.count = 1
+  const call = $.tool.call({ tool: 'Bash', command: 'make', tool_use_id: 'a' } as never)
+  await w.clock.settle()
+  w.finish('a')
+  await expect(call).resolves.toMatchObject({ result: {} })
+  expect(w.ran()).toBe(1)
+  expect(w.writes()).toBeGreaterThanOrEqual(1)
+})
+
+test('a refused last state write still answers the tool, once', async ($, on) => {
+  const w = world(on)
+  w.refuse.from = 2
+  w.refuse.count = 1
+  const call = $.tool.call({ tool: 'Bash', command: 'make', tool_use_id: 'a' } as never)
+  await w.clock.settle()
+  w.finish('a')
+  await expect(call).resolves.toMatchObject({ result: {} })
+  expect(w.ran()).toBe(1)
+  expect(w.writes()).toBeGreaterThanOrEqual(2)
 })

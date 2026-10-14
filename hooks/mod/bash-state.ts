@@ -11,7 +11,8 @@ export type Host = {
   env: (name: EnvName) => Promise<string | undefined>
   sessionId: () => Promise<string>
   read: (path: string) => Promise<string>
-  run: (argv: readonly string[]) => Promise<{ exitCode: number; stdout: string }>
+  /** the uid bash names its state directory with; undefined when unknown */
+  uid: () => Promise<string | undefined>
 }
 
 export type BashState = {
@@ -25,19 +26,9 @@ export type BashState = {
 const DEFAULT_SLOW_TOOL_AFTER = 60
 const FLAGS = ['enabled', 'live', 'start', 'livetool', 'project', 'cmdmem'] as const
 
-// bash names the directory with its own $UID, which is a shell variable and
-// not exported, so the hooks environment usually lacks it: ask id -u.
 async function stateDir(h: Host): Promise<string | undefined> {
   const tmp = ((await h.env('TMPDIR')) || '/tmp').replace(/\/+$/, '')
-  let uid = await h.env('UID')
-  if (!uid) {
-    try {
-      const ran = await h.run(['id', '-u'])
-      if (ran.exitCode === 0) uid = ran.stdout.trim()
-    } catch {
-      uid = undefined
-    }
-  }
+  const uid = await h.uid()
   if (!uid || !/^[0-9]+$/.test(uid)) return undefined
   return `${tmp}/claude-timestamp-${uid}`
 }

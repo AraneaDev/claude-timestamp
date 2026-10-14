@@ -6,6 +6,10 @@ export type LiveCall = {
   key?: string
   /** epoch ms */
   startedAt: number
+  /** the subagent or teammate loop it runs in; absent on the main loop */
+  agentId?: string
+  /** it went to a permission prompt, so its elapsed time includes the person's */
+  isAsked?: boolean
 }
 
 declare module 'claude-code' {

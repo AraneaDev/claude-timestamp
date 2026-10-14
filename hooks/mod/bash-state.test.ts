@@ -4,7 +4,7 @@ import type { Host } from './bash-state.ts'
 
 const DIR = '/tmp/x/claude-timestamp-1000'
 
-function host(files: Record<string, string>, env: Record<string, string> = { UID: '1000' }, idU = '1000\n'): Host {
+function host(files: Record<string, string>, env: Record<string, string> = {}, uid: string | undefined = '1000'): Host {
   const vars: Record<string, string> = { TMPDIR: '/tmp/x/', HOME: '/home/u', ...env }
   return {
     env: async name => vars[name],
@@ -14,7 +14,7 @@ function host(files: Record<string, string>, env: Record<string, string> = { UID
       if (text === undefined) throw new Error(`ENOENT ${path}`)
       return text
     },
-    run: async () => ({ exitCode: 0, stdout: idU }),
+    uid: async () => uid,
   }
 }
 
@@ -36,11 +36,8 @@ test('reads every staged flag', async () => {
   })
 })
 
-test('the uid comes from id -u when UID is unset', async () => {
-  expect((await readBashState(host({ [`${DIR}/abcd-1.enabled`]: 'on' }, {}))).isOn).toBe(true)
-})
-
-test('no uid at all is off', async () => {
+test('no uid, or one that is not a number, is off', async () => {
+  expect((await readBashState(host({ [`${DIR}/abcd-1.enabled`]: 'on' }, {}, ''))).isOn).toBe(false)
   expect((await readBashState(host({ [`${DIR}/abcd-1.enabled`]: 'on' }, {}, 'nope'))).isOn).toBe(false)
 })
 
@@ -78,7 +75,7 @@ test('a host that throws everywhere is off, not a throw', async () => {
   const boom = async () => {
     throw new Error('boom')
   }
-  expect((await readBashState({ env: boom, sessionId: boom, read: boom, run: boom })).isOn).toBe(false)
+  expect((await readBashState({ env: boom, sessionId: boom, read: boom, uid: boom })).isOn).toBe(false)
 })
 
 test('the commands file honours CLAUDE_TIMESTAMP_COMMANDS', async () => {

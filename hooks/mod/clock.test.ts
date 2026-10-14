@@ -3,11 +3,18 @@ import type { On } from 'claude-code'
 
 const DIR = '/tmp/claude-timestamp-1000'
 
-function world(on: On, flags: Record<string, string>) {
+function world(on: On, flags: Record<string, string>, env: Record<string, string> = { UID: '1000' }) {
   const clock = mock.clock(on, { now: 1_700_000_100_000 })
-  mock.env(on, { TMPDIR: '/tmp', UID: '1000', HOME: '/home/u' })
+  mock.env(on, { TMPDIR: '/tmp', HOME: '/home/u', ...env })
   on('session.id', () => ({ value: 's1' }))
+  let runs = 0
+  on('process.run', () => {
+    runs += 1
+    return { value: { exitCode: 0, stdout: '1000\n', stderr: '' } } as never
+  })
+  let reads = 0
   on('fs.read', ($, e) => {
+    reads += 1
     const name = e.path.startsWith(`${DIR}/s1.`) ? e.path.slice(`${DIR}/s1.`.length) : ''
     const text = flags[name]
     return text === undefined ? { deny: `ENOENT ${e.path}` } : { value: text }
@@ -20,7 +27,7 @@ function world(on: On, flags: Record<string, string>) {
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
   on('session.start', ($, e) => ({ cwd: e.cwd }))
-  return { clock, statuses }
+  return { clock, statuses, reads: () => reads, runs: () => runs }
 }
 
 const ON = { enabled: 'on', live: 'on', start: '1700000000' }
@@ -45,11 +52,11 @@ test('holds the final duration after the turn completes', async ($, on) => {
   expect(statuses.at(-1)).toBe(held)
 })
 
-test('a subagent turn neither restarts nor stops the main clock', async ($, on) => {
+// A subagent's run raises turn.complete with its agentId, and no turn.start.
+test("a subagent's completion does not stop the main clock", async ($, on) => {
   const { clock, statuses } = world(on, ON)
   await $.turn.start({ text: 'hi', turnId: 't1' })
   await clock.advance(10_000)
-  await $.turn.start({ text: 'sub', turnId: 't2' })
   await $.turn.complete(done(3_000, 'agent-1'))
   await clock.advance(2_000)
   expect(statuses.at(-1)).toBe('⏱ 12s · session 1m52s')
@@ -69,4 +76,32 @@ test("no .start: the session total counts from the mod's own session start", asy
   await $.turn.start({ text: 'hi', turnId: 't1' })
   await clock.advance(3_000)
   expect(statuses.at(-1)).toBe('⏱ 3s · session 4s')
+})
+
+test('LIVE=off: once the turn has started, nothing more is read', async ($, on) => {
+  const w = world(on, { ...ON, live: 'off' })
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  const before = w.reads()
+  await w.clock.advance(10_000)
+  expect(w.reads()).toBe(before)
+})
+
+test('id -u runs once, however many turns tick', async ($, on) => {
+  const w = world(on, ON, {})
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  await w.clock.advance(3_000)
+  await $.turn.complete(done(3_000))
+  await $.turn.start({ text: 'again', turnId: 't2' })
+  await w.clock.advance(3_000)
+  expect(w.statuses.at(-1)).toBe('⏱ 3s · session 1m46s')
+  expect(w.runs()).toBe(1)
+})
+
+test('a missed turn.complete does not carry its start into the next turn', async ($, on) => {
+  const w = world(on, ON)
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  await w.clock.advance(120_000)
+  await $.turn.start({ text: 'again', turnId: 't2' })
+  await w.clock.advance(5_000)
+  expect(w.statuses.at(-1)).toMatch(/^⏱ 5s · /)
 })
