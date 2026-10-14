@@ -1654,7 +1654,7 @@ is "a rejected format cannot smuggle a second setting into the file" "on" "$CT_E
 # to be wrong, so flag twenty-one is covered the day it is added.
 fresh 'ENABLED=on'
 flag_table="$(sed -n '/^CT_FLAG_TABLE="$/,/^"$/p' "$SCRIPTS/setup.sh" | sed '1d;$d')"
-is "every setting has a flag in the table" "25" \
+is "every setting has a flag in the table" "26" \
   "$(printf '%s\n' "$flag_table" | grep -c '^[a-z]')"
 # shellcheck disable=SC2034  # t_rest is read to consume the rest of the row
 while read -r t_flag t_rest; do
@@ -6417,6 +6417,26 @@ fresh 'HEARTBEAT_AFTER=0' 'SLOW_TOOL_AFTER=0' 'COMMAND_MEMORY=off'
 printf '{"session_id":"stage-c"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
 refutes "stage: both notes at 0 keep the gate shut" test -e "$(ct_state_file stage-c).timing-on"
 
+echo
+echo "live layer: staging"
+
+fresh
+printf '{"session_id":"live-a"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+is "live: staged on by default" "on" "$(ct_read_flag live-a live)"
+is "live: tool threshold staged raw" "60" "$(ct_read_flag live-a livetool)"
+
+fresh 'INJECT_CONTEXT=false'
+printf '{"session_id":"live-b"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+is "live: livetool ignores INJECT_CONTEXT" "60" "$(ct_read_flag live-b livetool)"
+
+fresh 'LIVE=off'
+printf '{"session_id":"live-c"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+is "live: LIVE=off stages off" "off" "$(ct_read_flag live-c live)"
+
+fresh 'ENABLED=off'
+printf '{"session_id":"live-d"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
+is "live: ENABLED=off stages live off" "off" "$(ct_read_flag live-d live)"
+
 fresh 'ENABLED=off'
 printf '{"session_id":"stage-d"}' | bash "$SCRIPTS/user-prompt-submit.sh" >/dev/null
 is "stage: ENABLED=off stages no heartbeat" "0" "$(ct_read_flag stage-d heartbeat)"
@@ -6998,6 +7018,20 @@ ct_load_config
 is "command memory: --command-memory is written" "off" "$CT_COMMAND_MEMORY"
 is "command memory: the file lives beside the history" "$WORK/commands.tsv" "$(ct_commands_path)"
 contains "command memory: --show lists it" "Command memory  off" "$(bash "$SCRIPTS/setup.sh" --show)"
+
+echo
+echo "live layer: setting"
+fresh
+ct_load_config
+is "live: on by default" "on" "$CT_LIVE"
+fresh 'LIVE=off'
+ct_load_config
+is "live: LIVE=off is read" "off" "$CT_LIVE"
+fresh
+bash "$SCRIPTS/setup.sh" --live=off >/dev/null
+ct_load_config
+is "live: --live is written" "off" "$CT_LIVE"
+contains "live: --show lists it" "Live layer      off" "$(bash "$SCRIPTS/setup.sh" --show)"
 
 echo
 echo "command memory: key"

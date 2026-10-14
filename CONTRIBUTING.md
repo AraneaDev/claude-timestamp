@@ -22,7 +22,7 @@ convention below. All three take `--no-verify` when you mean it.
 ## Checks
 
 ```bash
-bash tests/run.sh          # 1467 assertions, no framework and no dependencies
+bash tests/run.sh          # 1477 assertions, no framework and no dependencies
 bash tools/check-docs.sh   # the README and docs/ against the code
 shellcheck -S style -e SC1091 hooks/scripts/*.sh hooks/scripts/lib/*.sh tests/run.sh
 ```

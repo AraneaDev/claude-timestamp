@@ -547,7 +547,7 @@ while read -r path; do
 done < <(
   { grep -rhoE "$cp_re" \
          --include='*.sh' --include='*.md' --include='*.yml' --include='*.py' \
-         --exclude-dir='.venv' --exclude-dir='__pycache__' \
+         --exclude-dir='.venv' --exclude-dir='__pycache__' --exclude-dir='superpowers' \
          hooks tools tests commands docs .github .claude-plugin README.md CONTRIBUTING.md 2>/dev/null
     # Git hook scripts carry no extension, and --include excludes an
     # extensionless file even when it is named explicitly on the command line,
