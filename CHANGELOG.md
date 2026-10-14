@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.38](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.37...v0.0.38) (2026-10-14)
+
+
+### Fixes
+
+* rename the plugin to timestamps, since claude- names are reserved ([#104](https://github.com/AraneaDev/claude-timestamp/issues/104)) ([137b8ca](https://github.com/AraneaDev/claude-timestamp/commit/137b8cadc0fb52c74d521715ed5957ce3d76dbe3))
+
 ## [0.0.37](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.36...v0.0.37) (2026-10-14)
 
 
