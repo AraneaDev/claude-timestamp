@@ -7100,6 +7100,18 @@ body line")"
     ck_n=$((ck_n + 1))
     is "key: shared case $ck_n" "$ck_want" "$(ck "$ck_cmd")"
   done < <(sed '1d;$d' "$ck_cases" | sed 's/,[[:space:]]*$//' | jq -c '.')
+  # The usual time the live layer's band shows, held to bash's own answers.
+  us_cases="$ROOT/hooks/mod/usual.cases.ts"
+  us_file="$WORK/usual-cases.tsv"
+  sed -n '2p' "$us_cases" | sed 's/;[[:space:]]*$//' | jq -j '.' > "$us_file"
+  us_n=0
+  while IFS= read -r us_row; do
+    us_project="$(printf '%s' "$us_row" | jq -r '.[0]')"
+    us_key="$(printf '%s' "$us_row" | jq -r '.[1]')"
+    us_want="$(printf '%s' "$us_row" | jq -r '.[2]')"
+    us_n=$((us_n + 1))
+    is "usual: shared case $us_n ($us_project/$us_key)" "$us_want" "$(ct_command_usual "$us_file" "$us_project" "$us_key")"
+  done < <(sed '1,3d;$d' "$us_cases" | sed 's/,[[:space:]]*$//' | jq -c '.')
 else
   for ck_label in "and segment" "script path" "run ids" "quotes" "abs path" "sudo" "url" \
                   "heredoc" "pipe" "two args" "test file" "assignment" "empty" "non-string" \
@@ -7108,6 +7120,11 @@ else
                   "quoted braces" "env brace" "env paren" "path paren" "subst program" "60 chars"; do
     skip "key: $ck_label" "jq is not installed"
   done
+  # The shared cases, counted without jq: one element per line.
+  ck_n="$(grep -c '^  \[' "$ROOT/hooks/mod/cmdkey.cases.ts")"
+  for ck_i in $(seq 1 "$ck_n"); do skip "key: shared case $ck_i" "jq is not installed"; done
+  us_n="$(sed '1,3d' "$ROOT/hooks/mod/usual.cases.ts" | grep -c '^  \[')"
+  for us_i in $(seq 1 "$us_n"); do skip "usual: shared case $us_i" "jq is not installed"; done
 fi
 
 echo
