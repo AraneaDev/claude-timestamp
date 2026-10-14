@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.37](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.36...v0.0.37) (2026-10-14)
+
+
+### Features
+
+* show time passing while a turn runs ([#102](https://github.com/AraneaDev/claude-timestamp/issues/102)) ([271a592](https://github.com/AraneaDev/claude-timestamp/commit/271a5920a99ab0c3182b6eb681deff0dc27025cb))
+
 ## [0.0.36](https://github.com/AraneaDev/claude-timestamp/compare/v0.0.35...v0.0.36) (2026-10-02)
 
 
