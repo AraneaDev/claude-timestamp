@@ -6,8 +6,8 @@ The plugin itself needs only `bash` and `jq`. Working on it also wants
 `shellcheck`, and the screenshot tooling wants Python.
 
 ```bash
-git clone https://github.com/AraneaDev/claude-timestamp
-cd claude-timestamp
+git clone https://github.com/AraneaDev/timestamps
+cd timestamps
 cp .githooks/pre-commit .githooks/pre-push .githooks/commit-msg .git/hooks/
 chmod +x .git/hooks/pre-commit .git/hooks/pre-push .git/hooks/commit-msg
 ```
@@ -178,7 +178,7 @@ scoped to this repository with **Contents: read and write** and **Pull
 requests: read and write**, then:
 
 ```bash
-gh secret set RELEASE_PLEASE_TOKEN --repo AraneaDev/claude-timestamp
+gh secret set RELEASE_PLEASE_TOKEN --repo AraneaDev/timestamps
 ```
 
 Fine-grained tokens expire, and this is how that expiry shows up. A GitHub App

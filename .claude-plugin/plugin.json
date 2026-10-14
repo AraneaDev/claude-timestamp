@@ -7,8 +7,8 @@
     "name": "AraneaDev",
     "url": "https://github.com/AraneaDev"
   },
-  "homepage": "https://github.com/AraneaDev/claude-timestamp",
-  "repository": "https://github.com/AraneaDev/claude-timestamp",
+  "homepage": "https://github.com/AraneaDev/timestamps",
+  "repository": "https://github.com/AraneaDev/timestamps",
   "license": "MIT",
   "types": "./types/index.d.ts",
   "keywords": [
