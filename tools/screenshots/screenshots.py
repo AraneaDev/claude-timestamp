@@ -524,12 +524,21 @@ def save_timed_animation(frames, out, elapsed):
     save_animation(imgs, durations, out)
 
 
+# SLOW_AFTER sits well clear of a quick answer's few seconds: at 5, a model
+# that took exactly 5s coloured the "fast" turns as slow, and the hero's
+# point, two dim turns and one coloured, was lost.
+# The person's own settings stay out of every shot: their hooks once printed an
+# error with home-directory paths into the hero, and their status line and other
+# plugins are theirs, not the plugin's. Project and local settings of the empty
+# work directories are nothing, so only this checkout, via --plugin-dir, loads.
+ISOLATED = ["--setting-sources", "project,local"]
+
 DEMO_CONFIG = """\
 TZ=Europe/Amsterdam
 DISPLAY_FORMAT=24h
 COLOR=dim
 ELAPSED=on
-SLOW_AFTER=5
+SLOW_AFTER=15
 SLOW_COLOR=yellow
 IDLE_AFTER=0
 SUMMARY=on
@@ -584,19 +593,25 @@ def shot_hero():
 
     cols, rows = 96, 90
     os.chdir(work)
-    raw, timeline, elapsed = capture_pty(
-        ["claude"],
-        keys=[
-            (2.0, "What is the capital of Portugal? One word, no punctuation."), (3.0, "\r"),
-            (9.0, "Name three Portuguese cities, comma separated, nothing else."), (10.5, "\r"),
-            (16.0, "Run one bash command that counts, by trial division using only "
-                    "bash's own integer arithmetic (no python, bc, or awk), how many "
-                    "integers below 220000 are prime. Actually execute it, don't "
-                    "estimate. Reply with just the final count."), (18.0, "\r"),
-        ],
-        cols=cols, rows=rows, settle=10, total=110,
-        env={"CLAUDE_TIMESTAMP_CONFIG": str(conf)}, record=True,
-    )
+    link_dir = Path(tempfile.mkdtemp(prefix="ct-", dir="/tmp"))
+    plugin = link_dir / "timestamps"
+    plugin.symlink_to(ROOT)
+    try:
+        raw, timeline, elapsed = capture_pty(
+            ["claude", "--plugin-dir", str(plugin), *ISOLATED],
+            keys=[
+                (2.0, "What is the capital of Portugal? One word, no punctuation."), (3.0, "\r"),
+                (9.0, "Name three Portuguese cities, comma separated, nothing else."), (10.5, "\r"),
+                (16.0, "Run one bash command that counts, by trial division using only "
+                        "bash's own integer arithmetic (no python, bc, or awk), how many "
+                        "integers below 220000 are prime. Actually execute it, don't "
+                        "estimate. Reply with just the final count."), (18.0, "\r"),
+            ],
+            cols=cols, rows=rows, settle=10, total=110,
+            env={"CLAUDE_TIMESTAMP_CONFIG": str(conf)}, record=True,
+        )
+    finally:
+        shutil.rmtree(link_dir, ignore_errors=True)
     (work / "hero.raw").write_bytes(raw)
 
     # Crop past the welcome banner and stop before the status line. The banner
@@ -679,8 +694,7 @@ def shot_picker():
     plugin.symlink_to(ROOT)
     try:
         raw = capture_pty(
-            ["claude", "--plugin-dir", str(plugin),
-             "--settings", json.dumps({"enabledPlugins": {"timestamps@aranea": False}})],
+            ["claude", "--plugin-dir", str(plugin), *ISOLATED],
             keys=[(6.0, "/timestamps:configure"), (7.5, "\r")],
             cols=cols, rows=rows, settle=12, total=100,
         )
@@ -1091,8 +1105,7 @@ def shot_skill():
     os.chdir(work)
     try:
         raw = capture_pty(
-            ["claude", "--plugin-dir", str(plugin), "--model", "haiku",
-             "--settings", json.dumps({"enabledPlugins": {"timestamps@aranea": False}}),
+            ["claude", "--plugin-dir", str(plugin), "--model", "haiku", *ISOLATED,
              "--allowedTools", "Bash", "Skill"],
             keys=[
                 (6.0, "What is the capital of Portugal? One word, no punctuation."), (7.5, "\r"),
