@@ -27,7 +27,15 @@ function world(on: On, flags: Record<string, string>, env: Record<string, string
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
   on('session.start', ($, e) => ({ cwd: e.cwd }))
-  return { clock, statuses, reads: () => reads, runs: () => runs }
+  on('session.end', ($, e) => ({ sessionId: e.sessionId }) as never)
+  // While set, a read of the session's fallback start waits half a second:
+  // how a tick is caught mid-draw.
+  const hold = { on: false }
+  on('state.get', async ($, e, next) => {
+    if (hold.on && e.key === 'sessionStartedAt') await clock.sleep(500)
+    return next(e)
+  })
+  return { clock, statuses, reads: () => reads, runs: () => runs, hold }
 }
 
 const ON = { enabled: 'on', live: 'on', start: '1700000000' }
@@ -104,4 +112,27 @@ test('a missed turn.complete does not carry its start into the next turn', async
   await $.turn.start({ text: 'again', turnId: 't2' })
   await w.clock.advance(5_000)
   expect(w.statuses.at(-1)).toMatch(/^⏱ 5s · /)
+})
+
+test('a tick still drawing when the turn ends does not replace the held figure', async ($, on) => {
+  const w = world(on, { enabled: 'on' })
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  await w.clock.advance(4_000)
+  w.hold.on = true
+  await w.clock.advance(1_000)
+  w.hold.on = false
+  await $.turn.complete(done(7_000))
+  await w.clock.advance(500)
+  expect(w.statuses.at(-1)).toBe('⏱ 7s')
+})
+
+test('/clear starts the session total again', async ($, on) => {
+  const w = world(on, { enabled: 'on' })
+  await $.session.start({ cwd: '/w', surface: null, isInteractive: true })
+  await w.clock.advance(100_000)
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: {} } as never)
+  await w.clock.advance(1_000)
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  await w.clock.advance(3_000)
+  expect(w.statuses.at(-1)).toBe('⏱ 3s · session 4s')
 })

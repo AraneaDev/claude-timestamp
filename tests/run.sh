@@ -7100,6 +7100,9 @@ body line")"
     ck_n=$((ck_n + 1))
     is "key: shared case $ck_n" "$ck_want" "$(ck "$ck_cmd")"
   done < <(sed '1d;$d' "$ck_cases" | sed 's/,[[:space:]]*$//' | jq -c '.')
+  # jq stops at the first line that is not JSON, so a broken case would take
+  # every case after it with it, silently.
+  is "key: every shared case was read" "$(grep -c '^  \[' "$ck_cases")" "$ck_n"
   # The usual time the live layer's band shows, held to bash's own answers.
   us_cases="$ROOT/hooks/mod/usual.cases.ts"
   us_file="$WORK/usual-cases.tsv"
@@ -7112,6 +7115,8 @@ body line")"
     us_n=$((us_n + 1))
     is "usual: shared case $us_n ($us_project/$us_key)" "$us_want" "$(ct_command_usual "$us_file" "$us_project" "$us_key")"
   done < <(sed '1,3d;$d' "$us_cases" | sed 's/,[[:space:]]*$//' | jq -c '.')
+  is "usual: every shared case was read" "$(sed '1,3d' "$us_cases" | grep -c '^  \[')" "$us_n"
+  is "usual: the shared file was read" "$(sed -n '2p' "$us_cases" | sed 's/;[[:space:]]*$//' | jq -r '.' | grep -c .)" "$(grep -c . "$us_file")"
 else
   for ck_label in "and segment" "script path" "run ids" "quotes" "abs path" "sudo" "url" \
                   "heredoc" "pipe" "two args" "test file" "assignment" "empty" "non-string" \
@@ -7125,6 +7130,9 @@ else
   for ck_i in $(seq 1 "$ck_n"); do skip "key: shared case $ck_i" "jq is not installed"; done
   us_n="$(sed '1,3d' "$ROOT/hooks/mod/usual.cases.ts" | grep -c '^  \[')"
   for us_i in $(seq 1 "$us_n"); do skip "usual: shared case $us_i" "jq is not installed"; done
+  skip "key: every shared case was read" "jq is not installed"
+  skip "usual: every shared case was read" "jq is not installed"
+  skip "usual: the shared file was read" "jq is not installed"
 fi
 
 echo

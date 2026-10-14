@@ -9,7 +9,7 @@ const BAND = {
 }
 const TSV = ['1\tapp\tnpm test\t40000\tok', '2\tapp\tnpm test\t40000\tok', '3\tapp\tnpm test\t40000\tok'].join('\n')
 
-function world(on: On, flags: Record<string, string> = {}) {
+function world(on: On, flags: Record<string, string> = {}, extraTsv: string[] = []) {
   const clock = mock.clock(on, { now: 1_700_000_000_000 })
   mock.env(on, { TMPDIR: '/tmp', UID: '1000', HOME: '/home/u' })
   const files: Record<string, string> = {
@@ -18,7 +18,7 @@ function world(on: On, flags: Record<string, string> = {}) {
     [`${DIR}/s1.livetool`]: '60',
     [`${DIR}/s1.project`]: 'app',
     [`${DIR}/s1.cmdmem`]: 'on',
-    '/home/u/.claude/claude-timestamp-commands.tsv': TSV,
+    '/home/u/.claude/claude-timestamp-commands.tsv': [TSV, ...extraTsv].join('\n'),
     ...Object.fromEntries(Object.entries(flags).map(([k, v]) => [`${DIR}/s1.${k}`, v])),
   }
   on('session.id', () => ({ value: 's1' }))
@@ -111,7 +111,8 @@ test('several running: the longest slow one, plus a count', async ($, on) => {
   await clock.advance(10_000)
   const two = $.tool.call({ tool: 'Read', file_path: '/x', tool_use_id: 'b' } as never)
   await clock.advance(55_000)
-  expect(await bandText($, 'terminal')).toBe('make · 1m05s · +1 more')
+  // The Read is not slow yet, so it is not counted.
+  expect(await bandText($, 'terminal')).toBe('make · 1m05s')
   finish('a')
   await one
   expect(await bandText($, 'terminal')).toBeUndefined()
@@ -212,4 +213,38 @@ test('a refused last state write still answers the tool, once', async ($, on) =>
   await expect(call).resolves.toMatchObject({ result: {} })
   expect(w.ran()).toBe(1)
   expect(w.writes()).toBeGreaterThanOrEqual(2)
+})
+
+test('several slow: the longest, plus how many more are slow', async ($, on) => {
+  const w = world(on)
+  const one = $.tool.call({ tool: 'Bash', command: 'make', tool_use_id: 'a' } as never)
+  await w.clock.advance(10_000)
+  const two = $.tool.call({ tool: 'Read', file_path: '/x', tool_use_id: 'b' } as never)
+  await w.clock.advance(65_000)
+  expect(await bandText($, 'terminal')).toBe('make · 1m15s · +1 more')
+  w.finish('a')
+  w.finish('b')
+  await one
+  await two
+})
+
+test('a call still inside its usual time waits for it, past SLOW_TOOL_AFTER', async ($, on) => {
+  const slow = ['4\tapp\tmake\t120000\tok', '5\tapp\tmake\t120000\tok', '6\tapp\tmake\t120000\tok']
+  const w = world(on, {}, slow)
+  const call = $.tool.call({ tool: 'Bash', command: 'make', tool_use_id: 'a' } as never)
+  await w.clock.advance(61_000)
+  expect(await bandText($, 'terminal')).toBeUndefined()
+  await w.clock.advance(120_000)
+  expect(await bandText($, 'terminal')).toBe('make · 3m01s · usually ~2m00s')
+  w.finish('a')
+  await call
+})
+
+test('SLOW_TOOL_AFTER counts whole seconds, as bash does', async ($, on) => {
+  const w = world(on, { livetool: '20' })
+  const call = $.tool.call({ tool: 'Bash', command: 'make', tool_use_id: 'a' } as never)
+  await w.clock.advance(20_000)
+  expect(await bandText($, 'terminal')).toBe('make · 20s')
+  w.finish('a')
+  await call
 })

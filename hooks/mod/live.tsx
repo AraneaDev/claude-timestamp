@@ -71,29 +71,33 @@ async function bashState($: EngineInterface): Promise<BashState> {
   return (turnBash = await readBashState(hostOf($)))
 }
 
-async function paint($: EngineInterface): Promise<void> {
+// isCurrent is asked right before the status is written, with no await in
+// between: a tick still drawing when its turn ends must not replace the
+// figure the turn's completion wrote.
+async function paint($: EngineInterface, isCurrent: () => boolean = () => true): Promise<void> {
   const bash = turnBash ?? (await bashState($))
   if (!bash.isOn) {
-    $.ui.status(undefined)
+    if (isCurrent()) $.ui.status(undefined)
     return
   }
   const now = await $.clock.now()
   const started = await read($, turnStartedAt)
   const turnMs = started !== null ? now - started : await read($, lastTurnMs)
   if (turnMs === null) {
-    $.ui.status(undefined)
+    if (isCurrent()) $.ui.status(undefined)
     return
   }
   const sessionStart = bash.sessionStartedAt ?? (await read($, sessionStartedAt))
   const session = sessionStart === null ? '' : ` · session ${formatDuration((now - sessionStart) / 1000)}`
-  $.ui.status(`⏱ ${formatDuration(turnMs / 1000)}${session}`)
+  if (isCurrent()) $.ui.status(`⏱ ${formatDuration(turnMs / 1000)}${session}`)
 }
 
 function startTicking($: EngineInterface): void {
   ticker?.cancel()
-  ticker = $.clock.every(TICK_MS, () => {
-    paint($).catch(() => undefined)
+  const mine: Timer = $.clock.every(TICK_MS, () => {
+    paint($, () => ticker === mine).catch(() => undefined)
   })
+  ticker = mine
 }
 
 function stopTicking(): void {
@@ -102,7 +106,6 @@ function stopTicking(): void {
 }
 
 let redraw: Timer | undefined
-let minted = 0
 // Looked up once per call, when it has run MIN_BAND_S; lost on reload, then
 // looked up again. null means "looked, nothing usual".
 const usualById = new Map<string, number | null>()
@@ -136,6 +139,17 @@ export function registerLive(on: On): void {
     syncRedraw($, (await read($, running)).length > 0)
     return next(e)
   })
+
+  // A /clear ends the conversation without a new session.start: the session
+  // total starts again from here until bash stages the new conversation's.
+  on('session.end', async ($, e, next) => {
+    if (e.reason === 'clear') {
+      const now = await $.clock.now()
+      await update($, sessionStartedAt, () => now)
+      turnBash = undefined
+    }
+    return next(e)
+  }).catch(($, e, next) => next(e))
 
   on('turn.start', async ($, e, next) => {
     const now = await $.clock.now()
@@ -173,7 +187,9 @@ export function registerLive(on: On): void {
     // one's is the person's: neither is ever slow.
     if (e.tool === 'Bash' && input.run_in_background === true) return next(e)
     if (INTERACTIVE.has(String(e.tool))) return next(e)
-    const id = e.tool_use_id ?? `live-${++minted}`
+    // The id is what removes the call again: without one it is not tracked.
+    const id = e.tool_use_id
+    if (id === undefined) return next(e)
     const key = e.tool === 'Bash' ? cmdKey(input.command) || undefined : undefined
     const startedAt = await $.clock.now()
     const call: LiveCall = { id, tool: String(e.tool), key, startedAt, agentId: e.agentId }
@@ -212,15 +228,20 @@ export function registerLive(on: On): void {
     for (const call of candidates) {
       const elapsed = (now - call.startedAt) / 1000
       const usual = bash.isCommandMemoryOn ? await usualFor($, call, bash.project) : undefined
-      const isPastUsual = usual !== undefined && elapsed > Math.max(USUAL_FACTOR * usual, MIN_BAND_S)
-      const isPastSlow = bash.slowToolAfter > 0 && elapsed > bash.slowToolAfter
-      if (isPastUsual || isPastSlow) slow.push({ call, elapsed, usual })
+      // A known usual time is the better measure, so it alone decides; the
+      // slow-tool threshold is for calls with no history, in whole seconds as
+      // bash's own note counts them.
+      const isSlow =
+        usual !== undefined
+          ? elapsed > Math.max(USUAL_FACTOR * usual, MIN_BAND_S)
+          : bash.slowToolAfter > 0 && Math.floor(elapsed) >= bash.slowToolAfter
+      if (isSlow) slow.push({ call, elapsed, usual })
     }
     const top = slow.sort((a, b) => b.elapsed - a.elapsed)[0]
     if (top === undefined) return next(e)
     const parts = [top.call.key ?? top.call.tool, formatDuration(top.elapsed)]
     if (top.usual !== undefined) parts.push(`usually ~${formatDuration(top.usual)}`)
-    if (calls.length > 1) parts.push(`+${calls.length - 1} more`)
+    if (slow.length > 1) parts.push(`+${slow.length - 1} more`)
     const { Text } = $.ui.resolve(e)
     return <Text dimColor>{parts.join(' · ')}</Text>
   }).catch(($, e, next) => next(e))
