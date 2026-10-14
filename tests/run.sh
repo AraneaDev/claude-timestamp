@@ -7091,6 +7091,15 @@ body line")"
   }
   is "key: braces inside quotes are left alone" "awk file" "$(ck "awk '{print \$1}' file")"
   is "key: at most 60 characters" "60" "$(ck "$(printf 'x%.0s' $(seq 1 200))" | tr -d '\r\n' | wc -c | tr -d ' ')"
+  # The live layer's TypeScript port is held to the same cases.
+  ck_cases="$ROOT/hooks/mod/cmdkey.cases.ts"
+  ck_n=0
+  while IFS= read -r ck_pair; do
+    ck_cmd="$(printf '%s' "$ck_pair" | jq -r '.[0]')"
+    ck_want="$(printf '%s' "$ck_pair" | jq -r '.[1]')"
+    ck_n=$((ck_n + 1))
+    is "key: shared case $ck_n" "$ck_want" "$(ck "$ck_cmd")"
+  done < <(sed '1d;$d' "$ck_cases" | sed 's/,[[:space:]]*$//' | jq -c '.')
 else
   for ck_label in "and segment" "script path" "run ids" "quotes" "abs path" "sudo" "url" \
                   "heredoc" "pipe" "two args" "test file" "assignment" "empty" "non-string" \
