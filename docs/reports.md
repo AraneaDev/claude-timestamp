@@ -32,7 +32,7 @@ and which tool took the waiting:
 
 ```bash
 bash "$CLAUDE_PLUGIN_ROOT/hooks/scripts/setup.sh" --stats --since=7d
-bash "$CLAUDE_PLUGIN_ROOT/hooks/scripts/setup.sh" --stats --project=claude-timestamp
+bash "$CLAUDE_PLUGIN_ROOT/hooks/scripts/setup.sh" --stats --project=timestamps
 ```
 
 `--stats` only sees sessions that have already ended. For the one still
