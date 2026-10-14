@@ -56,7 +56,7 @@ documentation](https://learn.chatgpt.com/docs/hooks).
 ### Install in Codex CLI
 
 ```bash
-codex plugin marketplace add AraneaDev/claude-timestamp
+codex plugin marketplace add AraneaDev/timestamps
 codex plugin add timestamps@aranea
 ```
 
