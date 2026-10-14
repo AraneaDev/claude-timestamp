@@ -261,6 +261,16 @@ test('a call still inside its usual time waits for it, past SLOW_TOOL_AFTER', as
   await call
 })
 
+test('a sub-second usual time reads under 1s, not ~0s', async ($, on) => {
+  const quick = ['4\tapp\tls\t300\tok', '5\tapp\tls\t300\tok', '6\tapp\tls\t300\tok']
+  const w = world(on, {}, quick)
+  const call = $.tool.call({ tool: 'Bash', command: 'ls', tool_use_id: 'a' } as never)
+  await w.clock.advance(11_000)
+  expect(await bandText($, 'desktop')).toBe('ls · 11s · usually under 1s')
+  w.finish('a')
+  await call
+})
+
 test('SLOW_TOOL_AFTER counts whole seconds, as bash does', async ($, on) => {
   const w = world(on, { livetool: '20' })
   const call = $.tool.call({ tool: 'Bash', command: 'make', tool_use_id: 'a' } as never)

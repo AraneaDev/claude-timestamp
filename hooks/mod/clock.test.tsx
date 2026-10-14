@@ -78,6 +78,14 @@ test('holds the final duration after the turn completes', async ($, on) => {
   expect(await footer($)).toBe(held)
 })
 
+test('the held figure rounds, as the engine writes the turn time', async ($, on) => {
+  const { clock } = world(on, ON)
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  await clock.advance(5_000)
+  await $.turn.complete(done(88_600))
+  expect(await footer($)).toMatch(/^⏱ 1m29s /)
+})
+
 // A subagent's run raises turn.complete with its agentId, and no turn.start.
 test("a subagent's completion does not stop the main clock", async ($, on) => {
   const { clock, statuses } = world(on, ON)

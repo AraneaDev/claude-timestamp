@@ -84,7 +84,10 @@ async function paint($: EngineInterface, isCurrent: () => boolean = () => true):
   }
   const now = await $.clock.now()
   const started = await read($, turnStartedAt)
-  const turnMs = started !== null ? now - started : await read($, lastTurnMs)
+  // A running turn counts whole seconds up; a finished one is rounded, as the
+  // engine's own "Worked for" line rounds it.
+  const held = started === null ? await read($, lastTurnMs) : null
+  const turnMs = started !== null ? now - started : held === null ? null : Math.round(held / 1000) * 1000
   if (turnMs === null) {
     if (isCurrent()) await update($, clockText, () => null)
     return
@@ -163,7 +166,9 @@ async function slowCalls($: EngineInterface, calls: readonly LiveCall[]): Promis
 // `1m10s`, and `usually ~40s` when the command has a usual time.
 function describe(slow: Slow): string[] {
   const parts = [formatDuration(slow.elapsed)]
-  if (slow.usual !== undefined) parts.push(`usually ~${formatDuration(slow.usual)}`)
+  // A median under a second floors to 0, which is no duration to quote.
+  if (slow.usual === 0) parts.push('usually under 1s')
+  else if (slow.usual !== undefined) parts.push(`usually ~${formatDuration(slow.usual)}`)
   return parts
 }
 

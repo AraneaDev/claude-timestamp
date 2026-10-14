@@ -7258,6 +7258,8 @@ is "usually: the note carries the usual duration" "That Bash call took 6m10s (us
   "$(ct_slow_tool_note Bash 370000 ok 60 240)"
 is "usually: a failure too" "That Bash call failed after 1m10s (usually 4m00s)." \
   "$(ct_slow_tool_note Bash 70000 fail 60 240)"
+is "usually: a sub-second median says under 1s, not 0s" "That Bash call took 2m30s (usually under 1s)." \
+  "$(ct_slow_tool_note Bash 150000 ok 60 0)"
 is "usually: without it the note is unchanged" "That Bash call took 6m10s." "$(ct_slow_tool_note Bash 370000 ok 60)"
 
 if command -v jq >/dev/null 2>&1; then

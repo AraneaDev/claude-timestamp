@@ -59,16 +59,13 @@ function stops(w: string): boolean {
 
 const isPrefix = (w: string) => w.includes('=') || PREFIXES.has(w)
 
-export function cmdKey(command: unknown): string {
-  if (typeof command !== 'string') return ''
-  const line = unquote(command.split('\n')[0] ?? '').split('\t').join(' ')
-  const segments = ['&&', '||', ';']
-    .reduce<string[]>((parts, sep) => parts.flatMap(p => p.split(sep)), [line])
-    .filter(seg => words(seg).length > 0)
-  const segment = segments[segments.length - 1] ?? ''
+const TRAILERS = new Set(['echo', 'printf', 'true', ':', 'exit'])
+
+function segmentKey(segment: string): string {
   let ws = words(segment.split('|')[0] ?? '').slice(0, 40)
   while (ws[0] !== undefined && isPrefix(ws[0])) ws = ws.slice(1)
-  const prog = ws[0]?.split('/').pop() ?? ''
+  if (ws[0] === undefined) return ''
+  const prog = ws[0].split('/').pop() ?? ''
   if (!isPlain(prog) || prog.startsWith('-')) return ''
   if (prog === 'echo' || prog === 'printf') return prog
   const kept: string[] = []
@@ -77,4 +74,16 @@ export function cmdKey(command: unknown): string {
     kept.push(w)
   }
   return [...[prog, ...kept].join(' ')].slice(0, 60).join('')
+}
+
+export function cmdKey(command: unknown): string {
+  if (typeof command !== 'string') return ''
+  const line = unquote(command.split('\n')[0] ?? '').split('\t').join(' ')
+  const keys = ['&&', '||', ';']
+    .reduce<string[]>((parts, sep) => parts.flatMap(p => p.split(sep)), [line])
+    .filter(seg => words(seg).length > 0)
+    .map(segmentKey)
+  // A trailing status report (; echo "exit: $?") is not the command that took
+  // the time: the last segment that is something else names the call.
+  return keys.findLast(k => !TRAILERS.has(k)) ?? keys[keys.length - 1] ?? ''
 }
